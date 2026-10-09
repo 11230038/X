@@ -18,3 +18,4 @@ frontend/*.log
 
 .product
 Agent.md
+.agents/
