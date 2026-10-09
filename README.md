@@ -20,17 +20,31 @@ X/
 - Gin 1.10.0
 - 标准库 `net/http`
 - 标准库 `log/slog`
+- PostgreSQL
+- GORM
+- Goose（版本化 SQL migration）
 
 ### 启动
 
-在 `backend/` 目录执行：
+在 `backend/` 目录复制并完整填写本地配置，然后先迁移数据库再启动：
 
 ```bash
+cp .env.example .env
 go mod tidy
+go run ./cmd/migrate up
 go run .
 ```
 
-默认监听 `:8080`。构建、测试和静态检查：
+如需查看或单步回退 migration：
+
+```bash
+go run ./cmd/migrate status
+go run ./cmd/migrate down
+```
+
+仅开发环境需要两条测试用户时，可执行 `go run ./cmd/seed`。该命令幂等写入 `test_admin` 和 `test_user`，密码只以 bcrypt 哈希保存。
+
+监听地址由 `.env` 中的 `HTTP_ADDR` 决定。构建、测试和静态检查：
 
 ```bash
 go build -o bin/server .
@@ -40,13 +54,15 @@ go vet ./...
 
 ### 配置
 
-服务从环境变量读取配置，不会自动加载 `.env` 文件。可参考 [backend/.env.example](backend/.env.example)。
+服务只读取 `backend/.env`，不会从进程环境补值或覆盖。文件缺失、键缺失、空值或非法值都会阻止启动；[backend/.env.example](backend/.env.example) 是完整的非秘密模板，真实 `.env` 不得提交。
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `HTTP_ADDR` | `:8080` | HTTP 监听地址，例如 `127.0.0.1:8080` |
-| `APP_ENV` | `development` | `development` 使用 Gin debug 和文本日志；其他值使用 Gin release 和 JSON 日志 |
-| `SHUTDOWN_TIMEOUT` | `10s` | 收到 SIGINT/SIGTERM 后等待在途请求完成的最长时间 |
+必填配置包括：
+
+- HTTP：`HTTP_ADDR`、`APP_ENV`、`SHUTDOWN_TIMEOUT`
+- PostgreSQL：`DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`、`DB_SCHEMA`、`DB_SSLMODE`、`DB_TIMEZONE`、`DB_PING_TIMEOUT`
+- 连接池：`DB_MAX_OPEN_CONNS`、`DB_MAX_IDLE_CONNS`、`DB_CONN_MAX_LIFETIME`、`DB_CONN_MAX_IDLE_TIME`
+
+API 启动不会自动修改 schema：必须先通过 migration 命令升级到代码要求的版本。数据库配置和密码不会写入日志。
 
 ### 系统接口
 
@@ -55,11 +71,11 @@ go vet ./...
 | `GET` | `/` | 服务欢迎信息 |
 | `GET` | `/health` | 基础健康检查 |
 | `GET` | `/healthz` | liveness 检查 |
-| `GET` | `/readyz` | readiness 检查；当前无外部依赖，运行时返回 200 |
+| `GET` | `/readyz` | readiness 检查；PostgreSQL 可连接时返回 200，否则返回 503 |
 
 未知路径返回统一格式的 404 JSON，不支持的方法返回 405。每个请求都会返回 `X-Request-ID`；服务端不会向客户端泄露 panic 详情、堆栈或内部错误。
 
-当前后端尚未接入数据库、认证、CORS、限流、指标、Tracing、Swagger、消息队列或业务 service/repository 层，真实业务需求明确后再按垂直切片扩展。
+当前后端已接入 PostgreSQL 数据基础设施，并通过版本化 SQL 创建 `users` 表；GORM 映射位于 `internal/data/models`。现阶段没有用户业务 API、认证、CORS、限流、指标、Tracing、Swagger、消息队列或业务 service/repository 层，首个真实用例明确后再按垂直切片扩展。`users.password` 只允许保存密码哈希，GORM 模型不得直接作为 API 响应。
 
 ## 前端
 

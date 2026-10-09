@@ -12,11 +12,14 @@ import (
 	"syscall"
 
 	"backend/internal/config"
+	"backend/internal/data"
+	"backend/internal/data/migration"
+	"backend/internal/handler"
 	"backend/internal/server"
 )
 
 func main() {
-	cfg, err := config.Load()
+	cfg, err := config.Load(".env")
 	if err != nil {
 		logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 		logger.Error("invalid configuration", "error", err)
@@ -41,8 +44,29 @@ func newLogger(appEnv string) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(os.Stderr, options))
 }
 
-func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
-	router := server.NewRouter(logger, cfg.AppEnv)
+func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr error) {
+	database, err := data.Open(cfg.Database)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("close database: %w", err))
+		}
+	}()
+
+	pingCtx, cancelPing := context.WithTimeout(ctx, cfg.Database.PingTimeout)
+	if err := database.Ping(pingCtx); err != nil {
+		cancelPing()
+		return fmt.Errorf("connect to PostgreSQL")
+	}
+	cancelPing()
+	if err := migration.CheckLatest(ctx, database.SQLDB(), cfg.Database.Schema); err != nil {
+		return fmt.Errorf("database schema is not current; run migration command")
+	}
+
+	system := handler.NewSystemHandler(database, cfg.Database.PingTimeout, logger)
+	router := server.NewRouter(logger, cfg.AppEnv, system)
 	httpServer := server.NewHTTPServer(cfg, router)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)

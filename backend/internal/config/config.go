@@ -3,42 +3,86 @@ package config
 import (
 	"fmt"
 	"net"
-	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
-const (
-	defaultHTTPAddr        = ":8080"
-	defaultAppEnv          = "development"
-	defaultShutdownTimeout = 10 * time.Second
-)
+var postgresIdentifier = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
-// Config contains the settings required to run the HTTP server.
+var requiredKeys = []string{
+	"HTTP_ADDR",
+	"APP_ENV",
+	"SHUTDOWN_TIMEOUT",
+	"DB_HOST",
+	"DB_PORT",
+	"DB_NAME",
+	"DB_USER",
+	"DB_PASSWORD",
+	"DB_SCHEMA",
+	"DB_SSLMODE",
+	"DB_TIMEZONE",
+	"DB_PING_TIMEOUT",
+	"DB_MAX_OPEN_CONNS",
+	"DB_MAX_IDLE_CONNS",
+	"DB_CONN_MAX_LIFETIME",
+	"DB_CONN_MAX_IDLE_TIME",
+}
+
+// Config contains all settings required to run the service.
 type Config struct {
 	HTTPAddr        string
 	AppEnv          string
 	ShutdownTimeout time.Duration
+	Database        DatabaseConfig
 }
 
-// Load reads the server configuration from environment variables.
-// It does not load dotenv files, so deployment configuration remains explicit.
-func Load() (Config, error) {
+// DatabaseConfig contains PostgreSQL connection and pool settings.
+type DatabaseConfig struct {
+	Host            string
+	Port            uint16
+	Name            string
+	User            string
+	Password        string
+	Schema          string
+	SSLMode         string
+	TimeZone        string
+	PingTimeout     time.Duration
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+	ConnMaxIdleTime time.Duration
+}
+
+// Load reads configuration exclusively from the dotenv file at path.
+func Load(path string) (Config, error) {
+	values, err := godotenv.Read(path)
+	if err != nil {
+		return Config{}, fmt.Errorf("read configuration file %q", path)
+	}
+
+	if err := requireValues(values); err != nil {
+		return Config{}, err
+	}
+
+	shutdownTimeout, err := parsePositiveDuration(values, "SHUTDOWN_TIMEOUT")
+	if err != nil {
+		return Config{}, err
+	}
+	database, err := loadDatabaseConfig(values)
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
-		HTTPAddr:        envOrDefault("HTTP_ADDR", defaultHTTPAddr),
-		AppEnv:          envOrDefault("APP_ENV", defaultAppEnv),
-		ShutdownTimeout: defaultShutdownTimeout,
+		HTTPAddr:        strings.TrimSpace(values["HTTP_ADDR"]),
+		AppEnv:          strings.TrimSpace(values["APP_ENV"]),
+		ShutdownTimeout: shutdownTimeout,
+		Database:        database,
 	}
-
-	if raw, ok := os.LookupEnv("SHUTDOWN_TIMEOUT"); ok {
-		duration, err := time.ParseDuration(strings.TrimSpace(raw))
-		if err != nil || duration <= 0 {
-			return Config{}, fmt.Errorf("SHUTDOWN_TIMEOUT must be a positive duration: %q", raw)
-		}
-		cfg.ShutdownTimeout = duration
-	}
-
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -54,17 +98,149 @@ func (c Config) Validate() error {
 		return fmt.Errorf("APP_ENV must not be empty")
 	}
 	if c.ShutdownTimeout <= 0 {
-		return fmt.Errorf("shutdown timeout must be positive")
+		return fmt.Errorf("SHUTDOWN_TIMEOUT must be a positive duration")
+	}
+	return c.Database.Validate()
+}
+
+// Validate checks PostgreSQL connection and pool settings.
+func (c DatabaseConfig) Validate() error {
+	if strings.TrimSpace(c.Host) == "" {
+		return fmt.Errorf("DB_HOST must not be empty")
+	}
+	if c.Port == 0 {
+		return fmt.Errorf("DB_PORT must be between 1 and 65535")
+	}
+	for key, value := range map[string]string{
+		"DB_NAME":     c.Name,
+		"DB_USER":     c.User,
+		"DB_PASSWORD": c.Password,
+		"DB_SCHEMA":   c.Schema,
+		"DB_TIMEZONE": c.TimeZone,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("%s must not be empty", key)
+		}
+	}
+	if !postgresIdentifier.MatchString(c.Schema) {
+		return fmt.Errorf("DB_SCHEMA must be a lowercase PostgreSQL identifier")
+	}
+	if !validSSLMode(c.SSLMode) {
+		return fmt.Errorf("DB_SSLMODE must be one of disable, allow, prefer, require, verify-ca, verify-full")
+	}
+	if c.PingTimeout <= 0 {
+		return fmt.Errorf("DB_PING_TIMEOUT must be a positive duration")
+	}
+	if c.MaxOpenConns <= 0 {
+		return fmt.Errorf("DB_MAX_OPEN_CONNS must be positive")
+	}
+	if c.MaxIdleConns < 0 {
+		return fmt.Errorf("DB_MAX_IDLE_CONNS must not be negative")
+	}
+	if c.MaxIdleConns > c.MaxOpenConns {
+		return fmt.Errorf("DB_MAX_IDLE_CONNS must not exceed DB_MAX_OPEN_CONNS")
+	}
+	if c.ConnMaxLifetime < 0 {
+		return fmt.Errorf("DB_CONN_MAX_LIFETIME must not be negative")
+	}
+	if c.ConnMaxIdleTime < 0 {
+		return fmt.Errorf("DB_CONN_MAX_IDLE_TIME must not be negative")
 	}
 	return nil
 }
 
-func envOrDefault(key, fallback string) string {
-	value, ok := os.LookupEnv(key)
-	if !ok || strings.TrimSpace(value) == "" {
-		return fallback
+func loadDatabaseConfig(values map[string]string) (DatabaseConfig, error) {
+	port, err := parsePort(values, "DB_PORT")
+	if err != nil {
+		return DatabaseConfig{}, err
 	}
-	return strings.TrimSpace(value)
+	pingTimeout, err := parsePositiveDuration(values, "DB_PING_TIMEOUT")
+	if err != nil {
+		return DatabaseConfig{}, err
+	}
+	maxOpen, err := parseNonNegativeInt(values, "DB_MAX_OPEN_CONNS")
+	if err != nil {
+		return DatabaseConfig{}, err
+	}
+	maxIdle, err := parseNonNegativeInt(values, "DB_MAX_IDLE_CONNS")
+	if err != nil {
+		return DatabaseConfig{}, err
+	}
+	maxLifetime, err := parseNonNegativeDuration(values, "DB_CONN_MAX_LIFETIME")
+	if err != nil {
+		return DatabaseConfig{}, err
+	}
+	maxIdleTime, err := parseNonNegativeDuration(values, "DB_CONN_MAX_IDLE_TIME")
+	if err != nil {
+		return DatabaseConfig{}, err
+	}
+
+	return DatabaseConfig{
+		Host:            strings.TrimSpace(values["DB_HOST"]),
+		Port:            port,
+		Name:            strings.TrimSpace(values["DB_NAME"]),
+		User:            strings.TrimSpace(values["DB_USER"]),
+		Password:        values["DB_PASSWORD"],
+		Schema:          strings.TrimSpace(values["DB_SCHEMA"]),
+		SSLMode:         strings.TrimSpace(values["DB_SSLMODE"]),
+		TimeZone:        strings.TrimSpace(values["DB_TIMEZONE"]),
+		PingTimeout:     pingTimeout,
+		MaxOpenConns:    maxOpen,
+		MaxIdleConns:    maxIdle,
+		ConnMaxLifetime: maxLifetime,
+		ConnMaxIdleTime: maxIdleTime,
+	}, nil
+}
+
+func requireValues(values map[string]string) error {
+	for _, key := range requiredKeys {
+		value, ok := values[key]
+		if !ok || strings.TrimSpace(value) == "" {
+			return fmt.Errorf("%s is required in the configuration file", key)
+		}
+	}
+	return nil
+}
+
+func parsePort(values map[string]string, key string) (uint16, error) {
+	value, err := strconv.ParseUint(strings.TrimSpace(values[key]), 10, 16)
+	if err != nil || value == 0 {
+		return 0, fmt.Errorf("%s must be between 1 and 65535", key)
+	}
+	return uint16(value), nil
+}
+
+func parseNonNegativeInt(values map[string]string, key string) (int, error) {
+	value, err := strconv.Atoi(strings.TrimSpace(values[key]))
+	if err != nil || value < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative integer", key)
+	}
+	return value, nil
+}
+
+func parsePositiveDuration(values map[string]string, key string) (time.Duration, error) {
+	value, err := time.ParseDuration(strings.TrimSpace(values[key]))
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive duration", key)
+	}
+	return value, nil
+}
+
+func parseNonNegativeDuration(values map[string]string, key string) (time.Duration, error) {
+	value, err := time.ParseDuration(strings.TrimSpace(values[key]))
+	if err != nil || value < 0 {
+		return 0, fmt.Errorf("%s must be a non-negative duration", key)
+	}
+	return value, nil
+}
+
+func validSSLMode(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "disable", "allow", "prefer", "require", "verify-ca", "verify-full":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateHTTPAddr(addr string) error {
@@ -73,12 +249,9 @@ func validateHTTPAddr(addr string) error {
 		return fmt.Errorf("address must not be empty")
 	}
 
-	host, port, err := net.SplitHostPort(addr)
+	_, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return fmt.Errorf("must be host:port: %w", err)
-	}
-	if host == "" {
-		// An empty host means all interfaces and is valid for a server address.
 	}
 	portNumber, err := strconv.Atoi(port)
 	if err != nil || portNumber < 1 || portNumber > 65535 {

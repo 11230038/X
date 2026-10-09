@@ -9,7 +9,7 @@ import (
 )
 
 // NewRouter builds the application router without binding a network port.
-func NewRouter(logger *slog.Logger, appEnv string) *gin.Engine {
+func NewRouter(logger *slog.Logger, appEnv string, system *handler.SystemHandler) *gin.Engine {
 	if appEnv != "development" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -24,7 +24,6 @@ func NewRouter(logger *slog.Logger, appEnv string) *gin.Engine {
 		middleware.AccessLog(logger),
 	)
 
-	system := handler.NewSystemHandler()
 	router.GET("/", system.Root)
 	router.GET("/health", system.Health)
 	router.GET("/healthz", system.Liveness)

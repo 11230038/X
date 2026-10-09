@@ -1,18 +1,37 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"backend/internal/handler"
 	"github.com/gin-gonic/gin"
 )
 
+type readyChecker struct {
+	err error
+}
+
+func (c readyChecker) Ping(context.Context) error {
+	return c.err
+}
+
+func newTestRouter(t *testing.T, checker readyChecker) *gin.Engine {
+	t.Helper()
+	logger := slog.New(slog.NewTextHandler(&strings.Builder{}, nil))
+	system := handler.NewSystemHandler(checker, 50*time.Millisecond, logger)
+	return NewRouter(logger, "development", system)
+}
+
 func TestRouterSystemEndpoints(t *testing.T) {
-	router := NewRouter(slog.Default(), "development")
+	router := newTestRouter(t, readyChecker{})
 
 	tests := []struct {
 		name       string
@@ -48,8 +67,38 @@ func TestRouterSystemEndpoints(t *testing.T) {
 	}
 }
 
+func TestRouterReadinessFailureDoesNotAffectLiveness(t *testing.T) {
+	router := newTestRouter(t, readyChecker{err: errors.New("private database details")})
+
+	readyRecorder := httptest.NewRecorder()
+	router.ServeHTTP(readyRecorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if readyRecorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("readiness status = %d, want %d", readyRecorder.Code, http.StatusServiceUnavailable)
+	}
+	if strings.Contains(readyRecorder.Body.String(), "private database details") {
+		t.Fatal("readiness response exposed database error")
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(readyRecorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode readiness response: %v", err)
+	}
+	if body.Error.Code != "not_ready" {
+		t.Errorf("readiness error code = %q, want not_ready", body.Error.Code)
+	}
+
+	liveRecorder := httptest.NewRecorder()
+	router.ServeHTTP(liveRecorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if liveRecorder.Code != http.StatusOK {
+		t.Fatalf("liveness status = %d, want %d", liveRecorder.Code, http.StatusOK)
+	}
+}
+
 func TestRouterErrorsAndRequestID(t *testing.T) {
-	router := NewRouter(slog.Default(), "development")
+	router := newTestRouter(t, readyChecker{})
 
 	tests := []struct {
 		name       string
@@ -107,7 +156,7 @@ func TestRouterErrorsAndRequestID(t *testing.T) {
 }
 
 func TestRouterRecoversFromPanic(t *testing.T) {
-	router := NewRouter(slog.Default(), "development")
+	router := newTestRouter(t, readyChecker{})
 	router.GET("/panic", func(_ *gin.Context) {
 		panic("secret panic details")
 	})
