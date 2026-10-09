@@ -24,7 +24,7 @@
 - `backend/internal/httpx/`：HTTP 错误响应和 request ID 辅助函数
 - `backend/*_test.go`、`backend/internal/**/_test.go`：与源码同目录的 Go 测试
 - `backend/.env.example`：本地环境变量示例，不会被程序自动加载
-- `README.md`：backend 的运行和接口说明
+- `README.md`：项目整体运行、接口和开发说明
 - `.gitignore`：仓库根目录的 Git 忽略规则
 - `frontend/`：前端预留目录，当前没有可用业务代码
 - `.product/`：产品资料目录，与代码实现无关，除非用户明确要求，否则不查阅、不修改
@@ -122,7 +122,7 @@
 - 涉及删除或覆盖内容时先确认；用户已明确要求的删除除外。
 - 完成修改后必须如实报告验证结果；测试失败时说明失败命令和原因，不得声称已通过。
 - 不把历史文件、Git dangling object 或外部参考项目当作当前有效契约，除非用户明确确认。
-- 业务术语、API 字段和错误码保持一致；新增接口时同步更新 `backend/README.md`。
+- 业务术语、API 字段和错误码保持一致；新增接口或运行方式时同步更新根目录 `README.md`。
 - 如果后续要扩展技能或仓库约定，优先更新 CLAUDE.md 和对应说明文档，而不是散落在业务代码里
 - .product里的文件与项目无关，不需要查阅和修改
 - 禁止在页面写入描述类小字文本
