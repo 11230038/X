@@ -1,0 +1,19 @@
+bin/
+*.test
+.env
+
+# Agent skills and installer metadata
+.claude/skills/
+.agents/skills/
+agent/skills/
+skills-lock.json
+
+# Frontend dependencies, builds, caches, and local configuration
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.env.local
+frontend/.env.*.local
+frontend/*.log
+
+.product
