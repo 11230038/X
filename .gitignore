@@ -17,3 +17,4 @@ frontend/.env.*.local
 frontend/*.log
 
 .product
+Agent.md
