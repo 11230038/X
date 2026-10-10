@@ -1,0 +1,4 @@
+# Store every text file with LF in the repository and check it out with LF,
+# regardless of a contributor's core.autocrlf setting. Without this, a Windows
+# checkout rewrites Go sources as CRLF and `gofmt -l` flags every file.
+* text=auto eol=lf
