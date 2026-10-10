@@ -24,6 +24,8 @@ X/
 - PostgreSQL
 - GORM
 - Goose（版本化 SQL migration）
+- `golang.org/x/crypto/bcrypt`（密码哈希）
+- `github.com/golang-jwt/jwt/v5`（JWT 签发与校验）
 
 ### 启动
 
@@ -63,6 +65,15 @@ go vet ./...
 - 文件上传：`UPLOAD_ROOT`、`UPLOAD_MAX_FILE_BYTES`、`UPLOAD_MAX_REQUEST_BYTES`
 - PostgreSQL：`DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`、`DB_SCHEMA`、`DB_SSLMODE`、`DB_TIMEZONE`、`DB_PING_TIMEOUT`
 - 连接池：`DB_MAX_OPEN_CONNS`、`DB_MAX_IDLE_CONNS`、`DB_CONN_MAX_LIFETIME`、`DB_CONN_MAX_IDLE_TIME`
+- 认证：`AUTH_JWT_SECRET`、`AUTH_JWT_ISSUER`、`AUTH_TOKEN_TTL`
+
+`AUTH_JWT_SECRET` 至少 32 字节，必须使用随机值且不得提交：
+
+```bash
+openssl rand -base64 48
+```
+
+[backend/.env.example](backend/.env.example) 中的占位值故意短于 32 字节，照抄模板而不替换会让服务在监听端口前启动失败。`AUTH_TOKEN_TTL` 是 Go duration 字面量（如 `24h`）。密钥值不会出现在任何日志或错误信息中。
 
 API 启动不会自动修改 schema：必须先通过 migration 命令升级到代码要求的版本。数据库配置和密码不会写入日志。
 
@@ -77,12 +88,54 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `GET` | `/healthz` | liveness 检查 |
 | `GET` | `/readyz` | readiness 检查；PostgreSQL 可连接时返回 200，否则返回 503 |
 | `POST` | `/api/v1/library/files` | 上传单个文件；`multipart/form-data` 字段固定为 `file`，成功返回 201 |
+| `POST` | `/api/v1/auth/register` | 注册并直接返回登录态，成功返回 201 |
+| `POST` | `/api/v1/auth/login` | 用户名密码登录，成功返回 200 |
+| `GET` | `/api/v1/auth/me` | 返回当前登录用户，需要 Bearer token |
 
 文件库允许图片（JPG/JPEG/PNG/GIF/WebP）、PDF、PPT/PPTX、DOC/DOCX、Markdown 和 MP3，并按类型写入 `data/upload/` 的固定子目录。服务端流式限制大小、计算 SHA-256、验证扩展名与实际内容、先写 staging 再原子移动；数据库写入失败会补偿删除文件。SVG、宏 Office 文件以及未列出的格式会被拒绝。响应只返回逻辑 metadata，不暴露 `library_path` 或绝对路径，也没有静态目录或下载接口。
 
 当前上传接口没有认证、用户归属、限流、磁盘总配额或恶意文件扫描，只适用于本机或可信网络环境，不应直接暴露到互联网。文件系统与 PostgreSQL 无法共享事务；普通失败会补偿清理，但进程在最终移动后立即崩溃仍可能留下 orphan 文件，当前版本尚无后台 reconciliation。
 
 未知路径返回统一格式的 404 JSON，不支持的方法返回 405。每个请求都会返回 `X-Request-ID`；服务端不会向客户端泄露 panic 详情、堆栈或内部错误。
+
+### 认证
+
+注册与登录使用 `users` 表已有的 `username` / `password` 列，本次没有新增 migration，schema 版本仍为 5。密码使用 bcrypt（`bcrypt.DefaultCost`）哈希后写入 `users.password`，该列永远只保存哈希，接口响应只返回 `user_id`、`username`、`role`。
+
+**用户名严格区分大小写**：不做 trim、不做大小写折叠，`Test` 与 `test` 是两个不同账号。注册要求 `^[A-Za-z0-9_-]{3,32}$`，密码按字节长度要求 8–72（72 是 bcrypt 的输入上限）。登录不校验用户名格式，只做长度上界，这样历史数据仍可登录。
+
+登录成功返回：
+
+```json
+{
+  "user": { "user_id": 1, "username": "alice", "role": "user" },
+  "token": "<JWT>",
+  "token_type": "Bearer",
+  "expires_at": "2026-10-11T08:00:00Z",
+  "request_id": "..."
+}
+```
+
+token 是 HS256 JWT，`iss` 为 `AUTH_JWT_ISSUER`，`sub` 是 `user_id`，有效期由 `AUTH_TOKEN_TTL` 决定。受保护接口通过 `Authorization: Bearer <token>` 携带；除了校验签名、签发者与过期时间（含 30 秒宽限），服务端每次请求都会按 `sub` 重新读取用户，因此删除或禁用账号会立即生效，无需等待 token 过期。当前没有刷新 token、吊销列表或登出接口：登出只是客户端丢弃 token，该 token 在过期前仍然有效。
+
+为防用户名枚举，未知用户名与错误密码返回完全相同的 401 `invalid_credentials`，且未知用户名也会执行一次等成本的 bcrypt 比较；账号禁用状态只在密码验证通过后才返回。
+
+错误响应：
+
+| 情况 | 状态码 | code |
+| --- | --- | --- |
+| 请求体非法 JSON / 多余字段 | 400 | `invalid_request` |
+| 请求体超过 4 KiB | 413 | `request_too_large` |
+| 用户名不符合规则（注册） | 400 | `invalid_username` |
+| 密码长度不在 8–72 字节（注册） | 400 | `invalid_password` |
+| 用户名已存在（注册） | 409 | `username_taken` |
+| 用户名或密码错误（登录） | 401 | `invalid_credentials` |
+| 账号已禁用（登录 / 受保护接口） | 403 | `account_disabled` |
+| 缺少 Bearer token | 401 | `authorization_required` |
+| token 签名错误 / 过期 / 格式错误 / 用户已删除 | 401 | `invalid_token` |
+| 其他注册、登录、鉴权失败 | 500 | `registration_failed` / `login_failed` / `authentication_failed` |
+
+已知缺口：没有刷新 token、token 吊销、登出接口、改密与找回密码、邮箱验证、限流与账号锁定、2FA/CAPTCHA；没有基于 `role` 的授权判定（`role` 只作为信息返回）；`/api/v1/library/files` 因为 `library_files` 还没有 owner 列，仍然不需要认证。
 
 当前后端已接入 PostgreSQL 数据基础设施。版本化 SQL 除 `users` 外，conversation migration v2 还创建 `turn_event_types`、`sessions`、`messages`、`summaries`、`turns`、`turn_events`，对应 GORM 映射位于 `internal/data/models`。`turn_event_types` 是 ID 1–15 的稳定整数查找表；summary 按 revision 保留历史，`summary_up_to_msg_id` 是由字符串 message ID 组成的 JSON 数组，不是外键；`turns.assistant_message_id` 是指向 `messages.message_id` 的字符串外键。删除 session 会级联删除其 messages、summaries、turns，删除 turn 会级联删除其 events。
 
@@ -92,7 +145,7 @@ PostgreSQL migration v4 新增七张 Mastery Path 表和四张 Reading Workspace
 
 PostgreSQL migration v5 新增 `library_files` 与 `llm_calls`。文件本体位于本地磁盘，`library_files.library_path` 只保存相对 `UPLOAD_ROOT` 的路径；SHA-256 用于完整性和查询，不限制相同内容重复上传。`llm_calls.usage_json` 使用 PostgreSQL `JSON` 且必须是 object；`session_id` 与 `turn_id` 是历史关联标识，刻意不建立外键，因此 conversation 删除不会删除用量历史。本次不 seed 这两张表：文件 metadata 不能脱离真实文件，LLM 用量也不应伪造。字段、约束、索引和删除规则以 migration SQL 为唯一事实来源。
 
-当前已实现首个 File Library 上传垂直切片；conversation、quiz/practice、Mastery Path 与 Reading Workspace 的 repository、service、API，以及 LLM 调用写入链路仍属后续工作。现阶段没有用户认证、CORS、限流、指标、Tracing、Swagger 或消息队列。`users.password` 只允许保存密码哈希，GORM 模型不得直接作为 API 响应。
+当前已实现 File Library 上传与用户认证两个垂直切片；conversation、quiz/practice、Mastery Path 与 Reading Workspace 的 repository、service、API，以及 LLM 调用写入链路仍属后续工作。现阶段没有 CORS、限流、指标、Tracing、Swagger 或消息队列。`users.password` 只允许保存密码哈希，GORM 模型不得直接作为 API 响应。
 
 ## 前端
 
@@ -102,6 +155,7 @@ PostgreSQL migration v5 新增 `library_files` 与 `llm_calls`。文件本体位
 - Vite
 - TypeScript
 - vue-tsc
+- Vue Router
 - npm
 
 ### 安装和启动
@@ -123,9 +177,23 @@ npm run build
 npm run preview
 ```
 
+### 环境变量
+
+| 文件 | 变量 | 说明 |
+| --- | --- | --- |
+| `frontend/.env.development` | `VITE_API_PROXY_TARGET` | dev server 代理 `/api` 的目标地址，缺失时 `npm run dev` 直接报错退出 |
+| `frontend/.env.development` | `VITE_API_BASE_URL` | 前端请求的 API 前缀，开发环境为 `/api/v1` |
+| `frontend/.env.production` | `VITE_API_BASE_URL` | 生产构建的 API 前缀，默认 `/api/v1`，由部署时的同源反向代理承接 |
+
+这两个文件只包含非秘密配置，需要提交。本地的 `frontend/.env.local` 已被 Git 忽略，可用于覆盖。开发环境通过 Vite 代理把 `/api` 转发到后端，浏览器始终同源，因此后端不需要开启 CORS。
+
 ### 当前范围
 
-前端当前是一个可启动的基础应用壳，根页面显示 `Vue 3 + Vite`。暂未引入 Vue Router、Pinia、Axios/API client、UI 组件库、认证或业务页面，避免在接口和业务需求明确前建立空的抽象层。
+前端已接入 Vue Router，页面为 `/login`、`/register` 和 `/`（首页，需要登录），未匹配路径重定向到首页。启动时会先用本地 token 请求 `/api/v1/auth/me` 校验登录态，再渲染应用，因此刷新页面不会闪回登录页。
+
+登录 token 保存在 `localStorage`（键名 `auth_token`），任何同源脚本都能读取，因此存在 XSS 窃取登录态的取舍；替代方案 httpOnly Cookie 需要 CSRF 防护和服务端 Cookie 处理，本切片没有实现。登出只在本地丢弃 token，服务端没有吊销列表，该 token 在过期前仍然有效。受保护请求收到 401 时会清除 token 并回到登录页；登录、注册请求不带 token，它们的 401 只作为表单错误显示，不会触发跳转。
+
+暂未引入 Pinia、Axios（使用原生 `fetch`）、UI 组件库和前端测试运行器。首页只显示当前用户名与退出登录，本切片不含文件上传 UI。
 
 ## 开发约定
 
