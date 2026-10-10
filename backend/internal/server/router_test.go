@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/auth"
 	"backend/internal/handler"
 	"backend/internal/library"
 	"github.com/gin-gonic/gin"
@@ -29,13 +30,45 @@ func newTestRouter(t *testing.T, checker readyChecker) *gin.Engine {
 	logger := slog.New(slog.NewTextHandler(&strings.Builder{}, nil))
 	system := handler.NewSystemHandler(checker, 50*time.Millisecond, logger)
 	libraryFiles := handler.NewLibraryFilesHandler(routerUploaderStub{}, 1024, logger)
-	return NewRouter(logger, "development", Handlers{System: system, LibraryFiles: libraryFiles})
+	authenticator := routerAuthStub{}
+	return NewRouter(logger, "development", Handlers{
+		System:        system,
+		LibraryFiles:  libraryFiles,
+		Auth:          handler.NewAuthHandler(authenticator, logger),
+		TokenVerifier: authenticator,
+	})
 }
 
 type routerUploaderStub struct{}
 
 func (routerUploaderStub) Upload(context.Context, library.UploadInput) (library.UploadResult, error) {
 	return library.UploadResult{}, nil
+}
+
+// routerAuthStub accepts exactly one token and rejects everything else.
+type routerAuthStub struct{}
+
+const routerAcceptedToken = "accepted-token"
+
+func (routerAuthStub) Register(_ context.Context, input auth.RegisterInput) (auth.AuthResult, error) {
+	return auth.AuthResult{
+		User:  auth.User{UserID: 1, Username: input.Username, Role: "user"},
+		Token: routerAcceptedToken,
+	}, nil
+}
+
+func (routerAuthStub) Login(context.Context, auth.LoginInput) (auth.AuthResult, error) {
+	return auth.AuthResult{
+		User:  auth.User{UserID: 1, Username: "alice", Role: "user"},
+		Token: routerAcceptedToken,
+	}, nil
+}
+
+func (routerAuthStub) Authenticate(_ context.Context, token string) (auth.User, error) {
+	if token != routerAcceptedToken {
+		return auth.User{}, auth.ErrInvalidToken
+	}
+	return auth.User{UserID: 1, Username: "alice", Role: "user"}, nil
 }
 
 func TestRouterSystemEndpoints(t *testing.T) {
@@ -173,6 +206,53 @@ func TestRouterRegistersLibraryUploadAndRejectsWrongMethod(t *testing.T) {
 	if !strings.Contains(recorder.Body.String(), `"code":"method_not_allowed"`) {
 		t.Fatalf("body = %s", recorder.Body.String())
 	}
+}
+
+func TestRouterRegistersAuthRoutes(t *testing.T) {
+	router := newTestRouter(t, readyChecker{})
+
+	t.Run("register is public", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register",
+			strings.NewReader(`{"username":"alice","password":"correct-horse"}`))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201; body=%s", recorder.Code, recorder.Body.String())
+		}
+	})
+
+	t.Run("login rejects the wrong method", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil))
+		if recorder.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("status = %d, want 405", recorder.Code)
+		}
+	})
+
+	t.Run("me without a token", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil))
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
+		}
+		if !strings.Contains(recorder.Body.String(), `"code":"authorization_required"`) {
+			t.Fatalf("body = %s", recorder.Body.String())
+		}
+	})
+
+	t.Run("me with a valid token", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+		request.Header.Set("Authorization", "Bearer "+routerAcceptedToken)
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+		}
+		if !strings.Contains(recorder.Body.String(), `"username":"alice"`) {
+			t.Fatalf("body = %s", recorder.Body.String())
+		}
+	})
 }
 
 func TestRouterRecoversFromPanic(t *testing.T) {

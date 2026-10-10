@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"backend/internal/auth"
 	"backend/internal/config"
 	"backend/internal/data"
 	"backend/internal/data/migration"
@@ -80,9 +81,20 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		cfg.Upload.MaxRequestBytes,
 		logger,
 	)
+	authRepository := auth.NewPostgresRepository(database.GORM())
+	authService, err := auth.NewService(auth.Options{
+		Secret: cfg.Auth.Secret,
+		Issuer: cfg.Auth.Issuer,
+		TTL:    cfg.Auth.TTL,
+	}, authRepository)
+	if err != nil {
+		return fmt.Errorf("initialize authentication: %w", err)
+	}
 	router := server.NewRouter(logger, cfg.AppEnv, server.Handlers{
-		System:       system,
-		LibraryFiles: libraryFiles,
+		System:        system,
+		LibraryFiles:  libraryFiles,
+		Auth:          handler.NewAuthHandler(authService, logger),
+		TokenVerifier: authService,
 	})
 	httpServer := server.NewHTTPServer(cfg, router)
 
