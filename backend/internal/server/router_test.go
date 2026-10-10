@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"backend/internal/handler"
+	"backend/internal/library"
 	"github.com/gin-gonic/gin"
 )
 
@@ -27,7 +28,14 @@ func newTestRouter(t *testing.T, checker readyChecker) *gin.Engine {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(&strings.Builder{}, nil))
 	system := handler.NewSystemHandler(checker, 50*time.Millisecond, logger)
-	return NewRouter(logger, "development", system)
+	libraryFiles := handler.NewLibraryFilesHandler(routerUploaderStub{}, 1024, logger)
+	return NewRouter(logger, "development", Handlers{System: system, LibraryFiles: libraryFiles})
+}
+
+type routerUploaderStub struct{}
+
+func (routerUploaderStub) Upload(context.Context, library.UploadInput) (library.UploadResult, error) {
+	return library.UploadResult{}, nil
 }
 
 func TestRouterSystemEndpoints(t *testing.T) {
@@ -152,6 +160,18 @@ func TestRouterErrorsAndRequestID(t *testing.T) {
 				t.Errorf("body request_id = %q, want %q", body.RequestID, responseID)
 			}
 		})
+	}
+}
+
+func TestRouterRegistersLibraryUploadAndRejectsWrongMethod(t *testing.T) {
+	router := newTestRouter(t, readyChecker{})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/library/files", nil))
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), `"code":"method_not_allowed"`) {
+		t.Fatalf("body = %s", recorder.Body.String())
 	}
 }
 

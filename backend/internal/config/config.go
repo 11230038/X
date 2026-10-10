@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -11,12 +12,21 @@ import (
 	"github.com/joho/godotenv"
 )
 
+const multipartHeadroomBytes int64 = 64 * 1024
+
 var postgresIdentifier = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
 var requiredKeys = []string{
 	"HTTP_ADDR",
 	"APP_ENV",
 	"SHUTDOWN_TIMEOUT",
+	"HTTP_READ_HEADER_TIMEOUT",
+	"HTTP_READ_TIMEOUT",
+	"HTTP_WRITE_TIMEOUT",
+	"HTTP_IDLE_TIMEOUT",
+	"UPLOAD_ROOT",
+	"UPLOAD_MAX_FILE_BYTES",
+	"UPLOAD_MAX_REQUEST_BYTES",
 	"DB_HOST",
 	"DB_PORT",
 	"DB_NAME",
@@ -37,7 +47,24 @@ type Config struct {
 	HTTPAddr        string
 	AppEnv          string
 	ShutdownTimeout time.Duration
+	HTTPTimeouts    HTTPTimeoutConfig
+	Upload          UploadConfig
 	Database        DatabaseConfig
+}
+
+// HTTPTimeoutConfig contains network deadlines for the HTTP server.
+type HTTPTimeoutConfig struct {
+	ReadHeader time.Duration
+	Read       time.Duration
+	Write      time.Duration
+	Idle       time.Duration
+}
+
+// UploadConfig contains local file-library storage limits and location.
+type UploadConfig struct {
+	Root            string
+	MaxFileBytes    int64
+	MaxRequestBytes int64
 }
 
 // DatabaseConfig contains PostgreSQL connection and pool settings.
@@ -63,12 +90,19 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("read configuration file %q", path)
 	}
-
 	if err := requireValues(values); err != nil {
 		return Config{}, err
 	}
 
 	shutdownTimeout, err := parsePositiveDuration(values, "SHUTDOWN_TIMEOUT")
+	if err != nil {
+		return Config{}, err
+	}
+	httpTimeouts, err := loadHTTPTimeouts(values)
+	if err != nil {
+		return Config{}, err
+	}
+	upload, err := loadUploadConfig(path, values)
 	if err != nil {
 		return Config{}, err
 	}
@@ -81,6 +115,8 @@ func Load(path string) (Config, error) {
 		HTTPAddr:        strings.TrimSpace(values["HTTP_ADDR"]),
 		AppEnv:          strings.TrimSpace(values["APP_ENV"]),
 		ShutdownTimeout: shutdownTimeout,
+		HTTPTimeouts:    httpTimeouts,
+		Upload:          upload,
 		Database:        database,
 	}
 	if err := cfg.Validate(); err != nil {
@@ -100,7 +136,45 @@ func (c Config) Validate() error {
 	if c.ShutdownTimeout <= 0 {
 		return fmt.Errorf("SHUTDOWN_TIMEOUT must be a positive duration")
 	}
+	if err := c.HTTPTimeouts.Validate(); err != nil {
+		return err
+	}
+	if err := c.Upload.Validate(); err != nil {
+		return err
+	}
 	return c.Database.Validate()
+}
+
+// Validate checks HTTP server timeout settings.
+func (c HTTPTimeoutConfig) Validate() error {
+	for key, value := range map[string]time.Duration{
+		"HTTP_READ_HEADER_TIMEOUT": c.ReadHeader,
+		"HTTP_READ_TIMEOUT":        c.Read,
+		"HTTP_WRITE_TIMEOUT":       c.Write,
+		"HTTP_IDLE_TIMEOUT":        c.Idle,
+	} {
+		if value <= 0 {
+			return fmt.Errorf("%s must be a positive duration", key)
+		}
+	}
+	return nil
+}
+
+// Validate checks upload storage and request limits.
+func (c UploadConfig) Validate() error {
+	if strings.TrimSpace(c.Root) == "" {
+		return fmt.Errorf("UPLOAD_ROOT must not be empty")
+	}
+	if c.MaxFileBytes <= 0 {
+		return fmt.Errorf("UPLOAD_MAX_FILE_BYTES must be a positive integer")
+	}
+	if c.MaxRequestBytes <= 0 {
+		return fmt.Errorf("UPLOAD_MAX_REQUEST_BYTES must be a positive integer")
+	}
+	if c.MaxRequestBytes < multipartHeadroomBytes || c.MaxFileBytes > c.MaxRequestBytes-multipartHeadroomBytes {
+		return fmt.Errorf("UPLOAD_MAX_REQUEST_BYTES must exceed UPLOAD_MAX_FILE_BYTES by at least %d bytes", multipartHeadroomBytes)
+	}
+	return nil
 }
 
 // Validate checks PostgreSQL connection and pool settings.
@@ -149,6 +223,50 @@ func (c DatabaseConfig) Validate() error {
 	return nil
 }
 
+func loadHTTPTimeouts(values map[string]string) (HTTPTimeoutConfig, error) {
+	readHeader, err := parsePositiveDuration(values, "HTTP_READ_HEADER_TIMEOUT")
+	if err != nil {
+		return HTTPTimeoutConfig{}, err
+	}
+	read, err := parsePositiveDuration(values, "HTTP_READ_TIMEOUT")
+	if err != nil {
+		return HTTPTimeoutConfig{}, err
+	}
+	write, err := parsePositiveDuration(values, "HTTP_WRITE_TIMEOUT")
+	if err != nil {
+		return HTTPTimeoutConfig{}, err
+	}
+	idle, err := parsePositiveDuration(values, "HTTP_IDLE_TIMEOUT")
+	if err != nil {
+		return HTTPTimeoutConfig{}, err
+	}
+	return HTTPTimeoutConfig{ReadHeader: readHeader, Read: read, Write: write, Idle: idle}, nil
+}
+
+func loadUploadConfig(path string, values map[string]string) (UploadConfig, error) {
+	root := strings.TrimSpace(values["UPLOAD_ROOT"])
+	if !filepath.IsAbs(root) {
+		absoluteEnv, err := filepath.Abs(path)
+		if err != nil {
+			return UploadConfig{}, fmt.Errorf("resolve configuration file path")
+		}
+		root = filepath.Join(filepath.Dir(absoluteEnv), root)
+	}
+	root, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return UploadConfig{}, fmt.Errorf("resolve UPLOAD_ROOT")
+	}
+	maxFile, err := parsePositiveInt64(values, "UPLOAD_MAX_FILE_BYTES")
+	if err != nil {
+		return UploadConfig{}, err
+	}
+	maxRequest, err := parsePositiveInt64(values, "UPLOAD_MAX_REQUEST_BYTES")
+	if err != nil {
+		return UploadConfig{}, err
+	}
+	return UploadConfig{Root: root, MaxFileBytes: maxFile, MaxRequestBytes: maxRequest}, nil
+}
+
 func loadDatabaseConfig(values map[string]string) (DatabaseConfig, error) {
 	port, err := parsePort(values, "DB_PORT")
 	if err != nil {
@@ -174,21 +292,13 @@ func loadDatabaseConfig(values map[string]string) (DatabaseConfig, error) {
 	if err != nil {
 		return DatabaseConfig{}, err
 	}
-
 	return DatabaseConfig{
-		Host:            strings.TrimSpace(values["DB_HOST"]),
-		Port:            port,
-		Name:            strings.TrimSpace(values["DB_NAME"]),
-		User:            strings.TrimSpace(values["DB_USER"]),
-		Password:        values["DB_PASSWORD"],
-		Schema:          strings.TrimSpace(values["DB_SCHEMA"]),
-		SSLMode:         strings.TrimSpace(values["DB_SSLMODE"]),
-		TimeZone:        strings.TrimSpace(values["DB_TIMEZONE"]),
-		PingTimeout:     pingTimeout,
-		MaxOpenConns:    maxOpen,
-		MaxIdleConns:    maxIdle,
-		ConnMaxLifetime: maxLifetime,
-		ConnMaxIdleTime: maxIdleTime,
+		Host: strings.TrimSpace(values["DB_HOST"]), Port: port,
+		Name: strings.TrimSpace(values["DB_NAME"]), User: strings.TrimSpace(values["DB_USER"]),
+		Password: values["DB_PASSWORD"], Schema: strings.TrimSpace(values["DB_SCHEMA"]),
+		SSLMode: strings.TrimSpace(values["DB_SSLMODE"]), TimeZone: strings.TrimSpace(values["DB_TIMEZONE"]),
+		PingTimeout: pingTimeout, MaxOpenConns: maxOpen, MaxIdleConns: maxIdle,
+		ConnMaxLifetime: maxLifetime, ConnMaxIdleTime: maxIdleTime,
 	}, nil
 }
 
@@ -208,6 +318,14 @@ func parsePort(values map[string]string, key string) (uint16, error) {
 		return 0, fmt.Errorf("%s must be between 1 and 65535", key)
 	}
 	return uint16(value), nil
+}
+
+func parsePositiveInt64(values map[string]string, key string) (int64, error) {
+	value, err := strconv.ParseInt(strings.TrimSpace(values[key]), 10, 64)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", key)
+	}
+	return value, nil
 }
 
 func parseNonNegativeInt(values map[string]string, key string) (int, error) {
@@ -248,7 +366,6 @@ func validateHTTPAddr(addr string) error {
 	if addr == "" {
 		return fmt.Errorf("address must not be empty")
 	}
-
 	_, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return fmt.Errorf("must be host:port: %w", err)

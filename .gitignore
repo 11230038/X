@@ -2,6 +2,9 @@ bin/
 *.test
 .env
 
+# Local uploaded content and staging files
+/data/upload/
+
 # Agent skills and installer metadata
 .claude/skills/
 .agents/skills/

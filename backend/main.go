@@ -15,6 +15,7 @@ import (
 	"backend/internal/data"
 	"backend/internal/data/migration"
 	"backend/internal/handler"
+	"backend/internal/library"
 	"backend/internal/server"
 )
 
@@ -66,7 +67,23 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 	}
 
 	system := handler.NewSystemHandler(database, cfg.Database.PingTimeout, logger)
-	router := server.NewRouter(logger, cfg.AppEnv, system)
+	libraryRepository := library.NewPostgresRepository(database.GORM())
+	libraryService, err := library.NewService(library.Options{
+		Root:         cfg.Upload.Root,
+		MaxFileBytes: cfg.Upload.MaxFileBytes,
+	}, libraryRepository)
+	if err != nil {
+		return fmt.Errorf("initialize file library: %w", err)
+	}
+	libraryFiles := handler.NewLibraryFilesHandler(
+		libraryService,
+		cfg.Upload.MaxRequestBytes,
+		logger,
+	)
+	router := server.NewRouter(logger, cfg.AppEnv, server.Handlers{
+		System:       system,
+		LibraryFiles: libraryFiles,
+	})
 	httpServer := server.NewHTTPServer(cfg, router)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)
@@ -92,6 +109,9 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 
 		logger.Info("shutting down server", "reason", ctx.Err())
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			if closeErr := httpServer.Close(); closeErr != nil {
+				return fmt.Errorf("shutdown HTTP server: %w", errors.Join(err, closeErr))
+			}
 			return fmt.Errorf("shutdown HTTP server: %w", err)
 		}
 		return nil

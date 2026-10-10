@@ -8,8 +8,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// Handlers groups the HTTP handlers registered by the application router.
+type Handlers struct {
+	System       *handler.SystemHandler
+	LibraryFiles *handler.LibraryFilesHandler
+}
+
 // NewRouter builds the application router without binding a network port.
-func NewRouter(logger *slog.Logger, appEnv string, system *handler.SystemHandler) *gin.Engine {
+func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engine {
 	if appEnv != "development" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -24,12 +30,14 @@ func NewRouter(logger *slog.Logger, appEnv string, system *handler.SystemHandler
 		middleware.AccessLog(logger),
 	)
 
-	router.GET("/", system.Root)
-	router.GET("/health", system.Health)
-	router.GET("/healthz", system.Liveness)
-	router.GET("/readyz", system.Readiness)
-	router.NoRoute(system.NotFound)
-	router.NoMethod(system.MethodNotAllowed)
+	router.GET("/", handlers.System.Root)
+	router.GET("/health", handlers.System.Health)
+	router.GET("/healthz", handlers.System.Liveness)
+	router.GET("/readyz", handlers.System.Readiness)
+	apiV1 := router.Group("/api/v1")
+	apiV1.POST("/library/files", handlers.LibraryFiles.Upload)
+	router.NoRoute(handlers.System.NotFound)
+	router.NoMethod(handlers.System.MethodNotAllowed)
 
 	return router
 }

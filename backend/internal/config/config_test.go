@@ -27,6 +27,19 @@ func TestLoadReadsCompleteDotenv(t *testing.T) {
 	if cfg.ShutdownTimeout != 2*time.Second {
 		t.Errorf("ShutdownTimeout = %s", cfg.ShutdownTimeout)
 	}
+	if cfg.HTTPTimeouts.ReadHeader != 5*time.Second || cfg.HTTPTimeouts.Read != 2*time.Minute {
+		t.Errorf("HTTP timeouts were not loaded: %+v", cfg.HTTPTimeouts)
+	}
+	if cfg.HTTPTimeouts.Write != 2*time.Minute || cfg.HTTPTimeouts.Idle != time.Minute {
+		t.Errorf("HTTP timeouts were not loaded: %+v", cfg.HTTPTimeouts)
+	}
+	if cfg.Upload.MaxFileBytes != 20*1024*1024 || cfg.Upload.MaxRequestBytes != 21*1024*1024 {
+		t.Errorf("upload limits were not loaded: %+v", cfg.Upload)
+	}
+	wantRoot := filepath.Join(filepath.Dir(path), "data", "upload")
+	if cfg.Upload.Root != wantRoot {
+		t.Errorf("Upload.Root = %q, want %q", cfg.Upload.Root, wantRoot)
+	}
 	if cfg.Database.Port != 5432 || cfg.Database.Password != testPassword {
 		t.Errorf("Database configuration was not loaded")
 	}
@@ -76,6 +89,10 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 	}{
 		{name: "HTTP address", key: "HTTP_ADDR", value: "localhost"},
 		{name: "shutdown timeout", key: "SHUTDOWN_TIMEOUT", value: "0s"},
+		{name: "HTTP read timeout", key: "HTTP_READ_TIMEOUT", value: "0s"},
+		{name: "HTTP write timeout", key: "HTTP_WRITE_TIMEOUT", value: "soon"},
+		{name: "upload file limit", key: "UPLOAD_MAX_FILE_BYTES", value: "0"},
+		{name: "upload request limit", key: "UPLOAD_MAX_REQUEST_BYTES", value: "-1"},
 		{name: "database port", key: "DB_PORT", value: "70000"},
 		{name: "SSL mode", key: "DB_SSLMODE", value: "unsafe"},
 		{name: "schema identifier", key: "DB_SCHEMA", value: "public.schema"},
@@ -94,6 +111,43 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 				t.Fatalf("Load() error = nil, want error for %s", tt.key)
 			}
 		})
+	}
+}
+
+func TestLoadRejectsRequestLimitWithoutMultipartHeadroom(t *testing.T) {
+	values := validValues()
+	values["UPLOAD_MAX_REQUEST_BYTES"] = values["UPLOAD_MAX_FILE_BYTES"]
+
+	if _, err := Load(writeDotenv(t, values)); err == nil {
+		t.Fatal("Load() error = nil, want upload limit validation error")
+	}
+}
+
+func TestLoadRejectsOverflowingUploadLimits(t *testing.T) {
+	values := validValues()
+	values["UPLOAD_MAX_FILE_BYTES"] = "9223372036854775807"
+	values["UPLOAD_MAX_REQUEST_BYTES"] = "1"
+
+	if _, err := Load(writeDotenv(t, values)); err == nil {
+		t.Fatal("Load() error = nil, want upload limit overflow rejection")
+	}
+}
+
+func TestLoadResolvesUploadRootFromDotenvDirectory(t *testing.T) {
+	values := validValues()
+	values["UPLOAD_ROOT"] = "../runtime/upload"
+	path := writeDotenv(t, values)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	want, err := filepath.Abs(filepath.Join(filepath.Dir(path), "..", "runtime", "upload"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Upload.Root != want {
+		t.Fatalf("Upload.Root = %q, want %q", cfg.Upload.Root, want)
 	}
 }
 
@@ -146,22 +200,29 @@ func TestLoadDoesNotExposeSecrets(t *testing.T) {
 
 func validValues() map[string]string {
 	return map[string]string{
-		"HTTP_ADDR":             "127.0.0.1:9090",
-		"APP_ENV":               "test",
-		"SHUTDOWN_TIMEOUT":      "2s",
-		"DB_HOST":               "localhost",
-		"DB_PORT":               "5432",
-		"DB_NAME":               "x_test",
-		"DB_USER":               "x_test_user",
-		"DB_PASSWORD":           testPassword,
-		"DB_SCHEMA":             "public",
-		"DB_SSLMODE":            "disable",
-		"DB_TIMEZONE":           "UTC",
-		"DB_PING_TIMEOUT":       "1s",
-		"DB_MAX_OPEN_CONNS":     "10",
-		"DB_MAX_IDLE_CONNS":     "5",
-		"DB_CONN_MAX_LIFETIME":  "30m",
-		"DB_CONN_MAX_IDLE_TIME": "5m",
+		"HTTP_ADDR":                "127.0.0.1:9090",
+		"APP_ENV":                  "test",
+		"SHUTDOWN_TIMEOUT":         "2s",
+		"HTTP_READ_HEADER_TIMEOUT": "5s",
+		"HTTP_READ_TIMEOUT":        "2m",
+		"HTTP_WRITE_TIMEOUT":       "2m",
+		"HTTP_IDLE_TIMEOUT":        "1m",
+		"UPLOAD_ROOT":              "data/upload",
+		"UPLOAD_MAX_FILE_BYTES":    "20971520",
+		"UPLOAD_MAX_REQUEST_BYTES": "22020096",
+		"DB_HOST":                  "localhost",
+		"DB_PORT":                  "5432",
+		"DB_NAME":                  "x_test",
+		"DB_USER":                  "x_test_user",
+		"DB_PASSWORD":              testPassword,
+		"DB_SCHEMA":                "public",
+		"DB_SSLMODE":               "disable",
+		"DB_TIMEZONE":              "UTC",
+		"DB_PING_TIMEOUT":          "1s",
+		"DB_MAX_OPEN_CONNS":        "10",
+		"DB_MAX_IDLE_CONNS":        "5",
+		"DB_CONN_MAX_LIFETIME":     "30m",
+		"DB_CONN_MAX_IDLE_TIME":    "5m",
 	}
 }
 
