@@ -78,12 +78,12 @@ func TestRouterSystemEndpoints(t *testing.T) {
 		name       string
 		path       string
 		wantStatus int
-		wantBody   string
+		wantData   string
 	}{
-		{name: "root", path: "/", wantStatus: http.StatusOK, wantBody: `{"message":"Gin server is running"}`},
-		{name: "legacy health", path: "/health", wantStatus: http.StatusOK, wantBody: `{"status":"ok"}`},
-		{name: "liveness", path: "/healthz", wantStatus: http.StatusOK, wantBody: `{"status":"ok"}`},
-		{name: "readiness", path: "/readyz", wantStatus: http.StatusOK, wantBody: `{"status":"ready"}`},
+		{name: "root", path: "/", wantStatus: http.StatusOK, wantData: `{"message":"Gin server is running"}`},
+		{name: "legacy health", path: "/health", wantStatus: http.StatusOK, wantData: `{"status":"ok"}`},
+		{name: "liveness", path: "/healthz", wantStatus: http.StatusOK, wantData: `{"status":"ok"}`},
+		{name: "readiness", path: "/readyz", wantStatus: http.StatusOK, wantData: `{"status":"ready"}`},
 	}
 
 	for _, tt := range tests {
@@ -95,13 +95,24 @@ func TestRouterSystemEndpoints(t *testing.T) {
 			if recorder.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", recorder.Code, tt.wantStatus)
 			}
-			if got := strings.TrimSpace(recorder.Body.String()); got != tt.wantBody {
-				t.Errorf("body = %s, want %s", got, tt.wantBody)
+			var body struct {
+				Data      json.RawMessage `json:"data"`
+				RequestID string          `json:"request_id"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode success envelope %q: %v", recorder.Body.String(), err)
+			}
+			if got := strings.TrimSpace(string(body.Data)); got != tt.wantData {
+				t.Errorf("data = %s, want %s", got, tt.wantData)
+			}
+			responseID := recorder.Header().Get("X-Request-ID")
+			if body.RequestID != responseID {
+				t.Errorf("body request_id = %q, want %q", body.RequestID, responseID)
 			}
 			if got := recorder.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
 				t.Errorf("Content-Type = %q, want application/json", got)
 			}
-			if recorder.Header().Get("X-Request-ID") == "" {
+			if responseID == "" {
 				t.Error("X-Request-ID header is empty")
 			}
 		})

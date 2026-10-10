@@ -8,6 +8,14 @@ import (
 
 const requestIDKey = "request_id"
 
+// SuccessResponse is the stable JSON shape returned for successful requests.
+// Together with ErrorResponse it forms one envelope: every response carries
+// request_id and exactly one of data or error.
+type SuccessResponse struct {
+	Data      interface{} `json:"data"`
+	RequestID string      `json:"request_id,omitempty"`
+}
+
 // ErrorResponse is the stable JSON shape returned for client and server errors.
 type ErrorResponse struct {
 	Error     ErrorBody `json:"error"`
@@ -26,6 +34,12 @@ func RequestID(c *gin.Context) string {
 	value, _ := c.Get(requestIDKey)
 	requestID, _ := value.(string)
 	return requestID
+}
+
+// WriteSuccess writes the common success envelope. Handlers pass only their own
+// payload; the request ID is added here so no handler can forget or duplicate it.
+func WriteSuccess(c *gin.Context, status int, data interface{}) {
+	c.JSON(status, SuccessResponse{Data: data, RequestID: RequestID(c)})
 }
 
 // WriteError writes the common error envelope and aborts the request.

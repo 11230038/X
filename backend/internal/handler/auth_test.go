@@ -69,26 +69,31 @@ func TestAuthHandlerRegisterReturnsSession(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body=%s", recorder.Code, recorder.Body.String())
 	}
 	var response struct {
-		User struct {
-			UserID   int64  `json:"user_id"`
-			Username string `json:"username"`
-		} `json:"user"`
-		Token     string `json:"token"`
-		TokenType string `json:"token_type"`
-		ExpiresAt string `json:"expires_at"`
+		Data struct {
+			User struct {
+				UserID   int64  `json:"user_id"`
+				Username string `json:"username"`
+			} `json:"user"`
+			Token     string `json:"token"`
+			TokenType string `json:"token_type"`
+			ExpiresAt string `json:"expires_at"`
+		} `json:"data"`
 		RequestID string `json:"request_id"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.User.UserID != 7 || response.User.Username != "alice" {
-		t.Errorf("user = %+v", response.User)
+	if response.Data.User.UserID != 7 || response.Data.User.Username != "alice" {
+		t.Errorf("user = %+v", response.Data.User)
 	}
-	if response.Token != handlerToken || response.TokenType != "Bearer" {
-		t.Errorf("token fields = %q/%q", response.Token, response.TokenType)
+	if response.Data.Token != handlerToken || response.Data.TokenType != "Bearer" {
+		t.Errorf("token fields = %q/%q", response.Data.Token, response.Data.TokenType)
 	}
-	if response.ExpiresAt == "" || response.RequestID == "" {
+	if response.Data.ExpiresAt == "" || response.RequestID == "" {
 		t.Errorf("expires_at/request_id missing: %s", recorder.Body.String())
+	}
+	if response.RequestID != recorder.Header().Get("X-Request-ID") {
+		t.Errorf("body request_id = %q, want the response header", response.RequestID)
 	}
 	if stub.registerCall == nil || stub.registerCall.Username != "alice" || stub.registerCall.Password != handlerPassword {
 		t.Errorf("service input = %+v", stub.registerCall)
@@ -121,6 +126,22 @@ func TestAuthHandlerLoginReturnsSession(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), handlerUserJSON) {
 		t.Fatalf("body = %s, want the user", recorder.Body.String())
+	}
+	var response struct {
+		Data struct {
+			User  auth.User `json:"user"`
+			Token string    `json:"token"`
+		} `json:"data"`
+		RequestID string `json:"request_id"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Data.User.Username != "alice" || response.Data.Token != handlerToken {
+		t.Errorf("data = %+v", response.Data)
+	}
+	if response.RequestID == "" {
+		t.Error("envelope is missing request_id")
 	}
 	if stub.loginCall == nil || stub.loginCall.Username != "alice" {
 		t.Errorf("service input = %+v", stub.loginCall)

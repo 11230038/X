@@ -45,7 +45,6 @@ type sessionResponse struct {
 	Token     string    `json:"token"`
 	TokenType string    `json:"token_type"`
 	ExpiresAt time.Time `json:"expires_at"`
-	RequestID string    `json:"request_id"`
 }
 
 // Register creates an account and returns its first access token.
@@ -66,7 +65,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		h.writeRegisterError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, newSessionResponse(result, httpx.RequestID(c)))
+	httpx.WriteSuccess(c, http.StatusCreated, newSessionResponse(result))
 }
 
 // Login verifies credentials and returns an access token.
@@ -87,7 +86,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		h.writeLoginError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, newSessionResponse(result, httpx.RequestID(c)))
+	httpx.WriteSuccess(c, http.StatusOK, newSessionResponse(result))
 }
 
 // Me returns the account established by the bearer token middleware.
@@ -97,7 +96,7 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		h.writeAuthFailure(c, "authentication_failed", errors.New("route is not behind the auth middleware"))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"user": user, "request_id": httpx.RequestID(c)})
+	httpx.WriteSuccess(c, http.StatusOK, gin.H{"user": user})
 }
 
 // decodeCredentials reads one strict, size-bounded JSON credential object.
@@ -160,14 +159,13 @@ func (h *AuthHandler) writeAuthFailure(c *gin.Context, code string, err error) {
 	httpx.WriteError(c, http.StatusInternalServerError, code, "authentication is unavailable")
 }
 
-// newSessionResponse builds the register and login response. It carries the
+// newSessionResponse builds the register and login payload. It carries the
 // access token but never the stored password hash.
-func newSessionResponse(result auth.AuthResult, requestID string) sessionResponse {
+func newSessionResponse(result auth.AuthResult) sessionResponse {
 	return sessionResponse{
 		User:      result.User,
 		Token:     result.Token,
 		TokenType: "Bearer",
 		ExpiresAt: result.ExpiresAt.UTC(),
-		RequestID: requestID,
 	}
 }

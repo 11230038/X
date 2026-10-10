@@ -44,13 +44,15 @@ func TestLibraryFilesHandlerUploadsSingleFile(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body=%s", recorder.Code, recorder.Body.String())
 	}
 	var body struct {
-		File      library.UploadResult `json:"file"`
-		RequestID string               `json:"request_id"`
+		Data struct {
+			File library.UploadResult `json:"file"`
+		} `json:"data"`
+		RequestID string `json:"request_id"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.File.ID != "lib_test" || body.RequestID == "" {
+	if body.Data.File.ID != "lib_test" || body.RequestID == "" {
 		t.Errorf("response = %+v", body)
 	}
 	if uploader.input.Filename != "notes.md" || uploader.input.Content == nil {

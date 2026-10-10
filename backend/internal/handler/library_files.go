@@ -93,7 +93,7 @@ func (h *LibraryFilesHandler) Upload(c *gin.Context) {
 		h.writeUploadError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"file": result, "request_id": httpx.RequestID(c)})
+	httpx.WriteSuccess(c, http.StatusCreated, gin.H{"file": result})
 }
 
 func (h *LibraryFilesHandler) writeUploadError(c *gin.Context, err error) {

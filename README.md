@@ -92,6 +92,20 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `POST` | `/api/v1/auth/login` | 用户名密码登录，成功返回 200 |
 | `GET` | `/api/v1/auth/me` | 返回当前登录用户，需要 Bearer token |
 
+### 响应封装
+
+每个响应都是同一个 envelope，`request_id` 一定存在，且 `data` 与 `error` 恰好出现一个：
+
+```json
+{ "data": { "status": "ok" }, "request_id": "..." }
+```
+
+```json
+{ "error": { "code": "not_found", "message": "route not found" }, "request_id": "..." }
+```
+
+handler 只提供自己的 payload，`request_id` 由 `httpx` 统一附加，成功走 `httpx.WriteSuccess`、失败走 `httpx.WriteError`，两者共用同一份约定。HTTP 状态码仍然表达语义（201、400、409……），`error.code` 是前端做分支判断的稳定契约。
+
 文件库允许图片（JPG/JPEG/PNG/GIF/WebP）、PDF、PPT/PPTX、DOC/DOCX、Markdown 和 MP3，并按类型写入 `data/upload/` 的固定子目录。服务端流式限制大小、计算 SHA-256、验证扩展名与实际内容、先写 staging 再原子移动；数据库写入失败会补偿删除文件。SVG、宏 Office 文件以及未列出的格式会被拒绝。响应只返回逻辑 metadata，不暴露 `library_path` 或绝对路径，也没有静态目录或下载接口。
 
 当前上传接口没有认证、用户归属、限流、磁盘总配额或恶意文件扫描，只适用于本机或可信网络环境，不应直接暴露到互联网。文件系统与 PostgreSQL 无法共享事务；普通失败会补偿清理，但进程在最终移动后立即崩溃仍可能留下 orphan 文件，当前版本尚无后台 reconciliation。
@@ -108,13 +122,17 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 
 ```json
 {
-  "user": { "user_id": 1, "username": "alice", "role": "user" },
-  "token": "<JWT>",
-  "token_type": "Bearer",
-  "expires_at": "2026-10-11T08:00:00Z",
+  "data": {
+    "user": { "user_id": 1, "username": "alice", "role": "user" },
+    "token": "<JWT>",
+    "token_type": "Bearer",
+    "expires_at": "2026-10-11T08:00:00Z"
+  },
   "request_id": "..."
 }
 ```
+
+`GET /api/v1/auth/me` 返回同样的 envelope，`data` 为 `{ "user": { ... } }`，不包含 token。
 
 token 是 HS256 JWT，`iss` 为 `AUTH_JWT_ISSUER`，`sub` 是 `user_id`，有效期由 `AUTH_TOKEN_TTL` 决定。受保护接口通过 `Authorization: Bearer <token>` 携带；除了校验签名、签发者与过期时间（含 30 秒宽限），服务端每次请求都会按 `sub` 重新读取用户，因此删除或禁用账号会立即生效，无需等待 token 过期。当前没有刷新 token、吊销列表或登出接口：登出只是客户端丢弃 token，该 token 在过期前仍然有效。
 
@@ -190,6 +208,8 @@ npm run preview
 ### 当前范围
 
 前端已接入 Vue Router，页面为 `/login`、`/register` 和 `/`（首页，需要登录），未匹配路径重定向到首页。启动时会先用本地 token 请求 `/api/v1/auth/me` 校验登录态，再渲染应用，因此刷新页面不会闪回登录页。
+
+[src/auth/client.ts](frontend/src/auth/client.ts) 是唯一 API 边界：统一 base URL、JSON 收发、解包后端 envelope 的 `data`、解析 `error.code` 并抛出 `ApiError`，组件不直接拼 URL。开发环境由 Vite 代理 `/api` 到后端，浏览器保持同源。
 
 登录 token 保存在 `localStorage`（键名 `auth_token`），任何同源脚本都能读取，因此存在 XSS 窃取登录态的取舍；替代方案 httpOnly Cookie 需要 CSRF 防护和服务端 Cookie 处理，本切片没有实现。登出只在本地丢弃 token，服务端没有吊销列表，该 token 在过期前仍然有效。受保护请求收到 401 时会清除 token 并回到登录页；登录、注册请求不带 token，它们的 401 只作为表单错误显示，不会触发跳转。
 

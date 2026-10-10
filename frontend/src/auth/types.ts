@@ -4,17 +4,21 @@ export interface User {
   role: string
 }
 
+/** SuccessEnvelope mirrors the backend success shape: `{data, request_id}`. */
+export interface SuccessEnvelope<T> {
+  data: T
+  request_id?: string
+}
+
 export interface AuthResponse {
   user: User
   token: string
   token_type: string
   expires_at: string
-  request_id: string
 }
 
 export interface SessionResponse {
   user: User
-  request_id: string
 }
 
 export interface ApiErrorBody {

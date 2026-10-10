@@ -1,5 +1,5 @@
 import { ApiError } from './types'
-import type { ApiErrorBody, AuthResponse, SessionResponse } from './types'
+import type { ApiErrorBody, AuthResponse, SessionResponse, SuccessEnvelope } from './types'
 
 // The token lives in localStorage, which any script on the page can read, so a
 // successful XSS means a stolen session. The alternative — an httpOnly cookie —
@@ -76,7 +76,10 @@ async function apiFetch<T>(path: string, options: RequestOptions): Promise<T> {
     throw new ApiError(response.status, body.code, body.message, requestId)
   }
 
-  return (await response.json()) as T
+  // The backend wraps every success in {data, request_id}; callers only ever
+  // see the payload.
+  const envelope = (await response.json()) as SuccessEnvelope<T>
+  return envelope.data
 }
 
 async function readErrorBody(response: Response): Promise<ApiErrorBody> {
