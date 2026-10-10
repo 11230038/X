@@ -42,7 +42,7 @@ go run ./cmd/migrate status
 go run ./cmd/migrate down
 ```
 
-仅开发环境需要测试数据时，可执行 `go run ./cmd/seed`。该命令幂等写入 `test_admin`、`test_user`，一套固定 ID 的完整会话数据（session、用户/助手消息、summary revision 1、completed turn、content/done events），以及一套使用固定 ID 的确定性完整 quiz/practice fixture（notebook entry、category 关联、pending question、review state、review event）；密码只以 bcrypt 哈希保存。
+仅开发环境需要测试数据时，可执行 `go run ./cmd/seed`。该命令幂等写入 `test_admin`、`test_user`，一套固定 ID 的完整会话数据，一套 quiz/practice fixture，以及完整的 Mastery Path 与 Reading Workspace fixture；密码只以 bcrypt 哈希保存。
 
 监听地址由 `.env` 中的 `HTTP_ADDR` 决定。构建、测试和静态检查：
 
@@ -77,9 +77,11 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 
 当前后端已接入 PostgreSQL 数据基础设施。版本化 SQL 除 `users` 外，conversation migration v2 还创建 `turn_event_types`、`sessions`、`messages`、`summaries`、`turns`、`turn_events`，对应 GORM 映射位于 `internal/data/models`。`turn_event_types` 是 ID 1–15 的稳定整数查找表；summary 按 revision 保留历史，`summary_up_to_msg_id` 是由字符串 message ID 组成的 JSON 数组，不是外键；`turns.assistant_message_id` 是指向 `messages.message_id` 的字符串外键。删除 session 会级联删除其 messages、summaries、turns，删除 turn 会级联删除其 events。
 
-PostgreSQL migration v3 新增 quiz/practice 持久化表 `notebook_entries`、`notebook_categories`、`notebook_entry_categories`、`reading_quiz_pending`、`practice_review_state`、`practice_review_events`。`notebook_entries.notebook_entries_id` 是主键，`question_id` 在全表全局唯一；可空的 `session_id`、`turn_id` 分别引用 conversation 表，并使用 `ON DELETE CASCADE`。`reading_quiz_pending` 刻意只保存 `question_id`、`question`、`creat_time`；`mastery_path_id`、`knowledge_point_id` 仍是应用层 ID，不建立数据库外键。字段、约束、索引和级联规则以 migration SQL 为唯一事实来源。
+PostgreSQL migration v3 新增 quiz/practice 持久化表 `notebook_entries`、`notebook_categories`、`notebook_entry_categories`、`reading_quiz_pending`、`practice_review_state`、`practice_review_events`。`notebook_entries.notebook_entries_id` 是主键，`question_id` 在全表全局唯一；可空的 `session_id`、`turn_id` 分别引用 conversation 表，并使用 `ON DELETE CASCADE`。`reading_quiz_pending` 刻意只保存 `question_id`、`question`、`creat_time`。
 
-当前实现范围是 schema、持久化映射和开发 seed；conversation 与 quiz/practice 的 repository、service、API 均仍属后续工作。现阶段也没有用户业务 API、认证、CORS、限流、指标、Tracing、Swagger 或消息队列，首个真实用例明确后再按垂直切片扩展。`users.password` 只允许保存密码哈希，GORM 模型不得直接作为 API 响应。
+PostgreSQL migration v4 新增七张 Mastery Path 表和四张 Reading Workspace 表。Mastery 根表使用 `mastery_paths.mastery_path_id`，子表使用 `path_id` 外键；`mastery_path_sessions`、`reading_workspace_sessions`、`reading_workspace_materials` 使用复合主键。删除 mastery path 会级联清理其子记录；删除 reading workspace 只清理映射，不删除独立 session/material；删除 material 会清理 workspace-material 映射，并把 workspace 与 workspace-session 的 `active_material_id` 置空。`notebook_entries.mastery_path_id` 仍是应用层 ID，不追补数据库外键。字段、约束、索引和级联规则以 migration SQL 为唯一事实来源。
+
+当前实现范围是 schema、持久化映射和开发 seed；conversation、quiz/practice、Mastery Path 与 Reading Workspace 的 repository、service、API 均仍属后续工作。现阶段也没有用户业务 API、认证、CORS、限流、指标、Tracing、Swagger 或消息队列，首个真实用例明确后再按垂直切片扩展。`users.password` 只允许保存密码哈希，GORM 模型不得直接作为 API 响应。
 
 ## 前端
 

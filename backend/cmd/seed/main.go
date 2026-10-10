@@ -66,7 +66,10 @@ func main() {
 		if err := seedConversation(tx); err != nil {
 			return err
 		}
-		return seedNotebookPractice(tx)
+		if err := seedNotebookPractice(tx); err != nil {
+			return err
+		}
+		return seedMasteryReading(tx)
 	}); err != nil {
 		log.Fatal("seed development data")
 	}
@@ -74,6 +77,8 @@ func main() {
 	fmt.Println("seeded users: test_admin, test_user")
 	fmt.Printf("seeded conversation: %s\n", seedSessionID)
 	fmt.Printf("seeded notebook entry: %s\n", seedNotebookEntryID)
+	fmt.Printf("seeded mastery path: %s\n", seedMasteryPathID)
+	fmt.Printf("seeded reading workspace: %s\n", seedReadingWorkspaceID)
 }
 
 func seedUserAccounts(tx *gorm.DB) error {
@@ -290,7 +295,7 @@ func ensureSeedRecord(
 	record any,
 	label string,
 	primaryKey string,
-	primaryValue string,
+	primaryValue any,
 ) error {
 	result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(record)
 	if result.Error != nil {
@@ -300,8 +305,14 @@ func ensureSeedRecord(
 		return nil
 	}
 
+	query := tx.Model(record)
+	if values, ok := primaryValue.([]any); ok {
+		query = query.Where(primaryKey, values...)
+	} else {
+		query = query.Where(primaryKey+" = ?", primaryValue)
+	}
 	var count int64
-	if err := tx.Model(record).Where(primaryKey+" = ?", primaryValue).Count(&count).Error; err != nil {
+	if err := query.Count(&count).Error; err != nil {
 		return fmt.Errorf("verify seed %s: %w", label, err)
 	}
 	if count != 1 {
