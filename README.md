@@ -104,7 +104,9 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 { "error": { "code": "not_found", "message": "route not found" }, "request_id": "..." }
 ```
 
-handler 只提供自己的 payload，`request_id` 由 `httpx` 统一附加，成功走 `httpx.WriteSuccess`、失败走 `httpx.WriteError`，两者共用同一份约定。HTTP 状态码仍然表达语义（201、400、409……），`error.code` 是前端做分支判断的稳定契约。
+handler 只提供自己的 payload，`request_id` 由 `httpx` 统一附加，成功走 `httpx.WriteSuccess`、失败走 `httpx.WriteError`，两者共用同一份约定。**成功和失败共用这一套信封**：业务错误（400/401/403/404/405/409/413）、readiness 失败（503）和 panic 恢复（500）都是同一个 `error` 形状。HTTP 状态码仍然表达语义（201、400、409……），`error.code` 是前端做分支判断的稳定契约。
+
+服务不做任何重定向：尾斜杠（如 `/health/`）不会被改写成 301，而是走统一 404，因此客户端拿到的每个响应都是 JSON 信封，不会出现 HTML 或空 body。
 
 文件库允许图片（JPG/JPEG/PNG/GIF/WebP）、PDF、PPT/PPTX、DOC/DOCX、Markdown 和 MP3，并按类型写入 `data/upload/` 的固定子目录。服务端流式限制大小、计算 SHA-256、验证扩展名与实际内容、先写 staging 再原子移动；数据库写入失败会补偿删除文件。SVG、宏 Office 文件以及未列出的格式会被拒绝。响应只返回逻辑 metadata，不暴露 `library_path` 或绝对路径，也没有静态目录或下载接口。
 

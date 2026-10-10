@@ -162,6 +162,9 @@ func TestRouterErrorsAndRequestID(t *testing.T) {
 	}{
 		{name: "not found", method: http.MethodGet, path: "/missing", wantStatus: http.StatusNotFound, wantCode: "not_found"},
 		{name: "method not allowed", method: http.MethodPost, path: "/", wantStatus: http.StatusMethodNotAllowed, wantCode: "method_not_allowed"},
+		// A trailing slash must fall through to the envelope, not to Gin's built-in
+		// redirect, which answers with an HTML body and no request ID.
+		{name: "trailing slash", method: http.MethodGet, path: "/health/", wantStatus: http.StatusNotFound, wantCode: "not_found"},
 		{name: "provided request id", method: http.MethodGet, path: "/healthz", requestID: "client-request-42", wantStatus: http.StatusOK},
 	}
 

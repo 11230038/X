@@ -26,6 +26,10 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// Do not trust forwarded headers unless a trusted proxy is configured.
 	_ = router.SetTrustedProxies(nil)
 	router.HandleMethodNotAllowed = true
+	// Gin answers an unmatched trailing slash with a 301 and an HTML body before
+	// any handler runs, which would be the one response outside the envelope.
+	// Let it fall through to NoRoute so every response stays JSON.
+	router.RedirectTrailingSlash = false
 	router.Use(
 		middleware.RequestID(),
 		middleware.Recovery(logger),
