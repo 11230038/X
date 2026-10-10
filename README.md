@@ -1,13 +1,13 @@
 # X
 
-X 是一个前后端分离项目，当前包含一个 Go/Gin 后端服务和一个 Vue 3 前端基础应用。
+X 是一个前后端分离项目。当前阶段的开发只针对后端：`backend/` 是完整的 Go/Gin 服务，`frontend/` 只保留一个不含任何功能的 Vite 脚手架。
 
 ## 项目结构
 
 ```text
 X/
 ├── backend/       # Go + Gin HTTP 服务
-├── frontend/      # Vue 3 + Vite + TypeScript 前端
+├── frontend/      # Vue 3 + Vite 脚手架，当前不含功能代码
 ├── data/upload/   # 本地上传运行数据（由应用创建，Git 忽略）
 ├── Agent.md       # 项目开发约定
 └── .gitignore
@@ -169,53 +169,17 @@ PostgreSQL migration v5 新增 `library_files` 与 `llm_calls`。文件本体位
 
 ## 前端
 
-### 技术栈
-
-- Vue 3
-- Vite
-- TypeScript
-- vue-tsc
-- Vue Router
-- npm
-
-### 安装和启动
-
-在 `frontend/` 目录执行：
+`frontend/` 目前只是 Vite 官方脚手架：`src/App.vue` 渲染一个静态标题，没有路由、页面、API 调用或认证状态。此前实现的登录、注册、登录态校验等前端功能已全部移除，后端接口暂时没有前端消费方。
 
 ```bash
+cd frontend
 npm install
-npm run dev
-```
-
-默认访问 `http://localhost:5173`。
-
-其他命令：
-
-```bash
+npm run dev          # 默认 http://localhost:5173
 npm run type-check
 npm run build
-npm run preview
 ```
 
-### 环境变量
-
-| 文件 | 变量 | 说明 |
-| --- | --- | --- |
-| `frontend/.env.development` | `VITE_API_PROXY_TARGET` | dev server 代理 `/api` 的目标地址，缺失时 `npm run dev` 直接报错退出 |
-| `frontend/.env.development` | `VITE_API_BASE_URL` | 前端请求的 API 前缀，开发环境为 `/api/v1` |
-| `frontend/.env.production` | `VITE_API_BASE_URL` | 生产构建的 API 前缀，默认 `/api/v1`，由部署时的同源反向代理承接 |
-
-这两个文件只包含非秘密配置，需要提交。本地的 `frontend/.env.local` 已被 Git 忽略，可用于覆盖。开发环境通过 Vite 代理把 `/api` 转发到后端，浏览器始终同源，因此后端不需要开启 CORS。
-
-### 当前范围
-
-前端已接入 Vue Router，页面为 `/login`、`/register` 和 `/`（首页，需要登录），未匹配路径重定向到首页。启动时会先用本地 token 请求 `/api/v1/auth/me` 校验登录态，再渲染应用，因此刷新页面不会闪回登录页。
-
-[src/auth/client.ts](frontend/src/auth/client.ts) 是唯一 API 边界：统一 base URL、JSON 收发、解包后端 envelope 的 `data`、解析 `error.code` 并抛出 `ApiError`，组件不直接拼 URL。开发环境由 Vite 代理 `/api` 到后端，浏览器保持同源。
-
-登录 token 保存在 `localStorage`（键名 `auth_token`），任何同源脚本都能读取，因此存在 XSS 窃取登录态的取舍；替代方案 httpOnly Cookie 需要 CSRF 防护和服务端 Cookie 处理，本切片没有实现。登出只在本地丢弃 token，服务端没有吊销列表，该 token 在过期前仍然有效。受保护请求收到 401 时会清除 token 并回到登录页；登录、注册请求不带 token，它们的 401 只作为表单错误显示，不会触发跳转。
-
-暂未引入 Pinia、Axios（使用原生 `fetch`）、UI 组件库和前端测试运行器。首页只显示当前用户名与退出登录，本切片不含文件上传 UI。
+当前阶段只做后端改动，前端保持为空壳；后续阶段再按当时的后端契约重新实现。
 
 ## 开发约定
 
