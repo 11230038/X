@@ -42,7 +42,7 @@ go run ./cmd/migrate status
 go run ./cmd/migrate down
 ```
 
-仅开发环境需要两条测试用户时，可执行 `go run ./cmd/seed`。该命令幂等写入 `test_admin` 和 `test_user`，密码只以 bcrypt 哈希保存。
+仅开发环境需要测试数据时，可执行 `go run ./cmd/seed`。该命令幂等写入 `test_admin`、`test_user`，以及一套固定 ID 的完整会话数据（session、用户/助手消息、summary revision 1、completed turn、content/done events）；密码只以 bcrypt 哈希保存。
 
 监听地址由 `.env` 中的 `HTTP_ADDR` 决定。构建、测试和静态检查：
 
@@ -75,7 +75,9 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 
 未知路径返回统一格式的 404 JSON，不支持的方法返回 405。每个请求都会返回 `X-Request-ID`；服务端不会向客户端泄露 panic 详情、堆栈或内部错误。
 
-当前后端已接入 PostgreSQL 数据基础设施，并通过版本化 SQL 创建 `users` 表；GORM 映射位于 `internal/data/models`。现阶段没有用户业务 API、认证、CORS、限流、指标、Tracing、Swagger、消息队列或业务 service/repository 层，首个真实用例明确后再按垂直切片扩展。`users.password` 只允许保存密码哈希，GORM 模型不得直接作为 API 响应。
+当前后端已接入 PostgreSQL 数据基础设施。版本化 SQL 除 `users` 外，conversation migration v2 还创建 `turn_event_types`、`sessions`、`messages`、`summaries`、`turns`、`turn_events`，对应 GORM 映射位于 `internal/data/models`。`turn_event_types` 是 ID 1–15 的稳定整数查找表；summary 按 revision 保留历史，`summary_up_to_msg_id` 是由字符串 message ID 组成的 JSON 数组，不是外键；`turns.assistant_message_id` 是指向 `messages.message_id` 的字符串外键。删除 session 会级联删除其 messages、summaries、turns，删除 turn 会级联删除其 events。
+
+当前实现范围是 schema、持久化映射和开发 seed，conversation repository/API 仍属后续工作。现阶段也没有用户业务 API、认证、CORS、限流、指标、Tracing、Swagger、消息队列或业务 service/repository 层，首个真实用例明确后再按垂直切片扩展。`users.password` 只允许保存密码哈希，GORM 模型不得直接作为 API 响应。
 
 ## 前端
 
