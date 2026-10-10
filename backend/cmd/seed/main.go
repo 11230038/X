@@ -22,6 +22,11 @@ const (
 	seedAssistantMessageID = "seed_message_assistant"
 	seedSummaryID          = "seed_summary_revision_1"
 	seedTurnID             = "seed_turn_completed"
+	seedNotebookEntryID    = "seed_notebook_entry"
+	seedNotebookQuestionID = "seed_notebook_question"
+	seedNotebookCategoryID = "seed_notebook_category"
+	seedPendingQuestionID  = "seed_pending_question"
+	seedReviewRequestID    = "seed_review_request"
 )
 
 var seedUsers = []struct {
@@ -58,13 +63,17 @@ func main() {
 		if err := seedUserAccounts(tx); err != nil {
 			return err
 		}
-		return seedConversation(tx)
+		if err := seedConversation(tx); err != nil {
+			return err
+		}
+		return seedNotebookPractice(tx)
 	}); err != nil {
 		log.Fatal("seed development data")
 	}
 
 	fmt.Println("seeded users: test_admin, test_user")
 	fmt.Printf("seeded conversation: %s\n", seedSessionID)
+	fmt.Printf("seeded notebook entry: %s\n", seedNotebookEntryID)
 }
 
 func seedUserAccounts(tx *gorm.DB) error {
@@ -177,6 +186,126 @@ func seedConversation(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(record).Error; err != nil {
 			return fmt.Errorf("create seed conversation record: %w", err)
 		}
+	}
+	return nil
+}
+
+func seedNotebookPractice(tx *gorm.DB) error {
+	question := "PostgreSQL 中哪种约束用于保证列值唯一？"
+	questionType := "single_choice"
+	userAnswer := "UNIQUE"
+	correctAnswer := "UNIQUE"
+	difficulty := "easy"
+	quality := "verified"
+	assessmentType := "practice"
+	result := "correct"
+	source := "seed"
+	categoryName := "数据库基础"
+	pendingQuestion := "什么是数据库事务？"
+	isCorrect := true
+	resolved := true
+	bookmarked := false
+	isMistake := false
+	attemptCount := int32(1)
+	streak := int32(1)
+	reviewCount := int32(1)
+	lapses := int32(0)
+	caseValue := 2.5
+	rating := 5.0
+	now := time.Now().UTC()
+
+	entry := models.NotebookEntry{
+		NotebookEntriesID: seedNotebookEntryID,
+		QuestionID:        seedNotebookQuestionID,
+		Question:          question,
+		QuestionType:      questionType,
+		Difficulty:        &difficulty,
+		UserAnswer:        &userAnswer,
+		Options: datatypes.JSON(
+			`["PRIMARY KEY","UNIQUE","CHECK","DEFAULT"]`,
+		),
+		CorrectAnswer:  &correctAnswer,
+		Quality:        &quality,
+		AssessmentType: &assessmentType,
+		IsCorrect:      &isCorrect,
+		Result:         &result,
+		Resolved:       &resolved,
+		AttemptCount:   &attemptCount,
+		Bookmarked:     &bookmarked,
+		Source:         &source,
+		SessionID:      stringPointer(seedSessionID),
+		TurnID:         stringPointer(seedTurnID),
+	}
+	category := models.NotebookCategory{
+		NotebookCategoriesID: seedNotebookCategoryID,
+		Name:                 categoryName,
+	}
+	if err := ensureSeedRecord(tx, &entry, "notebook entry", "notebook_entries_id", seedNotebookEntryID); err != nil {
+		return err
+	}
+	if err := ensureSeedRecord(tx, &category, "notebook category", "notebook_categories_id", seedNotebookCategoryID); err != nil {
+		return err
+	}
+
+	records := []any{
+		&models.NotebookEntryCategory{
+			NotebookEntriesID:    seedNotebookEntryID,
+			NotebookCategoriesID: seedNotebookCategoryID,
+		},
+		&models.ReadingQuizPending{
+			QuestionID: seedPendingQuestionID,
+			Question:   pendingQuestion,
+		},
+		&models.PracticeReviewState{
+			NotebookEntriesID: seedNotebookEntryID,
+			FirstWrongTime:    &now,
+			DueTime:           &now,
+			LastReviewTime:    &now,
+			IsMistake:         &isMistake,
+			Case:              &caseValue,
+			Streak:            &streak,
+			ReviewCount:       &reviewCount,
+			Lapses:            &lapses,
+			Extra:             datatypes.JSON(`{"source":"seed"}`),
+		},
+		&models.PracticeReviewEvent{
+			RequestID:         seedReviewRequestID,
+			NotebookEntriesID: seedNotebookEntryID,
+			UserAnswer:        &userAnswer,
+			Rating:            &rating,
+			Outcome:           datatypes.JSON(`{"result":"correct"}`),
+			ReviewTime:        &now,
+		},
+	}
+	for _, record := range records {
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(record).Error; err != nil {
+			return fmt.Errorf("create seed notebook record: %w", err)
+		}
+	}
+	return nil
+}
+
+func ensureSeedRecord(
+	tx *gorm.DB,
+	record any,
+	label string,
+	primaryKey string,
+	primaryValue string,
+) error {
+	result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(record)
+	if result.Error != nil {
+		return fmt.Errorf("create seed %s: %w", label, result.Error)
+	}
+	if result.RowsAffected == 1 {
+		return nil
+	}
+
+	var count int64
+	if err := tx.Model(record).Where(primaryKey+" = ?", primaryValue).Count(&count).Error; err != nil {
+		return fmt.Errorf("verify seed %s: %w", label, err)
+	}
+	if count != 1 {
+		return fmt.Errorf("seed %s conflicts with an existing unique value", label)
 	}
 	return nil
 }
