@@ -27,6 +27,9 @@ var requiredKeys = []string{
 	"UPLOAD_ROOT",
 	"UPLOAD_MAX_FILE_BYTES",
 	"UPLOAD_MAX_REQUEST_BYTES",
+	"AUTH_JWT_SECRET",
+	"AUTH_JWT_ISSUER",
+	"AUTH_TOKEN_TTL",
 	"DB_HOST",
 	"DB_PORT",
 	"DB_NAME",
@@ -49,7 +52,15 @@ type Config struct {
 	ShutdownTimeout time.Duration
 	HTTPTimeouts    HTTPTimeoutConfig
 	Upload          UploadConfig
+	Auth            AuthConfig
 	Database        DatabaseConfig
+}
+
+// AuthConfig contains access-token signing settings.
+type AuthConfig struct {
+	Secret string
+	Issuer string
+	TTL    time.Duration
 }
 
 // HTTPTimeoutConfig contains network deadlines for the HTTP server.
@@ -106,6 +117,10 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	authConfig, err := loadAuthConfig(values)
+	if err != nil {
+		return Config{}, err
+	}
 	database, err := loadDatabaseConfig(values)
 	if err != nil {
 		return Config{}, err
@@ -117,6 +132,7 @@ func Load(path string) (Config, error) {
 		ShutdownTimeout: shutdownTimeout,
 		HTTPTimeouts:    httpTimeouts,
 		Upload:          upload,
+		Auth:            authConfig,
 		Database:        database,
 	}
 	if err := cfg.Validate(); err != nil {
@@ -140,6 +156,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.Upload.Validate(); err != nil {
+		return err
+	}
+	if err := c.Auth.Validate(); err != nil {
 		return err
 	}
 	return c.Database.Validate()
@@ -173,6 +192,24 @@ func (c UploadConfig) Validate() error {
 	}
 	if c.MaxRequestBytes < multipartHeadroomBytes || c.MaxFileBytes > c.MaxRequestBytes-multipartHeadroomBytes {
 		return fmt.Errorf("UPLOAD_MAX_REQUEST_BYTES must exceed UPLOAD_MAX_FILE_BYTES by at least %d bytes", multipartHeadroomBytes)
+	}
+	return nil
+}
+
+// Validate checks the access-token configuration. The secret is only checked for
+// presence here; its minimum strength is enforced when the signer is built, so
+// the requirement lives in one place. Failures never echo the secret value.
+func (c AuthConfig) Validate() error {
+	for key, value := range map[string]string{
+		"AUTH_JWT_SECRET": c.Secret,
+		"AUTH_JWT_ISSUER": c.Issuer,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("%s must not be empty", key)
+		}
+	}
+	if c.TTL <= 0 {
+		return fmt.Errorf("AUTH_TOKEN_TTL must be a positive duration")
 	}
 	return nil
 }
@@ -265,6 +302,19 @@ func loadUploadConfig(path string, values map[string]string) (UploadConfig, erro
 		return UploadConfig{}, err
 	}
 	return UploadConfig{Root: root, MaxFileBytes: maxFile, MaxRequestBytes: maxRequest}, nil
+}
+
+func loadAuthConfig(values map[string]string) (AuthConfig, error) {
+	ttl, err := parsePositiveDuration(values, "AUTH_TOKEN_TTL")
+	if err != nil {
+		return AuthConfig{}, err
+	}
+	// The secret is used verbatim: trimming it would silently change the key.
+	return AuthConfig{
+		Secret: values["AUTH_JWT_SECRET"],
+		Issuer: strings.TrimSpace(values["AUTH_JWT_ISSUER"]),
+		TTL:    ttl,
+	}, nil
 }
 
 func loadDatabaseConfig(values map[string]string) (DatabaseConfig, error) {

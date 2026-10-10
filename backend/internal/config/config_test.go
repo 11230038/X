@@ -8,7 +8,12 @@ import (
 	"time"
 )
 
-const testPassword = "unit-test-password"
+const (
+	testPassword    = "unit-test-password"
+	testJWTSecret   = "unit-test-jwt-secret-with-enough-bytes"
+	testJWTIssuer   = "x-backend-test"
+	testTokenTTLKey = "AUTH_TOKEN_TTL"
+)
 
 func TestLoadReadsCompleteDotenv(t *testing.T) {
 	path := writeDotenv(t, validValues())
@@ -45,6 +50,61 @@ func TestLoadReadsCompleteDotenv(t *testing.T) {
 	}
 	if cfg.Database.MaxOpenConns != 10 || cfg.Database.MaxIdleConns != 5 {
 		t.Errorf("connection pool = %d/%d", cfg.Database.MaxOpenConns, cfg.Database.MaxIdleConns)
+	}
+	if cfg.Auth.Secret != testJWTSecret || cfg.Auth.Issuer != testJWTIssuer {
+		t.Errorf("auth configuration was not loaded")
+	}
+	if cfg.Auth.TTL != 24*time.Hour {
+		t.Errorf("Auth.TTL = %s, want 24h", cfg.Auth.TTL)
+	}
+}
+
+func TestLoadRejectsIncompleteAuthConfiguration(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		key    string
+		remove bool
+	}{
+		{name: "missing secret", key: "AUTH_JWT_SECRET", remove: true},
+		{name: "empty issuer", key: "AUTH_JWT_ISSUER"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			values := validValues()
+			if tt.remove {
+				delete(values, tt.key)
+			} else {
+				values[tt.key] = " "
+			}
+
+			_, err := Load(writeDotenv(t, values))
+			if err == nil || !strings.Contains(err.Error(), tt.key) {
+				t.Fatalf("Load() error = %v, want error naming %s", err, tt.key)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsInvalidTokenTTL(t *testing.T) {
+	for _, value := range []string{"0s", "-1h", "soon"} {
+		values := validValues()
+		values[testTokenTTLKey] = value
+
+		if _, err := Load(writeDotenv(t, values)); err == nil {
+			t.Fatalf("Load() error = nil for %s=%s", testTokenTTLKey, value)
+		}
+	}
+}
+
+func TestLoadNeverEchoesTheJWTSecret(t *testing.T) {
+	values := validValues()
+	values[testTokenTTLKey] = "not-a-duration"
+
+	_, err := Load(writeDotenv(t, values))
+	if err == nil {
+		t.Fatal("Load() error = nil, want token TTL error")
+	}
+	if strings.Contains(err.Error(), testJWTSecret) {
+		t.Fatal("configuration error exposed the JWT secret")
 	}
 }
 
@@ -210,6 +270,9 @@ func validValues() map[string]string {
 		"UPLOAD_ROOT":              "data/upload",
 		"UPLOAD_MAX_FILE_BYTES":    "20971520",
 		"UPLOAD_MAX_REQUEST_BYTES": "22020096",
+		"AUTH_JWT_SECRET":          testJWTSecret,
+		"AUTH_JWT_ISSUER":          testJWTIssuer,
+		testTokenTTLKey:            "24h",
 		"DB_HOST":                  "localhost",
 		"DB_PORT":                  "5432",
 		"DB_NAME":                  "x_test",
