@@ -25,25 +25,33 @@ func main() {
 	if err != nil {
 		log.Fatal("load configuration")
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+
+	// The connection that runs migrations cannot create the database it points
+	// at, so create it first over a connection that selects no database.
+	if err := data.EnsureDatabase(ctx, cfg.Database); err != nil {
+		log.Fatal("ensure database exists")
+	}
+
 	resource, err := data.Open(cfg.Database)
 	if err != nil {
 		log.Fatal("open database")
 	}
 	defer resource.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
-	defer cancel()
 	if err := resource.Ping(ctx); err != nil {
 		log.Fatal("database is unavailable")
 	}
 
 	switch os.Args[1] {
 	case "up":
-		err = migration.Up(ctx, resource.SQLDB(), cfg.Database.Schema)
+		err = migration.Up(ctx, resource.SQLDB())
 	case "down":
-		err = migration.Down(ctx, resource.SQLDB(), cfg.Database.Schema)
+		err = migration.Down(ctx, resource.SQLDB())
 	case "status":
-		err = printStatus(ctx, resource.SQLDB(), cfg.Database.Schema)
+		err = printStatus(ctx, resource.SQLDB())
 	default:
 		log.Fatalf("unknown migration command %q", os.Args[1])
 	}
@@ -52,8 +60,8 @@ func main() {
 	}
 }
 
-func printStatus(ctx context.Context, db *sql.DB, schema string) error {
-	statuses, err := migration.Status(ctx, db, schema)
+func printStatus(ctx context.Context, db *sql.DB) error {
+	statuses, err := migration.Status(ctx, db)
 	if err != nil {
 		return err
 	}

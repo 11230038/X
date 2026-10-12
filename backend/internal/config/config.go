@@ -14,7 +14,16 @@ import (
 
 const multipartHeadroomBytes int64 = 64 * 1024
 
-var postgresIdentifier = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+// databaseIdentifier matches the database names this service will accept. seekdb
+// runs with lower_case_table_names=1, so a mixed-case name would be folded anyway.
+var databaseIdentifier = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+
+// charsetIdentifier matches the character-set and collation names accepted in the
+// connection string, keeping arbitrary text out of the DSN.
+var charsetIdentifier = regexp.MustCompile(`^[a-z0-9_]+$`)
+
+// utcZone is the only session time zone this service accepts.
+const utcZone = "UTC"
 
 var requiredKeys = []string{
 	"HTTP_ADDR",
@@ -35,8 +44,9 @@ var requiredKeys = []string{
 	"DB_NAME",
 	"DB_USER",
 	"DB_PASSWORD",
-	"DB_SCHEMA",
-	"DB_SSLMODE",
+	"DB_CHARSET",
+	"DB_COLLATION",
+	"DB_TLS",
 	"DB_TIMEZONE",
 	"DB_PING_TIMEOUT",
 	"DB_MAX_OPEN_CONNS",
@@ -78,15 +88,19 @@ type UploadConfig struct {
 	MaxRequestBytes int64
 }
 
-// DatabaseConfig contains PostgreSQL connection and pool settings.
+// DatabaseConfig contains seekdb connection and pool settings. seekdb speaks the
+// MySQL protocol, so the field set follows MySQL rather than PostgreSQL: there is
+// no separate schema namespace (the database is the schema) and TLS is either on
+// or off rather than a libpq sslmode ladder.
 type DatabaseConfig struct {
 	Host            string
 	Port            uint16
 	Name            string
 	User            string
 	Password        string
-	Schema          string
-	SSLMode         string
+	Charset         string
+	Collation       string
+	TLS             bool
 	TimeZone        string
 	PingTimeout     time.Duration
 	MaxOpenConns    int
@@ -214,7 +228,7 @@ func (c AuthConfig) Validate() error {
 	return nil
 }
 
-// Validate checks PostgreSQL connection and pool settings.
+// Validate checks seekdb connection and pool settings.
 func (c DatabaseConfig) Validate() error {
 	if strings.TrimSpace(c.Host) == "" {
 		return fmt.Errorf("DB_HOST must not be empty")
@@ -223,21 +237,27 @@ func (c DatabaseConfig) Validate() error {
 		return fmt.Errorf("DB_PORT must be between 1 and 65535")
 	}
 	for key, value := range map[string]string{
-		"DB_NAME":     c.Name,
-		"DB_USER":     c.User,
-		"DB_PASSWORD": c.Password,
-		"DB_SCHEMA":   c.Schema,
-		"DB_TIMEZONE": c.TimeZone,
+		"DB_NAME":      c.Name,
+		"DB_USER":      c.User,
+		"DB_CHARSET":   c.Charset,
+		"DB_COLLATION": c.Collation,
+		"DB_TIMEZONE":  c.TimeZone,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("%s must not be empty", key)
 		}
 	}
-	if !postgresIdentifier.MatchString(c.Schema) {
-		return fmt.Errorf("DB_SCHEMA must be a lowercase PostgreSQL identifier")
+	if !databaseIdentifier.MatchString(c.Name) {
+		return fmt.Errorf("DB_NAME must be a lowercase identifier")
 	}
-	if !validSSLMode(c.SSLMode) {
-		return fmt.Errorf("DB_SSLMODE must be one of disable, allow, prefer, require, verify-ca, verify-full")
+	if !charsetIdentifier.MatchString(c.Charset) {
+		return fmt.Errorf("DB_CHARSET must be a character-set name")
+	}
+	if !charsetIdentifier.MatchString(c.Collation) {
+		return fmt.Errorf("DB_COLLATION must be a collation name")
+	}
+	if c.TimeZone != utcZone {
+		return fmt.Errorf("DB_TIMEZONE must be %s", utcZone)
 	}
 	if c.PingTimeout <= 0 {
 		return fmt.Errorf("DB_PING_TIMEOUT must be a positive duration")
@@ -342,14 +362,27 @@ func loadDatabaseConfig(values map[string]string) (DatabaseConfig, error) {
 	if err != nil {
 		return DatabaseConfig{}, err
 	}
+	tls, err := parseBool(values, "DB_TLS")
+	if err != nil {
+		return DatabaseConfig{}, err
+	}
 	return DatabaseConfig{
 		Host: strings.TrimSpace(values["DB_HOST"]), Port: port,
 		Name: strings.TrimSpace(values["DB_NAME"]), User: strings.TrimSpace(values["DB_USER"]),
-		Password: values["DB_PASSWORD"], Schema: strings.TrimSpace(values["DB_SCHEMA"]),
-		SSLMode: strings.TrimSpace(values["DB_SSLMODE"]), TimeZone: strings.TrimSpace(values["DB_TIMEZONE"]),
+		Password: values["DB_PASSWORD"], Charset: strings.TrimSpace(values["DB_CHARSET"]),
+		Collation: strings.TrimSpace(values["DB_COLLATION"]), TLS: tls,
+		TimeZone:    strings.TrimSpace(values["DB_TIMEZONE"]),
 		PingTimeout: pingTimeout, MaxOpenConns: maxOpen, MaxIdleConns: maxIdle,
 		ConnMaxLifetime: maxLifetime, ConnMaxIdleTime: maxIdleTime,
 	}, nil
+}
+
+func parseBool(values map[string]string, key string) (bool, error) {
+	value := strings.TrimSpace(values[key])
+	if value != "true" && value != "false" {
+		return false, fmt.Errorf("%s must be true or false", key)
+	}
+	return value == "true", nil
 }
 
 func requireValues(values map[string]string) error {
@@ -400,15 +433,6 @@ func parseNonNegativeDuration(values map[string]string, key string) (time.Durati
 		return 0, fmt.Errorf("%s must be a non-negative duration", key)
 	}
 	return value, nil
-}
-
-func validSSLMode(value string) bool {
-	switch strings.TrimSpace(value) {
-	case "disable", "allow", "prefer", "require", "verify-ca", "verify-full":
-		return true
-	default:
-		return false
-	}
 }
 
 func validateHTTPAddr(addr string) error {

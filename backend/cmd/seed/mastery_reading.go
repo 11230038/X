@@ -32,7 +32,7 @@ func seedMastery(tx *gorm.DB) error {
 	assessmentType := "practice"
 	userAnswer := "UNIQUE"
 	eventType := "assessment.recorded"
-	goal := "掌握 PostgreSQL 基础约束"
+	goal := "掌握数据库基础约束"
 	description := "用于验证 Mastery Path 持久化结构。"
 	emoji := "🧭"
 	status := "active"
@@ -48,7 +48,7 @@ func seedMastery(tx *gorm.DB) error {
 		{&models.MasteryPath{
 			MasteryPathID:  seedMasteryPathID,
 			OwnerSessionID: seedSessionID,
-			State:          datatypes.JSON(`{"topic":"postgresql constraints","progress":1}`),
+			State:          datatypes.JSON(`{"topic":"database constraints","progress":1}`),
 			Version:        &version,
 			UpdatedAt:      &now,
 		}, "mastery path", "mastery_path_id", seedMasteryPathID},

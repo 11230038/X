@@ -46,7 +46,7 @@ func (h *SystemHandler) Liveness(c *gin.Context) {
 	httpx.WriteSuccess(c, http.StatusOK, gin.H{"status": "ok"})
 }
 
-// Readiness reports whether PostgreSQL can accept work.
+// Readiness reports whether seekdb can accept work.
 func (h *SystemHandler) Readiness(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), h.readinessTimeout)
 	defer cancel()

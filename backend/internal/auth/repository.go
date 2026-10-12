@@ -13,18 +13,18 @@ import (
 // accountColumns lists the only columns this adapter reads.
 var accountColumns = []string{"user_id", "username", "role", "password", "disable"}
 
-// PostgresRepository persists accounts through GORM.
-type PostgresRepository struct {
+// GORMRepository persists accounts through GORM (seekdb via the MySQL protocol).
+type GORMRepository struct {
 	db *gorm.DB
 }
 
-// NewPostgresRepository creates an account adapter over an existing GORM handle.
-func NewPostgresRepository(db *gorm.DB) *PostgresRepository {
-	return &PostgresRepository{db: db}
+// NewGORMRepository creates an account adapter over an existing GORM handle.
+func NewGORMRepository(db *gorm.DB) *GORMRepository {
+	return &GORMRepository{db: db}
 }
 
 // Create inserts one account without modifying the schema.
-func (r *PostgresRepository) Create(ctx context.Context, params CreateParams) (Record, error) {
+func (r *GORMRepository) Create(ctx context.Context, params CreateParams) (Record, error) {
 	if r == nil || r.db == nil {
 		return Record{}, fmt.Errorf("auth repository is not initialized")
 	}
@@ -48,16 +48,16 @@ func (r *PostgresRepository) Create(ctx context.Context, params CreateParams) (R
 }
 
 // FindByUsername loads one account by its exact username.
-func (r *PostgresRepository) FindByUsername(ctx context.Context, username string) (Record, error) {
+func (r *GORMRepository) FindByUsername(ctx context.Context, username string) (Record, error) {
 	return r.find(ctx, "username = ?", username)
 }
 
 // FindByID loads one account by primary key.
-func (r *PostgresRepository) FindByID(ctx context.Context, userID int64) (Record, error) {
+func (r *GORMRepository) FindByID(ctx context.Context, userID int64) (Record, error) {
 	return r.find(ctx, "user_id = ?", userID)
 }
 
-func (r *PostgresRepository) find(ctx context.Context, query string, value any) (Record, error) {
+func (r *GORMRepository) find(ctx context.Context, query string, value any) (Record, error) {
 	if r == nil || r.db == nil {
 		return Record{}, fmt.Errorf("auth repository is not initialized")
 	}
@@ -97,4 +97,4 @@ func mapRepositoryError(err error) error {
 	}
 }
 
-var _ Repository = (*PostgresRepository)(nil)
+var _ Repository = (*GORMRepository)(nil)

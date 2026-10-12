@@ -45,8 +45,17 @@ func TestLoadReadsCompleteDotenv(t *testing.T) {
 	if cfg.Upload.Root != wantRoot {
 		t.Errorf("Upload.Root = %q, want %q", cfg.Upload.Root, wantRoot)
 	}
-	if cfg.Database.Port != 5432 || cfg.Database.Password != testPassword {
+	if cfg.Database.Port != 2881 || cfg.Database.Password != testPassword {
 		t.Errorf("Database configuration was not loaded")
+	}
+	if cfg.Database.Charset != "utf8mb4" || cfg.Database.Collation != "utf8mb4_bin" {
+		t.Errorf("Database character set was not loaded: %+v", cfg.Database)
+	}
+	if cfg.Database.TLS {
+		t.Error("Database.TLS = true, want false")
+	}
+	if cfg.Database.TimeZone != "UTC" {
+		t.Errorf("Database.TimeZone = %q, want UTC", cfg.Database.TimeZone)
 	}
 	if cfg.Database.MaxOpenConns != 10 || cfg.Database.MaxIdleConns != 5 {
 		t.Errorf("connection pool = %d/%d", cfg.Database.MaxOpenConns, cfg.Database.MaxIdleConns)
@@ -154,9 +163,11 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{name: "upload file limit", key: "UPLOAD_MAX_FILE_BYTES", value: "0"},
 		{name: "upload request limit", key: "UPLOAD_MAX_REQUEST_BYTES", value: "-1"},
 		{name: "database port", key: "DB_PORT", value: "70000"},
-		{name: "SSL mode", key: "DB_SSLMODE", value: "unsafe"},
-		{name: "schema identifier", key: "DB_SCHEMA", value: "public.schema"},
-		{name: "uppercase schema identifier", key: "DB_SCHEMA", value: "AppData"},
+		{name: "uppercase database name", key: "DB_NAME", value: "AppData"},
+		{name: "charset with a space", key: "DB_CHARSET", value: "utf8 mb4"},
+		{name: "collation with a dash", key: "DB_COLLATION", value: "utf8mb4-bin"},
+		{name: "TLS flag", key: "DB_TLS", value: "yes"},
+		{name: "non-UTC time zone", key: "DB_TIMEZONE", value: "Asia/Shanghai"},
 		{name: "ping timeout", key: "DB_PING_TIMEOUT", value: "soon"},
 		{name: "max open", key: "DB_MAX_OPEN_CONNS", value: "0"},
 		{name: "max idle", key: "DB_MAX_IDLE_CONNS", value: "-1"},
@@ -274,12 +285,13 @@ func validValues() map[string]string {
 		"AUTH_JWT_ISSUER":          testJWTIssuer,
 		testTokenTTLKey:            "24h",
 		"DB_HOST":                  "localhost",
-		"DB_PORT":                  "5432",
+		"DB_PORT":                  "2881",
 		"DB_NAME":                  "x_test",
 		"DB_USER":                  "x_test_user",
 		"DB_PASSWORD":              testPassword,
-		"DB_SCHEMA":                "public",
-		"DB_SSLMODE":               "disable",
+		"DB_CHARSET":               "utf8mb4",
+		"DB_COLLATION":             "utf8mb4_bin",
+		"DB_TLS":                   "false",
 		"DB_TIMEZONE":              "UTC",
 		"DB_PING_TIMEOUT":          "1s",
 		"DB_MAX_OPEN_CONNS":        "10",

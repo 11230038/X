@@ -4,9 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
-	"regexp"
 
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/database"
@@ -20,21 +20,16 @@ const (
 	versionTableName       = "goose_db_version"
 )
 
-var postgresIdentifier = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
-
-// Provider creates a migration provider over the embedded SQL files.
-func Provider(db *sql.DB, schema string) (*goose.Provider, error) {
+// Provider creates a migration provider over the embedded SQL files. seekdb
+// speaks the MySQL protocol and has no schema namespace separate from the
+// database, so the version table is unqualified and the connection's database
+// is the one that gets migrated.
+func Provider(db *sql.DB) (*goose.Provider, error) {
 	files, err := fs.Sub(migrationFiles, "sql")
 	if err != nil {
 		return nil, fmt.Errorf("load embedded migrations")
 	}
-	if !postgresIdentifier.MatchString(schema) {
-		return nil, fmt.Errorf("invalid migration schema")
-	}
-	store, err := database.NewStore(
-		database.DialectPostgres,
-		schema+"."+versionTableName,
-	)
+	store, err := database.NewStore(database.DialectMySQL, versionTableName)
 	if err != nil {
 		return nil, fmt.Errorf("create migration store")
 	}
@@ -52,24 +47,20 @@ func Provider(db *sql.DB, schema string) (*goose.Provider, error) {
 }
 
 // Up applies all pending migrations.
-func Up(ctx context.Context, db *sql.DB, schema string) error {
-	if err := ensureSchema(ctx, db, schema); err != nil {
-		return err
-	}
-	provider, err := Provider(db, schema)
+func Up(ctx context.Context, db *sql.DB) error {
+	provider, err := Provider(db)
 	if err != nil {
 		return err
 	}
-	_, err = provider.Up(ctx)
-	if err != nil {
+	if _, err := provider.Up(ctx); err != nil {
 		return fmt.Errorf("apply migrations: %w", err)
 	}
 	return nil
 }
 
 // Down rolls back one migration.
-func Down(ctx context.Context, db *sql.DB, schema string) error {
-	provider, err := Provider(db, schema)
+func Down(ctx context.Context, db *sql.DB) error {
+	provider, err := Provider(db)
 	if err != nil {
 		return err
 	}
@@ -80,8 +71,8 @@ func Down(ctx context.Context, db *sql.DB, schema string) error {
 }
 
 // Status returns the current migration status.
-func Status(ctx context.Context, db *sql.DB, schema string) ([]*goose.MigrationStatus, error) {
-	provider, err := Provider(db, schema)
+func Status(ctx context.Context, db *sql.DB) ([]*goose.MigrationStatus, error) {
+	provider, err := Provider(db)
 	if err != nil {
 		return nil, err
 	}
@@ -93,27 +84,25 @@ func Status(ctx context.Context, db *sql.DB, schema string) ([]*goose.MigrationS
 }
 
 // CheckLatest performs a read-only check of the migration version table.
-func CheckLatest(ctx context.Context, db *sql.DB, schema string) error {
-	if !postgresIdentifier.MatchString(schema) {
-		return fmt.Errorf("invalid migration schema")
-	}
-
-	var tableExists bool
+func CheckLatest(ctx context.Context, db *sql.DB) error {
+	var found string
+	// seekdb has no to_regclass equivalent; ask information_schema for the table
+	// in whichever database the connection is using.
 	err := db.QueryRowContext(
 		ctx,
-		`SELECT to_regclass($1) IS NOT NULL`,
-		schema+"."+versionTableName,
-	).Scan(&tableExists)
+		`SELECT table_name FROM information_schema.tables
+		 WHERE table_schema = DATABASE() AND table_name = ?`,
+		versionTableName,
+	).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("migration version table does not exist")
+	}
 	if err != nil {
 		return fmt.Errorf("check migration version table")
 	}
-	if !tableExists {
-		return fmt.Errorf("migration version table does not exist")
-	}
 
 	query := fmt.Sprintf(
-		`SELECT COALESCE(MAX(version_id), 0) FROM %s.%s WHERE is_applied = TRUE`,
-		quoteIdentifier(schema),
+		`SELECT COALESCE(MAX(version_id), 0) FROM %s WHERE is_applied = TRUE`,
 		quoteIdentifier(versionTableName),
 	)
 	var current int64
@@ -126,19 +115,8 @@ func CheckLatest(ctx context.Context, db *sql.DB, schema string) error {
 	return nil
 }
 
-func ensureSchema(ctx context.Context, db *sql.DB, schema string) error {
-	if !postgresIdentifier.MatchString(schema) {
-		return fmt.Errorf("invalid migration schema")
-	}
-	query := fmt.Sprintf(`CREATE SCHEMA IF NOT EXISTS %s`, quoteIdentifier(schema))
-	if _, err := db.ExecContext(ctx, query); err != nil {
-		return fmt.Errorf("ensure migration schema: %w", err)
-	}
-	return nil
-}
-
 func quoteIdentifier(value string) string {
-	return `"` + value + `"`
+	return "`" + value + "`"
 }
 
 // LatestVersion returns the schema version embedded in this binary.

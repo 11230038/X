@@ -55,7 +55,7 @@ func main() {
 	if err := resource.Ping(ctx); err != nil {
 		log.Fatal("database is unavailable")
 	}
-	if err := migration.CheckLatest(ctx, resource.SQLDB(), cfg.Database.Schema); err != nil {
+	if err := migration.CheckLatest(ctx, resource.SQLDB()); err != nil {
 		log.Fatal("database schema is not current")
 	}
 
@@ -196,7 +196,7 @@ func seedConversation(tx *gorm.DB) error {
 }
 
 func seedNotebookPractice(tx *gorm.DB) error {
-	question := "PostgreSQL 中哪种约束用于保证列值唯一？"
+	question := "关系型数据库中哪种约束用于保证列值唯一？"
 	questionType := "single_choice"
 	userAnswer := "UNIQUE"
 	correctAnswer := "UNIQUE"

@@ -6,7 +6,7 @@ import (
 	"gorm.io/datatypes"
 )
 
-// User is the PostgreSQL persistence mapping for the users table.
+// User is the seekdb persistence mapping for the users table.
 type User struct {
 	UserID         int64          `gorm:"column:user_id;primaryKey;autoIncrement"`
 	Username       string         `gorm:"column:username;not null"`

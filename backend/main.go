@@ -60,15 +60,15 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 	pingCtx, cancelPing := context.WithTimeout(ctx, cfg.Database.PingTimeout)
 	if err := database.Ping(pingCtx); err != nil {
 		cancelPing()
-		return fmt.Errorf("connect to PostgreSQL")
+		return fmt.Errorf("connect to seekdb")
 	}
 	cancelPing()
-	if err := migration.CheckLatest(ctx, database.SQLDB(), cfg.Database.Schema); err != nil {
+	if err := migration.CheckLatest(ctx, database.SQLDB()); err != nil {
 		return fmt.Errorf("database schema is not current; run migration command")
 	}
 
 	system := handler.NewSystemHandler(database, cfg.Database.PingTimeout, logger)
-	libraryRepository := library.NewPostgresRepository(database.GORM())
+	libraryRepository := library.NewGORMRepository(database.GORM())
 	libraryService, err := library.NewService(library.Options{
 		Root:         cfg.Upload.Root,
 		MaxFileBytes: cfg.Upload.MaxFileBytes,
@@ -81,7 +81,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		cfg.Upload.MaxRequestBytes,
 		logger,
 	)
-	authRepository := auth.NewPostgresRepository(database.GORM())
+	authRepository := auth.NewGORMRepository(database.GORM())
 	authService, err := auth.NewService(auth.Options{
 		Secret: cfg.Auth.Secret,
 		Issuer: cfg.Auth.Issuer,

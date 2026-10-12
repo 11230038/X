@@ -8,18 +8,18 @@ import (
 	"gorm.io/gorm"
 )
 
-// PostgresRepository persists file metadata through GORM.
-type PostgresRepository struct {
+// GORMRepository persists file metadata through GORM (seekdb via the MySQL protocol).
+type GORMRepository struct {
 	db *gorm.DB
 }
 
-// NewPostgresRepository creates a metadata adapter over an existing GORM handle.
-func NewPostgresRepository(db *gorm.DB) *PostgresRepository {
-	return &PostgresRepository{db: db}
+// NewGORMRepository creates a metadata adapter over an existing GORM handle.
+func NewGORMRepository(db *gorm.DB) *GORMRepository {
+	return &GORMRepository{db: db}
 }
 
 // Create inserts one library file record without modifying the schema.
-func (r *PostgresRepository) Create(ctx context.Context, record FileRecord) error {
+func (r *GORMRepository) Create(ctx context.Context, record FileRecord) error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("library repository is not initialized")
 	}
@@ -34,4 +34,4 @@ func (r *PostgresRepository) Create(ctx context.Context, record FileRecord) erro
 	return nil
 }
 
-var _ MetadataRepository = (*PostgresRepository)(nil)
+var _ MetadataRepository = (*GORMRepository)(nil)
