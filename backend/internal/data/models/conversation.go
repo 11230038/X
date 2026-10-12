@@ -64,6 +64,8 @@ type Session struct {
 	UpdatedAt     time.Time      `gorm:"column:update_time;autoCreateTime;autoUpdateTime"`
 	Preferences   datatypes.JSON `gorm:"column:preferences_json;type:json"`
 	WorkspaceMode *string        `gorm:"column:workspace_mode"`
+	IsDeleted     bool           `gorm:"column:is_deleted;not null;default:false"`
+	DeletedAt     *time.Time     `gorm:"column:deleted_at"`
 }
 
 // TableName fixes the sessions table name.

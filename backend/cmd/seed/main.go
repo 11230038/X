@@ -170,7 +170,7 @@ func seedConversation(tx *gorm.DB) error {
 		&models.TurnEvent{
 			TurnEventID: "seed_turn_event_content",
 			TurnID:      seedTurnID,
-			Sequence:    0,
+			Sequence:    1,
 			Timestamp:   now,
 			TypeID:      models.TurnEventTypeContent,
 			Content:     &assistantContent,
@@ -180,7 +180,7 @@ func seedConversation(tx *gorm.DB) error {
 		&models.TurnEvent{
 			TurnEventID: "seed_turn_event_done",
 			TurnID:      seedTurnID,
-			Sequence:    1,
+			Sequence:    2,
 			Timestamp:   now,
 			TypeID:      models.TurnEventTypeDone,
 			Source:      &source,
