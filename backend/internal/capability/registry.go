@@ -8,42 +8,60 @@ import (
 
 // Registry holds the capabilities a process offers.
 //
+// It holds the implementations rather than their manifests, because offering a
+// capability means being able to run it: a manifest alone would let a process
+// advertise a name nothing behind it could answer, and the declaration it does
+// keep is the one the implementation reports about itself.
+//
 // Registration happens at startup and lookups happen per turn, so the map is
 // read concurrently only after registration is finished; Register must not be
 // called once turns are being served.
 type Registry struct {
-	manifests map[string]Manifest
+	capabilities map[string]Capability
 }
 
 // NewRegistry returns an empty registry.
 func NewRegistry() *Registry {
-	return &Registry{manifests: make(map[string]Manifest)}
+	return &Registry{capabilities: make(map[string]Capability)}
 }
 
-// Register adds a manifest, rejecting an invalid one and a name already taken.
-// Registering a capability is the only way it becomes reachable, so a request
-// for a name that is not here cannot select behaviour nobody declared.
-func (r *Registry) Register(manifest Manifest) error {
+// Register adds a capability, rejecting an invalid manifest and a name already
+// taken. Registering is the only way a capability becomes reachable, so a
+// request for a name that is not here cannot select behaviour nobody declared.
+func (r *Registry) Register(c Capability) error {
+	if c == nil {
+		return fmt.Errorf("%w: a capability is required", ErrInvalidManifest)
+	}
+	manifest := c.Manifest()
 	if err := manifest.Validate(); err != nil {
 		return err
 	}
-	if _, exists := r.manifests[manifest.Name]; exists {
+	if _, exists := r.capabilities[manifest.Name]; exists {
 		return fmt.Errorf("%w: %s", ErrDuplicateCapability, manifest.Name)
 	}
-	r.manifests[manifest.Name] = manifest
+	r.capabilities[manifest.Name] = c
 	return nil
 }
 
 // Lookup returns the named manifest.
 func (r *Registry) Lookup(name string) (Manifest, bool) {
-	manifest, ok := r.manifests[name]
-	return manifest, ok
+	c, ok := r.capabilities[name]
+	if !ok {
+		return Manifest{}, false
+	}
+	return c.Manifest(), true
+}
+
+// Resolve returns the named capability, which is what a turn runs.
+func (r *Registry) Resolve(name string) (Capability, bool) {
+	c, ok := r.capabilities[name]
+	return c, ok
 }
 
 // Names returns every registered name, sorted.
 func (r *Registry) Names() []string {
-	names := make([]string, 0, len(r.manifests))
-	for name := range r.manifests {
+	names := make([]string, 0, len(r.capabilities))
+	for name := range r.capabilities {
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -53,9 +71,9 @@ func (r *Registry) Names() []string {
 // Manifests returns every registered manifest, sorted by name so that a check
 // over all of them reports its findings in the same order on every run.
 func (r *Registry) Manifests() []Manifest {
-	manifests := make([]Manifest, 0, len(r.manifests))
+	manifests := make([]Manifest, 0, len(r.capabilities))
 	for _, name := range r.Names() {
-		manifests = append(manifests, r.manifests[name])
+		manifests = append(manifests, r.capabilities[name].Manifest())
 	}
 	return manifests
 }
@@ -101,7 +119,7 @@ func (r *Registry) CheckToolDrift(registered []string) error {
 func (r *Registry) CheckConfigDrift(config Config) error {
 	var problems []string
 	for _, name := range sortedKeys(config) {
-		manifest, ok := r.manifests[name]
+		manifest, ok := r.Lookup(name)
 		if !ok {
 			problems = append(problems, fmt.Sprintf("%s is not a registered capability", name))
 			continue

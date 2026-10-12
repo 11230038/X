@@ -1,17 +1,26 @@
 package capability
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
 )
 
+// declared is a capability that only declares a manifest. The checks in this
+// file are about declarations, so a capability that runs is beside the point.
+type declared struct{ manifest Manifest }
+
+func (d declared) Manifest() Manifest { return d.manifest }
+
+func (d declared) Run(context.Context, RunContext) error { return nil }
+
 func registryWith(t *testing.T, manifests ...Manifest) *Registry {
 	t.Helper()
 	registry := NewRegistry()
 	for _, manifest := range manifests {
-		if err := registry.Register(manifest); err != nil {
+		if err := registry.Register(declared{manifest: manifest}); err != nil {
 			t.Fatalf("Register(%s) error = %v", manifest.Name, err)
 		}
 	}
@@ -32,13 +41,33 @@ func TestRegisterAndLookup(t *testing.T) {
 	}
 }
 
+func TestResolveReturnsSomethingThatCanRun(t *testing.T) {
+	// A registry that only kept manifests would let a process advertise a name
+	// with nothing behind it; Resolve is what a turn asks before running one.
+	registry := registryWith(t, chatManifest())
+
+	resolved, ok := registry.Resolve("chat")
+	if !ok {
+		t.Fatal("Resolve(chat) did not find the registered capability")
+	}
+	if resolved.Manifest().Name != "chat" {
+		t.Errorf("resolved manifest name = %q", resolved.Manifest().Name)
+	}
+	if _, ok := registry.Resolve("deep_solve"); ok {
+		t.Error("Resolve(deep_solve) found a capability that was never registered")
+	}
+}
+
 func TestRegisterRejectsInvalidAndDuplicateManifests(t *testing.T) {
 	registry := registryWith(t, chatManifest())
 
-	if err := registry.Register(Manifest{Name: "broken"}); !errors.Is(err, ErrInvalidManifest) {
+	if err := registry.Register(declared{manifest: Manifest{Name: "broken"}}); !errors.Is(err, ErrInvalidManifest) {
 		t.Errorf("Register(invalid) error = %v, want ErrInvalidManifest", err)
 	}
-	if err := registry.Register(chatManifest()); !errors.Is(err, ErrDuplicateCapability) {
+	if err := registry.Register(nil); !errors.Is(err, ErrInvalidManifest) {
+		t.Errorf("Register(nil) error = %v, want ErrInvalidManifest", err)
+	}
+	if err := registry.Register(declared{manifest: chatManifest()}); !errors.Is(err, ErrDuplicateCapability) {
 		t.Errorf("Register(duplicate) error = %v, want ErrDuplicateCapability", err)
 	}
 	if want := []string{"chat"}; !reflect.DeepEqual(registry.Names(), want) {
