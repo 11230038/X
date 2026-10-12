@@ -128,8 +128,8 @@ func (f *fakeRepository) AppendMessage(_ context.Context, record Message) error 
 	if f.err != nil {
 		return f.err
 	}
-	// The real adapter reaches this the same way: its transaction marks the
-	// session active, and a session that is not there updates no rows.
+	// Checked the same way the real adapter checks it, by looking for the
+	// session, because what an update of it reports cannot answer this.
 	record2, ok := f.sessions[record.SessionID]
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrNotFound, record.SessionID)

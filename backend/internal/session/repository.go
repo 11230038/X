@@ -8,6 +8,7 @@ import (
 
 	"backend/internal/data/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // GORMRepository reads and writes conversations through GORM (seekdb over the
@@ -113,6 +114,9 @@ func (r *GORMRepository) Delete(ctx context.Context, sessionID string) error {
 	if result.Error != nil {
 		return fmt.Errorf("delete session: %w", result.Error)
 	}
+	// A delete reports the rows it removed, which is the question being asked:
+	// there is no "the row was there but the value did not change" case to be
+	// confused by, as there is on an update.
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("%w: %s", ErrNotFound, sessionID)
 	}
@@ -125,6 +129,9 @@ func (r *GORMRepository) AppendMessage(ctx context.Context, record Message) erro
 		return err
 	}
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := requireSession(tx, record.SessionID); err != nil {
+			return err
+		}
 		model := models.Message{
 			MessageID: record.ID,
 			SessionID: record.SessionID,
@@ -135,17 +142,15 @@ func (r *GORMRepository) AppendMessage(ctx context.Context, record Message) erro
 		if record.Capability != "" {
 			model.Capability = &record.Capability
 		}
+		// The foreign key would reject a message for a session that is not there
+		// as well, but as a storage error rather than as the session being gone.
 		if err := tx.Create(&model).Error; err != nil {
 			return fmt.Errorf("create message: %w", err)
 		}
-		result := tx.Model(&models.Session{}).
+		if err := tx.Model(&models.Session{}).
 			Where("session_id = ?", record.SessionID).
-			Update("update_time", record.CreatedAt)
-		if result.Error != nil {
-			return fmt.Errorf("mark session active: %w", result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return fmt.Errorf("%w: %s", ErrNotFound, record.SessionID)
+			Update("update_time", record.CreatedAt).Error; err != nil {
+			return fmt.Errorf("mark session active: %w", err)
 		}
 		return nil
 	})
@@ -180,15 +185,38 @@ func (r *GORMRepository) update(ctx context.Context, sessionID string, updates m
 	if err := r.ready(); err != nil {
 		return err
 	}
-	result := r.db.WithContext(ctx).
-		Model(&models.Session{}).
-		Where("session_id = ?", sessionID).
-		Updates(updates)
-	if result.Error != nil {
-		return fmt.Errorf("update session: %w", result.Error)
-	}
-	if result.RowsAffected == 0 {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := requireSession(tx, sessionID); err != nil {
+			return err
+		}
+		if err := tx.Model(&models.Session{}).
+			Where("session_id = ?", sessionID).
+			Updates(updates).Error; err != nil {
+			return fmt.Errorf("update session: %w", err)
+		}
+		return nil
+	})
+}
+
+// requireSession reports a session that is not stored, checking by reading it
+// rather than by what an update of it reports.
+//
+// The row count an update returns is the number of rows whose values actually
+// changed, which on MySQL is zero for a row written back the values it already
+// holds: `UPDATE sessions SET update_time = update_time` reports none. Read as
+// "no such session", that turns a rename to the title it already has — or a
+// message appended in the same second as the session's last update — into an
+// error about a session that is right there. The read is a locking one, so what
+// it reports still holds when the write that follows lands.
+func requireSession(tx *gorm.DB, sessionID string) error {
+	var stored models.Session
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(&stored, "session_id = ?", sessionID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return fmt.Errorf("%w: %s", ErrNotFound, sessionID)
+	}
+	if err != nil {
+		return fmt.Errorf("look for session %s: %w", sessionID, err)
 	}
 	return nil
 }
