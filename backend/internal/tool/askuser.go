@@ -77,7 +77,11 @@ func (t *AskUserTool) Invoke(ctx context.Context, call Call) (Result, error) {
 
 	answer, err := t.asker.AskUser(ctx, question)
 	if err != nil {
-		return Result{}, err
+		// A question that could not be asked ends the turn rather than becoming
+		// a result: the runtime only fails here when the turn is over — the
+		// deadline for an answer passed, or the turn was cancelled — and
+		// answering on without the answer would be inventing one.
+		return Result{}, fmt.Errorf("%w: %w", ErrFatal, err)
 	}
 	return Result{
 		Content:  answer,

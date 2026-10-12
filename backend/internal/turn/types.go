@@ -80,6 +80,36 @@ var (
 	// ErrInputTimeout reports a turn that waited for an answer past its
 	// deadline.
 	ErrInputTimeout = errors.New("turn: the input deadline passed")
+	// ErrEmptyMessage reports a turn asked to start with nothing to answer.
+	ErrEmptyMessage = errors.New("turn: the message is empty")
+	// ErrEmptyReply reports an answer to a question that says nothing.
+	ErrEmptyReply = errors.New("turn: the reply is empty")
+)
+
+// The failure codes a turn can end with.
+//
+// A client reads these rather than the error text: the text is for an operator
+// and may name a provider, a host or an internal step, while a code is what
+// tells a client whether to offer a retry, to change what it asked for, or to
+// stop. They are stored in turns.failure_code.
+const (
+	// CodeUnknownCapability means the turn named a capability this service does
+	// not offer. Retrying it will not help.
+	CodeUnknownCapability = "unknown_capability"
+	// CodeInputTimeout means the turn waited for an answer past its deadline.
+	CodeInputTimeout = "input_timeout"
+	// CodeRoundsExhausted means the model kept calling tools until the round
+	// limit stopped it.
+	CodeRoundsExhausted = "rounds_exhausted"
+	// CodeTimeout means the provider did not answer in time.
+	CodeTimeout = "timeout"
+	// CodeAbandoned means the process running the turn stopped before it
+	// finished, so the turn was ended by whoever found it next.
+	CodeAbandoned = "abandoned"
+	// CodeInternalError is everything else: a failure this service did not
+	// classify. It is the default rather than an absence, so a client never has
+	// to interpret a missing code.
+	CodeInternalError = "internal_error"
 )
 
 // Turn is one run of a capability in a session.

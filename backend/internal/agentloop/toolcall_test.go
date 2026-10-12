@@ -3,6 +3,7 @@ package agentloop
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -150,6 +151,31 @@ func TestRunSurvivesAToolThatFails(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "the database is unreachable") {
 		t.Errorf("the failure was not recorded: %s", logs.String())
+	}
+}
+
+func TestRunStopsOnAFatalToolFailure(t *testing.T) {
+	wantErr := errors.New("the input deadline passed")
+	fatal := &stubTool{name: "ask_user", err: fmt.Errorf("%w: %w", tool.ErrFatal, wantErr)}
+	provider := &scriptedProvider{steps: []step{
+		{response: asksFor(llm.ToolCall{ID: "call_1", Name: "ask_user", Arguments: `{}`})},
+		// No second step: a run that carried on would ask the provider again,
+		// and the script has nothing left to give it.
+	}}
+	emitter := &recordingEmitter{}
+	loop, _ := newTestLoop(t, provider, emitter, fatal)
+
+	_, err := loop.Run(context.Background(), basicRequest())
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Run() error = %v, want %v", err, wantErr)
+	}
+	// The model is never handed a result for a call the turn is ending on: it
+	// would have nothing it could do with it.
+	if results := emitter.ofType(event.TypeToolResult); len(results) != 1 {
+		t.Fatalf("tool_result events = %+v, want the call reported as having come back", results)
+	}
+	if len(provider.requests) != 1 {
+		t.Errorf("the provider was asked %d times, want the run to stop at the first", len(provider.requests))
 	}
 }
 

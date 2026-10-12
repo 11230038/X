@@ -18,6 +18,7 @@ import (
 
 const (
 	eventIDPrefix = "evt_"
+	turnIDPrefix  = "turn_"
 	idRandomBytes = 16
 )
 
@@ -45,6 +46,10 @@ type Repository interface {
 	AppendEvent(ctx context.Context, record event.Event) error
 	// Events returns a turn's events after a sequence number, oldest first.
 	Events(ctx context.Context, turnID string, afterSeq int64) ([]event.Event, error)
+	// LastEvent returns the most recent event of a turn, or ErrNotFound when it
+	// has produced none. It is how a subscriber that is already up to date
+	// learns there is nothing left to wait for.
+	LastEvent(ctx context.Context, turnID string) (event.Event, error)
 	// LastSeq returns the highest stored sequence number, or zero.
 	LastSeq(ctx context.Context, turnID string) (int64, error)
 }
@@ -246,6 +251,25 @@ func (r *GORMRepository) Events(ctx context.Context, turnID string, afterSeq int
 		events = append(events, converted)
 	}
 	return events, nil
+}
+
+// LastEvent returns the most recent event of a turn.
+func (r *GORMRepository) LastEvent(ctx context.Context, turnID string) (event.Event, error) {
+	if err := r.ready(); err != nil {
+		return event.Event{}, err
+	}
+	var model models.TurnEvent
+	err := r.db.WithContext(ctx).
+		Where("turn_id = ?", turnID).
+		Order("seq DESC").
+		First(&model).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return event.Event{}, fmt.Errorf("%w: %s has no events", ErrNotFound, turnID)
+		}
+		return event.Event{}, fmt.Errorf("read last event: %w", err)
+	}
+	return toEvent(model)
 }
 
 // LastSeq returns the highest stored sequence number.

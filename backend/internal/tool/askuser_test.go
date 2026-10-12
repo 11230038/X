@@ -125,6 +125,28 @@ func TestAskUserPassesThroughTheAskerFailure(t *testing.T) {
 	if !errors.Is(err, wantErr) {
 		t.Errorf("Invoke() error = %v, want %v", err, wantErr)
 	}
+	// A question the runtime could not deliver ends the turn: the deadline for
+	// an answer passed, or the turn was cancelled, and in neither case is there
+	// an answer the model could be given instead.
+	if !errors.Is(err, ErrFatal) {
+		t.Errorf("Invoke() error = %v, want a fatal failure", err)
+	}
+}
+
+func TestAMissingQuestionIsTheModelsToFix(t *testing.T) {
+	// The model can ask again with a question in it, so this one stays the
+	// call's failure rather than ending the turn over it.
+	asker := &fakeAsker{}
+	_, err := NewAskUserTool(asker).Invoke(context.Background(), askUserCall(t, `{}`))
+	if !errors.Is(err, ErrMissingQuestion) {
+		t.Fatalf("Invoke() error = %v, want ErrMissingQuestion", err)
+	}
+	if errors.Is(err, ErrFatal) {
+		t.Error("a missing question ended the turn")
+	}
+	if asker.calls != 0 {
+		t.Error("the runtime was asked a question with nothing in it")
+	}
 }
 
 func TestAskUserHonoursCancellation(t *testing.T) {

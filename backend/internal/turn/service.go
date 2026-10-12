@@ -1,0 +1,353 @@
+package turn
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
+	"sync"
+	"time"
+
+	"backend/internal/capability"
+	"backend/internal/llm"
+	"backend/internal/session"
+	"backend/internal/tool"
+)
+
+// Sessions is the part of the conversation domain the runtime uses.
+//
+// It is an interface rather than the service itself so that a turn can be run
+// against a conversation without a database behind it, and so that what the
+// runtime may do to a conversation is a list someone can read.
+type Sessions interface {
+	Create(ctx context.Context) (session.Session, error)
+	Get(ctx context.Context, sessionID string) (session.Session, error)
+	Rename(ctx context.Context, sessionID, title string) (session.Session, error)
+	AppendMessage(ctx context.Context, input session.NewMessage) (session.Message, error)
+	Messages(ctx context.Context, sessionID string) ([]session.Message, error)
+}
+
+var _ Sessions = (*session.Service)(nil)
+
+// Options is everything a Runner needs. Nothing is optional: a runtime missing
+// one of these would fail in the middle of a turn, where the failure is a
+// half-finished answer, rather than at startup, where it is a message.
+type Options struct {
+	Repository   Repository
+	Hub          *Hub
+	Sessions     Sessions
+	Capabilities *capability.Registry
+	Tools        *tool.Registry
+	Policy       tool.Policy
+	Provider     llm.Provider
+	// Titler names a session after its first exchange. A turn whose session is
+	// already named does not call it.
+	Titler *Titler
+	Logger *slog.Logger
+	// DefaultCapability runs a turn that did not ask for one.
+	DefaultCapability string
+	// InputTimeout bounds how long a turn waits for an answer to a question it
+	// asked. A turn that waits forever holds its session's turn slot forever.
+	InputTimeout time.Duration
+}
+
+// Runner owns every turn this process is running.
+//
+// A turn's goroutine belongs here and not to a connection: a client may
+// disconnect while a turn is running and come back to find it still going, so
+// nothing about a turn's lifetime follows a socket (AC-04). The runner is what
+// makes that true and what a cancel has to reach.
+type Runner struct {
+	repository   Repository
+	hub          *Hub
+	sessions     Sessions
+	capabilities *capability.Registry
+	tools        *tool.Registry
+	policy       tool.Policy
+	provider     llm.Provider
+	titler       *Titler
+	logger       *slog.Logger
+	fallback     string
+	inputTimeout time.Duration
+	now          func() time.Time
+
+	// rootCtx is what every turn's context derives from. Cancelling it stops
+	// the process's turns, which is what a shutdown does and what a client
+	// leaving must never do.
+	rootCtx  context.Context
+	stopRoot context.CancelFunc
+
+	mu     sync.Mutex
+	active map[string]*turnRun
+	runs   sync.WaitGroup
+}
+
+// NewRunner creates a runner, refusing an incomplete one.
+func NewRunner(options Options) (*Runner, error) {
+	for _, missing := range []struct {
+		name  string
+		isset bool
+	}{
+		{"Repository", options.Repository != nil},
+		{"Hub", options.Hub != nil},
+		{"Sessions", options.Sessions != nil},
+		{"Capabilities", options.Capabilities != nil},
+		{"Tools", options.Tools != nil},
+		{"Provider", options.Provider != nil},
+		{"Titler", options.Titler != nil},
+		{"Logger", options.Logger != nil},
+	} {
+		if !missing.isset {
+			return nil, fmt.Errorf("turn: a runner needs %s", missing.name)
+		}
+	}
+	if strings.TrimSpace(options.DefaultCapability) == "" {
+		return nil, fmt.Errorf("turn: a runner needs a default capability")
+	}
+	if options.InputTimeout <= 0 {
+		return nil, fmt.Errorf("turn: the input timeout must be positive, got %s", options.InputTimeout)
+	}
+	rootCtx, stopRoot := context.WithCancel(context.Background())
+	return &Runner{
+		repository:   options.Repository,
+		hub:          options.Hub,
+		sessions:     options.Sessions,
+		capabilities: options.Capabilities,
+		tools:        options.Tools,
+		policy:       options.Policy,
+		provider:     options.Provider,
+		titler:       options.Titler,
+		logger:       options.Logger,
+		fallback:     options.DefaultCapability,
+		inputTimeout: options.InputTimeout,
+		now:          func() time.Time { return time.Now().UTC() },
+		rootCtx:      rootCtx,
+		stopRoot:     stopRoot,
+		active:       make(map[string]*turnRun),
+	}, nil
+}
+
+// StartRequest is what a client asks for when it starts a turn.
+type StartRequest struct {
+	// SessionID continues an existing conversation. Empty starts a new one.
+	SessionID string
+	// Capability is what should run. Empty runs the default.
+	Capability string
+	// Content is what the user said.
+	Content string
+}
+
+// Started is what starting a turn produced.
+//
+// The session comes back with the turn because a client that started a new
+// conversation needs its id to continue it, and the turn id names the stream it
+// should now subscribe to.
+type Started struct {
+	Session session.Session
+	Turn    Turn
+}
+
+// Start creates the turn and runs it in the background.
+//
+// It returns as soon as the turn is stored, before any of it has run: the model
+// call takes seconds, and a client that waited for it would be a client that
+// could not cancel it, because the id it would cancel by has not reached it.
+func (r *Runner) Start(ctx context.Context, request StartRequest) (Started, error) {
+	content := strings.TrimSpace(request.Content)
+	if content == "" {
+		return Started{}, ErrEmptyMessage
+	}
+	capabilityName := strings.TrimSpace(request.Capability)
+	if capabilityName == "" {
+		capabilityName = r.fallback
+	}
+
+	conversation, err := r.conversation(ctx, request.SessionID)
+	if err != nil {
+		return Started{}, err
+	}
+	if _, err := r.sessions.AppendMessage(ctx, session.NewMessage{
+		SessionID:  conversation.ID,
+		Role:       session.RoleUser,
+		Content:    content,
+		Capability: capabilityName,
+	}); err != nil {
+		return Started{}, err
+	}
+
+	turnID, err := newID(turnIDPrefix)
+	if err != nil {
+		return Started{}, fmt.Errorf("generate turn id: %w", err)
+	}
+	record := Turn{
+		ID:         turnID,
+		SessionID:  conversation.ID,
+		Status:     StatusQueued,
+		Capability: capabilityName,
+		CreatedAt:  r.now(),
+		UpdatedAt:  r.now(),
+	}
+
+	// From here the turn has a context of its own, derived from the runner's
+	// rather than from the request's, so that a client that goes away does not
+	// take the turn with it.
+	runCtx, cancel := context.WithCancel(r.rootCtx)
+	// The emitter keeps a context that reaches past the turn being cancelled:
+	// it is what its background flush writes on, and a cancel racing that flush
+	// would look like a storage failure rather than the turn ending normally.
+	emitter, err := NewEmitter(context.WithoutCancel(runCtx), turnID, r.repository, r.hub)
+	if err != nil {
+		cancel()
+		return Started{}, err
+	}
+	if err := r.repository.Start(ctx, record); err != nil {
+		cancel()
+		return Started{}, err
+	}
+
+	r.launch(r.newTurnRun(runCtx, cancel, record, conversation, content, emitter))
+	return Started{Session: conversation, Turn: record}, nil
+}
+
+// conversation continues one that exists, or starts one.
+func (r *Runner) conversation(ctx context.Context, sessionID string) (session.Session, error) {
+	if sessionID == "" {
+		return r.sessions.Create(ctx)
+	}
+	return r.sessions.Get(ctx, sessionID)
+}
+
+// launch puts a turn in the table and starts its goroutine.
+//
+// The table is written before the goroutine starts, so a cancel arriving the
+// moment Start returns finds something to cancel rather than concluding the
+// turn is not here.
+func (r *Runner) launch(run *turnRun) {
+	r.mu.Lock()
+	r.active[run.turn.ID] = run
+	r.runs.Add(1)
+	r.mu.Unlock()
+
+	go run.run()
+}
+
+// finished removes a turn once its goroutine has stopped.
+func (r *Runner) finished(turnID string) {
+	r.runs.Done()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.active, turnID)
+}
+
+// Cancel stops a running turn.
+//
+// It only signals: the goroutine running the turn is the one that writes the
+// terminal state and publishes done, so there is exactly one writer and exactly
+// one ending, whether the turn was cancelled or finished on its own (WS-08).
+func (r *Runner) Cancel(ctx context.Context, turnID string) error {
+	r.mu.Lock()
+	run, running := r.active[turnID]
+	r.mu.Unlock()
+
+	if running {
+		run.cancel()
+		return nil
+	}
+
+	record, err := r.repository.Turn(ctx, turnID)
+	if err != nil {
+		return err
+	}
+	if record.Status.Terminal() {
+		// Cancelling a turn that has already stopped is what a client does when
+		// its cancel and the turn's own ending cross. There is nothing to undo,
+		// so there is nothing to report.
+		return nil
+	}
+	return r.abandon(ctx, record)
+}
+
+// abandon ends a turn that is stored as active with nothing running it.
+//
+// It is what a previous process left behind: the turn was stored, the process
+// died before finishing it, and no goroutine in this one will ever move it. Left
+// alone it holds its session's turn slot, so the session can never be used
+// again. Nothing is watching the turn's stream either, which is why this writes
+// the state without publishing an ending.
+func (r *Runner) abandon(ctx context.Context, record Turn) error {
+	r.logger.WarnContext(ctx, "cancelling a turn no process is running",
+		"turn_id", record.ID, "session_id", record.SessionID, "status", record.Status)
+
+	final, err := record.Fail(Failure{
+		Error:     "the process running this turn stopped",
+		Code:      CodeAbandoned,
+		Retryable: true,
+	}, r.now())
+	if err != nil {
+		return err
+	}
+	return r.repository.Save(ctx, final, record.Status)
+}
+
+// SubmitReply answers the question a turn is waiting on.
+func (r *Runner) SubmitReply(_ context.Context, turnID, answer string) error {
+	trimmed := strings.TrimSpace(answer)
+	if trimmed == "" {
+		return ErrEmptyReply
+	}
+	r.mu.Lock()
+	run := r.active[turnID]
+	r.mu.Unlock()
+	if run == nil {
+		return ErrNotWaiting
+	}
+	return run.submit(trimmed)
+}
+
+// Turn returns one turn, whatever state it is in.
+func (r *Runner) Turn(ctx context.Context, turnID string) (Turn, error) {
+	return r.repository.Turn(ctx, turnID)
+}
+
+// ActiveTurn returns the session's unfinished turn, or ErrNotFound.
+func (r *Runner) ActiveTurn(ctx context.Context, sessionID string) (Turn, error) {
+	return r.repository.ActiveTurn(ctx, sessionID)
+}
+
+// Subscribe attaches to a turn's stream from a position in it.
+//
+// Reading the turn's events and reading whether it has already ended are the
+// same call, so a client learns where a turn got to and that it is over without
+// a second round trip in which the answer could change.
+func (r *Runner) Subscribe(ctx context.Context, turnID string, afterSeq int64) (*Subscription, error) {
+	return r.hub.Subscribe(ctx, turnID, afterSeq)
+}
+
+// Close stops the process's turns and waits for them to record how they ended.
+//
+// Cancelling makes them end as cancelled, which is what they are: the process
+// is going away, not the client's intent. Waiting is what stops a shutdown from
+// leaving turns stored as active with nothing running them — the state abandon
+// exists to clean up.
+func (r *Runner) Close(ctx context.Context) error {
+	r.stopRoot()
+
+	stopped := make(chan struct{})
+	go func() {
+		r.runs.Wait()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("%w: %d turns were still running", ctx.Err(), r.running())
+	}
+}
+
+// running counts the turns still in flight.
+func (r *Runner) running() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.active)
+}

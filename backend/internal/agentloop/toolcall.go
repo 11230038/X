@@ -3,6 +3,7 @@ package agentloop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"runtime/debug"
 
@@ -33,8 +34,13 @@ func (l *Loop) dispatch(ctx context.Context, req Request, call llm.ToolCall) (ll
 	if err := l.publishCall(ctx, req, call); err != nil {
 		return llm.Message{}, err
 	}
-	result := l.invoke(ctx, req, call)
+	result, err := l.invoke(ctx, req, call)
 	if err := l.publishResult(ctx, req, call, result); err != nil {
+		return llm.Message{}, err
+	}
+	// The call is reported before the turn stops on it: a client drawing a call
+	// with no result would show it running forever.
+	if err != nil {
 		return llm.Message{}, err
 	}
 
@@ -51,25 +57,26 @@ func (l *Loop) dispatch(ctx context.Context, req Request, call llm.ToolCall) (ll
 // trusting that the call was authorized when the plane was composed: the plane
 // the model was shown and the plane it may call are not the same thing
 // (TOOL-07).
-func (l *Loop) invoke(ctx context.Context, req Request, call llm.ToolCall) tool.Result {
+func (l *Loop) invoke(ctx context.Context, req Request, call llm.ToolCall) (tool.Result, error) {
 	if call.Name == "" {
-		return failure("The call named no tool.")
+		return failure("The call named no tool."), nil
 	}
 	t, ok := l.plane.Tool(call.Name)
 	if !ok {
-		return failure(fmt.Sprintf("There is no tool named %q available here.", call.Name))
+		return failure(fmt.Sprintf("There is no tool named %q available here.", call.Name)), nil
 	}
 	// The model is not obliged to produce valid JSON. Saying so is more useful
 	// to it than failing the turn.
 	if !json.Valid([]byte(call.Arguments)) {
-		return failure(fmt.Sprintf("The arguments for %q were not valid JSON.", call.Name))
+		return failure(fmt.Sprintf("The arguments for %q were not valid JSON.", call.Name)), nil
 	}
 
 	return l.run(ctx, t, call)
 }
 
-// run calls the tool, converting a panic or an error into a failure result.
-func (l *Loop) run(ctx context.Context, t tool.Tool, call llm.ToolCall) (result tool.Result) {
+// run calls the tool, converting a panic or an ordinary error into a failure
+// result and returning only a fatal one.
+func (l *Loop) run(ctx context.Context, t tool.Tool, call llm.ToolCall) (result tool.Result, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			// A tool that panics is a defect, and a defect must not end the
@@ -91,9 +98,14 @@ func (l *Loop) run(ctx context.Context, t tool.Tool, call llm.ToolCall) (result 
 	})
 	if err != nil {
 		l.logger.Error("tool failed", "tool", call.Name, "call_id", call.ID, "error", err)
-		return failure(toolFailureText)
+		// A fatal failure is the turn's, not the call's: there is no result the
+		// model could act on, so it is returned rather than reported to it.
+		if errors.Is(err, tool.ErrFatal) {
+			return failure(toolFailureText), err
+		}
+		return failure(toolFailureText), nil
 	}
-	return invoked
+	return invoked, nil
 }
 
 // publishCall reports a call before it runs, so a client sees the tool start

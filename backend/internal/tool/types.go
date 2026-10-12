@@ -9,7 +9,16 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"errors"
 )
+
+// ErrFatal marks a tool failure the turn cannot carry on from.
+//
+// Almost every failure a tool reports belongs to the call: the model is told,
+// and it tries something else. A fatal one belongs to the turn — the tool could
+// not do the thing the turn exists to do, so there is no result the model could
+// act on. The turn ends and reports the reason instead.
+var ErrFatal = errors.New("tool: this failure ends the turn")
 
 // Definition is a tool as the model sees it.
 type Definition struct {
