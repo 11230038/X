@@ -1,0 +1,52 @@
+package capability
+
+import (
+	"context"
+
+	"backend/internal/agentloop"
+	"backend/internal/event"
+	"backend/internal/llm"
+	"backend/internal/tool"
+)
+
+// Capability is a way of holding a conversation: it owns a whole turn, from the
+// stages it runs to the point it decides the turn is over.
+//
+// Run is the capability's own code, in order, deciding what each stage does and
+// when to move between them. What it cannot do is call a model any other way
+// than through RunContext.RunLoop, which is how RT-07 is enforced: there is one
+// execution engine, and a capability has no way to bring its own (RT-07).
+type Capability interface {
+	Manifest() Manifest
+	// Run plays the turn out. The context is the turn's, not a request's: it is
+	// cancelled when the turn is cancelled, and not when a client disconnects
+	// (AC-04). A returned error is the capability saying the turn failed; a
+	// cancelled context is not an error the capability should convert.
+	Run(ctx context.Context, rc RunContext) error
+}
+
+// RunContext is what a turn gives a capability while it runs.
+//
+// It is an interface the runtime satisfies rather than a struct the capability
+// receives, so the runtime keeps the parts a capability must not reach: how
+// events are persisted, whether the turn is still active, and what a model call
+// costs. Everything exposed here is either the capability's own material or a
+// request to run something under the runtime's control.
+type RunContext interface {
+	// Emitter publishes an event into the turn's stream. The capability's own
+	// events — stage boundaries, results — go here; the loop publishes the
+	// model's output and the tool traffic itself, so a capability does not
+	// repeat them.
+	Emitter() event.Emitter
+	// Tools is the plane this turn may call, as the model sees it. It is already
+	// composed by the mount policy: the capability declares what it needs in its
+	// manifest, and the runtime decides what the deployment actually mounts.
+	Tools() []tool.Definition
+	// Messages is the conversation so far, oldest first.
+	Messages() []llm.Message
+	// RunLoop runs one stage through the shared engine. The request's stage,
+	// messages and tools normally come from this context; the settings that vary
+	// per stage — the model and its sampling — are the capability's to supply,
+	// because only it knows what the stage is for.
+	RunLoop(ctx context.Context, req agentloop.Request) (agentloop.Result, error)
+}
