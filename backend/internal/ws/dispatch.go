@@ -42,6 +42,14 @@ func (c *conn) handle(ctx context.Context, raw []byte) error {
 	response, after, err := c.perform(ctx, cmd)
 	if err != nil {
 		code, message := describe(err)
+		if code == CodeInternal {
+			// The client is told nothing it can act on, so this is the only
+			// place the failure exists. An internal error a client reports as
+			// "the command failed" and the server does not record at all is a
+			// failure nobody can diagnose.
+			c.logger.Error("ws: command failed",
+				"command", cmd.Type, "turn_id", cmd.TurnID, "session_id", cmd.SessionID, "error", err)
+		}
 		return c.reportError(ctx, code, message)
 	}
 	if response != nil {
