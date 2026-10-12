@@ -13,6 +13,7 @@ const (
 	testJWTSecret   = "unit-test-jwt-secret-with-enough-bytes"
 	testJWTIssuer   = "x-backend-test"
 	testTokenTTLKey = "AUTH_TOKEN_TTL"
+	testLLMAPIKey   = "unit-test-llm-api-key"
 )
 
 func TestLoadReadsCompleteDotenv(t *testing.T) {
@@ -65,6 +66,57 @@ func TestLoadReadsCompleteDotenv(t *testing.T) {
 	}
 	if cfg.Auth.TTL != 24*time.Hour {
 		t.Errorf("Auth.TTL = %s, want 24h", cfg.Auth.TTL)
+	}
+	if cfg.LLM.Provider != "deepseek" || cfg.LLM.Model != "deepseek-chat" {
+		t.Errorf("LLM provider = %q model = %q", cfg.LLM.Provider, cfg.LLM.Model)
+	}
+	if cfg.LLM.BaseURL != "https://api.deepseek.com" {
+		t.Errorf("LLM.BaseURL = %q", cfg.LLM.BaseURL)
+	}
+	if cfg.LLM.TaskModel != "deepseek-chat" || cfg.LLM.TaskMaxTokens != 512 {
+		t.Errorf("task model = %q max tokens = %d", cfg.LLM.TaskModel, cfg.LLM.TaskMaxTokens)
+	}
+	if cfg.LLM.Timeout != 2*time.Minute {
+		t.Errorf("LLM.Timeout = %s, want 2m", cfg.LLM.Timeout)
+	}
+	if cfg.Turn.InputTimeout != 30*time.Minute || cfg.Turn.MaxRounds != 12 {
+		t.Errorf("turn bounds were not loaded: %+v", cfg.Turn)
+	}
+	chat, ok := cfg.LLM.Capabilities["chat"]
+	if !ok {
+		t.Fatalf("capability parameters were not loaded: %v", cfg.LLM.Capabilities)
+	}
+	if chat.Temperature != 0.7 {
+		t.Errorf("chat temperature = %v, want 0.7", chat.Temperature)
+	}
+	if chat.Stages["responding"].MaxTokens != 4096 || chat.Stages["exploring"].MaxTokens != 1024 {
+		t.Errorf("chat stage limits were not loaded: %+v", chat.Stages)
+	}
+}
+
+func TestLoadNeverEchoesTheLLMAPIKey(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{name: "empty key", key: "LLM_API_KEY", value: " "},
+		{name: "unsupported provider", key: "LLM_PROVIDER", value: "openai"},
+		{name: "invalid base URL", key: "LLM_BASE_URL", value: "api.deepseek.com"},
+		{name: "invalid capability config", key: "LLM_CAPABILITY_CONFIG_JSON", value: "not json"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			values := validValues()
+			values[tt.key] = tt.value
+
+			_, err := Load(writeDotenv(t, values))
+			if err == nil {
+				t.Fatalf("Load() error = nil, want an error for %s", tt.key)
+			}
+			if strings.Contains(err.Error(), testLLMAPIKey) {
+				t.Fatal("configuration error exposed the LLM API key")
+			}
+		})
 	}
 }
 
@@ -172,6 +224,25 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{name: "max open", key: "DB_MAX_OPEN_CONNS", value: "0"},
 		{name: "max idle", key: "DB_MAX_IDLE_CONNS", value: "-1"},
 		{name: "connection lifetime", key: "DB_CONN_MAX_LIFETIME", value: "-1s"},
+		{name: "unsupported LLM provider", key: "LLM_PROVIDER", value: "openai"},
+		{name: "relative LLM base URL", key: "LLM_BASE_URL", value: "api.deepseek.com"},
+		{name: "LLM base URL without a host", key: "LLM_BASE_URL", value: "https://"},
+		{name: "non-HTTP LLM scheme", key: "LLM_BASE_URL", value: "ftp://api.deepseek.com"},
+		{name: "LLM timeout", key: "LLM_TIMEOUT", value: "soon"},
+		{name: "task max tokens", key: "LLM_TASK_MAX_TOKENS", value: "0"},
+		{name: "capability config as an array", key: "LLM_CAPABILITY_CONFIG_JSON", value: "[]"},
+		{name: "capability config with an unknown field", key: "LLM_CAPABILITY_CONFIG_JSON",
+			value: `{"chat":{"temperatur":0.7,"stages":{"responding":{"max_tokens":1}}}}`},
+		{name: "capability temperature above the range", key: "LLM_CAPABILITY_CONFIG_JSON",
+			value: `{"chat":{"temperature":3,"stages":{"responding":{"max_tokens":1}}}}`},
+		{name: "capability temperature below the range", key: "LLM_CAPABILITY_CONFIG_JSON",
+			value: `{"chat":{"temperature":-1,"stages":{"responding":{"max_tokens":1}}}}`},
+		{name: "capability stage without max tokens", key: "LLM_CAPABILITY_CONFIG_JSON",
+			value: `{"chat":{"temperature":0.7,"stages":{"responding":{}}}}`},
+		{name: "capability without stages", key: "LLM_CAPABILITY_CONFIG_JSON",
+			value: `{"chat":{"temperature":0.7}}`},
+		{name: "turn input timeout", key: "TURN_INPUT_TIMEOUT", value: "0s"},
+		{name: "turn rounds", key: "TURN_MAX_ROUNDS", value: "0"},
 	}
 
 	for _, tt := range cases {
@@ -298,6 +369,18 @@ func validValues() map[string]string {
 		"DB_MAX_IDLE_CONNS":        "5",
 		"DB_CONN_MAX_LIFETIME":     "30m",
 		"DB_CONN_MAX_IDLE_TIME":    "5m",
+		"LLM_PROVIDER":             "deepseek",
+		"LLM_BASE_URL":             "https://api.deepseek.com",
+		"LLM_MODEL":                "deepseek-chat",
+		"LLM_API_KEY":              testLLMAPIKey,
+		"LLM_TASK_MODEL":           "deepseek-chat",
+		"LLM_TASK_MAX_TOKENS":      "512",
+		"LLM_TIMEOUT":              "2m",
+		// Single quotes keep godotenv from reading the braces and quotes, which
+		// is also how the shipped dotenv files spell this value.
+		"LLM_CAPABILITY_CONFIG_JSON": `'{"chat":{"temperature":0.7,"stages":{"exploring":{"max_tokens":1024},"responding":{"max_tokens":4096}}}}'`,
+		"TURN_INPUT_TIMEOUT":         "30m",
+		"TURN_MAX_ROUNDS":            "12",
 	}
 }
 

@@ -53,6 +53,16 @@ var requiredKeys = []string{
 	"DB_MAX_IDLE_CONNS",
 	"DB_CONN_MAX_LIFETIME",
 	"DB_CONN_MAX_IDLE_TIME",
+	"LLM_PROVIDER",
+	"LLM_BASE_URL",
+	"LLM_MODEL",
+	"LLM_API_KEY",
+	"LLM_TASK_MODEL",
+	"LLM_TASK_MAX_TOKENS",
+	"LLM_TIMEOUT",
+	"LLM_CAPABILITY_CONFIG_JSON",
+	"TURN_INPUT_TIMEOUT",
+	"TURN_MAX_ROUNDS",
 }
 
 // Config contains all settings required to run the service.
@@ -64,6 +74,8 @@ type Config struct {
 	Upload          UploadConfig
 	Auth            AuthConfig
 	Database        DatabaseConfig
+	LLM             LLMConfig
+	Turn            TurnConfig
 }
 
 // AuthConfig contains access-token signing settings.
@@ -139,6 +151,14 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	llm, err := loadLLMConfig(values)
+	if err != nil {
+		return Config{}, err
+	}
+	turn, err := loadTurnConfig(values)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
 		HTTPAddr:        strings.TrimSpace(values["HTTP_ADDR"]),
@@ -148,6 +168,8 @@ func Load(path string) (Config, error) {
 		Upload:          upload,
 		Auth:            authConfig,
 		Database:        database,
+		LLM:             llm,
+		Turn:            turn,
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -175,7 +197,13 @@ func (c Config) Validate() error {
 	if err := c.Auth.Validate(); err != nil {
 		return err
 	}
-	return c.Database.Validate()
+	if err := c.Database.Validate(); err != nil {
+		return err
+	}
+	if err := c.LLM.Validate(); err != nil {
+		return err
+	}
+	return c.Turn.Validate()
 }
 
 // Validate checks HTTP server timeout settings.
@@ -415,6 +443,14 @@ func parseNonNegativeInt(values map[string]string, key string) (int, error) {
 	value, err := strconv.Atoi(strings.TrimSpace(values[key]))
 	if err != nil || value < 0 {
 		return 0, fmt.Errorf("%s must be a non-negative integer", key)
+	}
+	return value, nil
+}
+
+func parsePositiveInt(values map[string]string, key string) (int, error) {
+	value, err := strconv.Atoi(strings.TrimSpace(values[key]))
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", key)
 	}
 	return value, nil
 }
