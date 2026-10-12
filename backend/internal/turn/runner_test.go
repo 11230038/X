@@ -70,9 +70,10 @@ func TestATurnStopsToAskAndCarriesOnWithTheAnswer(t *testing.T) {
 	}
 
 	stored := fixture.repository.awaitStatus(t, started.Turn.ID, StatusCompleted)
-	if stored.StateVersion != 4 {
-		// queued → running → waiting_input → running → completed.
-		t.Errorf("StateVersion = %d, want the turn to have moved four times", stored.StateVersion)
+	if stored.StateVersion != 5 {
+		// The insert is version 1, and queued → running → waiting_input →
+		// running → completed are four more.
+		t.Errorf("StateVersion = %d, want 5", stored.StateVersion)
 	}
 }
 

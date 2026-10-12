@@ -184,8 +184,13 @@ func (r *Runner) Start(ctx context.Context, request StartRequest) (Started, erro
 		SessionID:  conversation.ID,
 		Status:     StatusQueued,
 		Capability: capabilityName,
-		CreatedAt:  r.now(),
-		UpdatedAt:  r.now(),
+		// The insert is the first write to the turn, so this is where the
+		// version count starts. Leaving it at the zero value would store a turn
+		// below the first version the column accepts, and every turn would fail
+		// to start.
+		StateVersion: InitialStateVersion,
+		CreatedAt:    r.now(),
+		UpdatedAt:    r.now(),
 	}
 
 	// From here the turn has a context of its own, derived from the runner's

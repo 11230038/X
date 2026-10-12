@@ -98,8 +98,9 @@ func TestATurnIsPlayedOutInOrderAndEnds(t *testing.T) {
 	}
 
 	stored := fixture.repository.awaitStatus(t, started.Turn.ID, StatusCompleted)
-	if stored.StateVersion != 2 {
-		t.Errorf("StateVersion = %d, want the turn to have moved twice", stored.StateVersion)
+	if stored.StateVersion != 3 {
+		// The insert is version 1, then queued → running → completed.
+		t.Errorf("StateVersion = %d, want 3", stored.StateVersion)
 	}
 	if stored.FinishedAt.IsZero() {
 		t.Error("FinishedAt is zero on a finished turn")

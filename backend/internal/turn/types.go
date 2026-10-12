@@ -112,6 +112,14 @@ const (
 	CodeInternalError = "internal_error"
 )
 
+// InitialStateVersion is the version a turn is stored at when it is created.
+//
+// The version counts writes to the turn, and the insert is the first of them,
+// so a turn that has never moved is at one and its first transition takes it to
+// two. The column requires at least one, which is the same statement made where
+// it cannot be forgotten.
+const InitialStateVersion int64 = 1
+
 // Turn is one run of a capability in a session.
 type Turn struct {
 	ID        string
@@ -120,10 +128,10 @@ type Turn struct {
 	// Capability names what ran. It is empty until the turn starts, and stays
 	// empty on a turn that failed before a capability was chosen.
 	Capability string
-	// StateVersion counts the writes to this turn. Every change increments it,
-	// and a change is applied only if the version it was prepared from is still
-	// the stored one — which is what stops two writers from both believing they
-	// moved the turn.
+	// StateVersion counts the writes to this turn, starting at
+	// InitialStateVersion. Every change increments it, and a change is applied
+	// only if the version it was prepared from is still the stored one — which
+	// is what stops two writers from both believing they moved the turn.
 	StateVersion int64
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
