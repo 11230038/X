@@ -89,6 +89,9 @@ func TestLoadReadsCompleteDotenv(t *testing.T) {
 	if chat.Temperature != 0.7 {
 		t.Errorf("chat temperature = %v, want 0.7", chat.Temperature)
 	}
+	if chat.ContextBudgetTokens != 32000 {
+		t.Errorf("chat context budget = %d, want 32000", chat.ContextBudgetTokens)
+	}
 	if chat.Stages["responding"].MaxTokens != 4096 || chat.Stages["exploring"].MaxTokens != 1024 {
 		t.Errorf("chat stage limits were not loaded: %+v", chat.Stages)
 	}
@@ -234,13 +237,17 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{name: "capability config with an unknown field", key: "LLM_CAPABILITY_CONFIG_JSON",
 			value: `{"chat":{"temperatur":0.7,"stages":{"responding":{"max_tokens":1}}}}`},
 		{name: "capability temperature above the range", key: "LLM_CAPABILITY_CONFIG_JSON",
-			value: `{"chat":{"temperature":3,"stages":{"responding":{"max_tokens":1}}}}`},
+			value: `{"chat":{"temperature":3,"context_budget_tokens":32000,"stages":{"responding":{"max_tokens":1}}}}`},
 		{name: "capability temperature below the range", key: "LLM_CAPABILITY_CONFIG_JSON",
-			value: `{"chat":{"temperature":-1,"stages":{"responding":{"max_tokens":1}}}}`},
+			value: `{"chat":{"temperature":-1,"context_budget_tokens":32000,"stages":{"responding":{"max_tokens":1}}}}`},
 		{name: "capability stage without max tokens", key: "LLM_CAPABILITY_CONFIG_JSON",
-			value: `{"chat":{"temperature":0.7,"stages":{"responding":{}}}}`},
+			value: `{"chat":{"temperature":0.7,"context_budget_tokens":32000,"stages":{"responding":{}}}}`},
 		{name: "capability without stages", key: "LLM_CAPABILITY_CONFIG_JSON",
 			value: `{"chat":{"temperature":0.7}}`},
+		{name: "capability without a context budget", key: "LLM_CAPABILITY_CONFIG_JSON",
+			value: `{"chat":{"temperature":0.7,"stages":{"responding":{"max_tokens":1}}}}`},
+		{name: "capability with a zero context budget", key: "LLM_CAPABILITY_CONFIG_JSON",
+			value: `{"chat":{"temperature":0.7,"context_budget_tokens":0,"stages":{"responding":{"max_tokens":1}}}}`},
 		{name: "turn input timeout", key: "TURN_INPUT_TIMEOUT", value: "0s"},
 		{name: "turn rounds", key: "TURN_MAX_ROUNDS", value: "0"},
 	}
@@ -378,7 +385,7 @@ func validValues() map[string]string {
 		"LLM_TIMEOUT":              "2m",
 		// Single quotes keep godotenv from reading the braces and quotes, which
 		// is also how the shipped dotenv files spell this value.
-		"LLM_CAPABILITY_CONFIG_JSON": `'{"chat":{"temperature":0.7,"stages":{"exploring":{"max_tokens":1024},"responding":{"max_tokens":4096}}}}'`,
+		"LLM_CAPABILITY_CONFIG_JSON": `'{"chat":{"temperature":0.7,"context_budget_tokens":32000,"stages":{"exploring":{"max_tokens":1024},"responding":{"max_tokens":4096}}}}'`,
 		"TURN_INPUT_TIMEOUT":         "30m",
 		"TURN_MAX_ROUNDS":            "12",
 	}

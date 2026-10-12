@@ -17,7 +17,8 @@ func validLLMConfig() LLMConfig {
 		Timeout:       2 * time.Minute,
 		Capabilities: map[string]CapabilityParams{
 			"chat": {
-				Temperature: 0.7,
+				Temperature:         0.7,
+				ContextBudgetTokens: 32000,
 				Stages: map[string]StageParams{
 					"exploring":  {MaxTokens: 1024},
 					"responding": {MaxTokens: 4096},
@@ -57,16 +58,19 @@ func TestLLMConfigValidateRejectsInvalidSettings(t *testing.T) {
 		{name: "zero task max tokens", mutate: func(c *LLMConfig) { c.TaskMaxTokens = 0 }},
 		{name: "no capabilities", mutate: func(c *LLMConfig) { c.Capabilities = nil }},
 		{name: "capability without stages", mutate: func(c *LLMConfig) {
-			c.Capabilities["chat"] = CapabilityParams{Temperature: 0.5}
+			c.Capabilities["chat"] = CapabilityParams{Temperature: 0.5, ContextBudgetTokens: 32000}
 		}},
 		{name: "blank capability name", mutate: func(c *LLMConfig) {
 			c.Capabilities[" "] = CapabilityParams{
-				Temperature: 0.5,
-				Stages:      map[string]StageParams{"responding": {MaxTokens: 1}},
+				Temperature:         0.5,
+				ContextBudgetTokens: 32000,
+				Stages:              map[string]StageParams{"responding": {MaxTokens: 1}},
 			}
 		}},
 		{name: "temperature above the range", mutate: withChat(func(p *CapabilityParams) { p.Temperature = 2.5 })},
 		{name: "temperature below the range", mutate: withChat(func(p *CapabilityParams) { p.Temperature = -0.1 })},
+		{name: "zero context budget", mutate: withChat(func(p *CapabilityParams) { p.ContextBudgetTokens = 0 })},
+		{name: "negative context budget", mutate: withChat(func(p *CapabilityParams) { p.ContextBudgetTokens = -1 })},
 		{name: "blank stage name", mutate: withChat(func(p *CapabilityParams) {
 			p.Stages[" "] = StageParams{MaxTokens: 1}
 		})},
@@ -96,7 +100,7 @@ func TestLLMConfigValidateRejectsInvalidSettings(t *testing.T) {
 
 func TestLoadParsesCapabilityParameters(t *testing.T) {
 	values := validValues()
-	values["LLM_CAPABILITY_CONFIG_JSON"] = `'{"chat":{"temperature":0.2,"stages":{"exploring":{"max_tokens":256}}}}'`
+	values["LLM_CAPABILITY_CONFIG_JSON"] = `'{"chat":{"temperature":0.2,"context_budget_tokens":32000,"stages":{"exploring":{"max_tokens":256}}}}'`
 
 	cfg, err := Load(writeDotenv(t, values))
 	if err != nil {
@@ -106,6 +110,9 @@ func TestLoadParsesCapabilityParameters(t *testing.T) {
 	chat := cfg.LLM.Capabilities["chat"]
 	if chat.Temperature != 0.2 {
 		t.Errorf("temperature = %v, want 0.2", chat.Temperature)
+	}
+	if chat.ContextBudgetTokens != 32000 {
+		t.Errorf("context_budget_tokens = %d, want 32000", chat.ContextBudgetTokens)
 	}
 	if chat.Stages["exploring"].MaxTokens != 256 {
 		t.Errorf("exploring max_tokens = %d, want 256", chat.Stages["exploring"].MaxTokens)
@@ -120,11 +127,11 @@ func TestLoadRejectsMalformedCapabilityParameters(t *testing.T) {
 		{name: "not JSON", value: "not json"},
 		{name: "array instead of object", value: "[]"},
 		{name: "empty object", value: "{}"},
-		{name: "trailing content", value: `{"chat":{"temperature":0.5,"stages":{"responding":{"max_tokens":1}}}} extra`},
+		{name: "trailing content", value: `{"chat":{"temperature":0.5,"context_budget_tokens":32000,"stages":{"responding":{"max_tokens":1}}}} extra`},
 		{name: "missing temperature", value: `{"chat":{"stages":{"responding":{"max_tokens":1}}}}`},
-		{name: "missing max tokens", value: `{"chat":{"temperature":0.5,"stages":{"responding":{}}}}`},
+		{name: "missing max tokens", value: `{"chat":{"temperature":0.5,"context_budget_tokens":32000,"stages":{"responding":{}}}}`},
 		{name: "missing stages", value: `{"chat":{"temperature":0.5}}`},
-		{name: "unknown nested field", value: `{"chat":{"temperature":0.5,"stages":{"responding":{"max_tokens":1}},"top_p":0.9}}`},
+		{name: "unknown nested field", value: `{"chat":{"temperature":0.5,"context_budget_tokens":32000,"stages":{"responding":{"max_tokens":1}},"top_p":0.9}}`},
 	}
 
 	for _, tt := range cases {

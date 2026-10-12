@@ -34,7 +34,12 @@ type LLMConfig struct {
 // CapabilityParams is the CFG-01 tuning for a single capability.
 type CapabilityParams struct {
 	Temperature float64
-	Stages      map[string]StageParams
+	// ContextBudgetTokens bounds the conversation the capability may send in one
+	// model call. It sits with the rest of CFG-01's per-capability runtime
+	// limits rather than being derived from a model name, which would put a
+	// window size in code that no deployment could adjust.
+	ContextBudgetTokens int
+	Stages              map[string]StageParams
 }
 
 // StageParams is the CFG-01 tuning for a single stage of a capability.
@@ -79,6 +84,9 @@ func validateCapabilityParams(capabilities map[string]CapabilityParams) error {
 		}
 		if params.Temperature < 0 || params.Temperature > 2 {
 			return fmt.Errorf("LLM_CAPABILITY_CONFIG_JSON: %s temperature must be between 0 and 2", name)
+		}
+		if params.ContextBudgetTokens <= 0 {
+			return fmt.Errorf("LLM_CAPABILITY_CONFIG_JSON: %s context_budget_tokens must be a positive integer", name)
 		}
 		if len(params.Stages) == 0 {
 			return fmt.Errorf("LLM_CAPABILITY_CONFIG_JSON: %s must configure at least one stage", name)
@@ -127,6 +135,7 @@ func loadLLMConfig(values map[string]string) (LLMConfig, error) {
 // value, so a missing temperature cannot pass as 0.
 type capabilityParamsJSON struct {
 	Temperature *float64                   `json:"temperature"`
+	Budget      *int                       `json:"context_budget_tokens"`
 	Stages      map[string]stageParamsJSON `json:"stages"`
 }
 
@@ -156,7 +165,11 @@ func parseCapabilityParams(raw string) (map[string]CapabilityParams, error) {
 		for stage, stageEntry := range entry.Stages {
 			stages[stage] = StageParams{MaxTokens: *stageEntry.MaxTokens}
 		}
-		capabilities[name] = CapabilityParams{Temperature: *entry.Temperature, Stages: stages}
+		capabilities[name] = CapabilityParams{
+			Temperature:         *entry.Temperature,
+			ContextBudgetTokens: *entry.Budget,
+			Stages:              stages,
+		}
 	}
 	return capabilities, nil
 }
@@ -168,6 +181,9 @@ func validateCapabilityShape(decoded map[string]capabilityParamsJSON) error {
 	for name, entry := range decoded {
 		if entry.Temperature == nil {
 			return fmt.Errorf("LLM_CAPABILITY_CONFIG_JSON: %s must set temperature", name)
+		}
+		if entry.Budget == nil {
+			return fmt.Errorf("LLM_CAPABILITY_CONFIG_JSON: %s must set context_budget_tokens", name)
 		}
 		if len(entry.Stages) == 0 {
 			return fmt.Errorf("LLM_CAPABILITY_CONFIG_JSON: %s must set at least one stage", name)
