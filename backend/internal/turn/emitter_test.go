@@ -158,6 +158,41 @@ func TestARunOfAnswerTextIsWrittenAsOneEvent(t *testing.T) {
 	}
 }
 
+func TestAWriteThatFailsLeavesNoHoleInTheStream(t *testing.T) {
+	fixture := newEmitterFixture(t, 0)
+	storageAway := errors.New("storage is away")
+
+	// A write that fails, as one does when the turn is cancelled underneath it.
+	// The turn goes on to end, and the events it stores afterwards are what a
+	// client replays: a number spent on an event that never arrived would make
+	// the replay skip one.
+	fixture.repository.appendErr = storageAway
+	if err := fixture.emitter.Emit(context.Background(), event.Event{Type: event.TypeStageStart}); !errors.Is(err, storageAway) {
+		t.Fatalf("Emit() error = %v, want the failure storage reported", err)
+	}
+
+	// A run of text that is only in memory when its write fails is lost with it,
+	// and the number it would have taken is not.
+	fixture.say(t, "chat", "responding", "闭包是")
+	if err := fixture.emitter.Emit(context.Background(), event.Event{Type: event.TypeToolCall}); !errors.Is(err, storageAway) {
+		t.Fatalf("Emit() error = %v, want the flush of the run to report it", err)
+	}
+
+	fixture.repository.appendErr = nil
+	fixture.emit(t, event.Event{Type: event.TypeDone})
+	fixture.emit(t, event.Event{Type: event.TypeSessionMeta})
+
+	stored := fixture.repository.stored()
+	if len(stored) != 2 {
+		t.Fatalf("storage holds %d events: %+v", len(stored), stored)
+	}
+	for i, record := range stored {
+		if record.Seq != int64(i+1) {
+			t.Errorf("event %d has Seq %d, want %d", i, record.Seq, i+1)
+		}
+	}
+}
+
 func TestARunIsWrittenBeforeTheEventThatInterruptsIt(t *testing.T) {
 	fixture := newEmitterFixture(t, 0)
 

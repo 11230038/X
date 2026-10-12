@@ -2,6 +2,7 @@ package turn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -195,6 +196,14 @@ func (r *turnRun) endTurn(ctx context.Context, failure error) {
 // reporting that as one would call a client's own cancel an error.
 func (r *turnRun) outcome(failure error) (Status, *Failure) {
 	if r.ctx.Err() != nil {
+		// A cancel explains a call that ended because of it, and nothing else.
+		// Anything other than that is a failure that happened to land in the
+		// same moment, and a cancelled turn reports no failure to a client —
+		// so this log is the only place it exists.
+		if failure != nil && !errors.Is(failure, context.Canceled) && !errors.Is(failure, context.DeadlineExceeded) {
+			r.runner.logger.ErrorContext(r.ctx, "a turn was cancelled while a failure was in flight",
+				"turn_id", r.turn.ID, "capability", r.turn.Capability, "error", failure)
+		}
 		return StatusCancelled, nil
 	}
 	if failure == nil {

@@ -30,9 +30,9 @@ type Broadcaster interface {
 // Emitter is the turn's single event outlet.
 //
 // It is the only writer of a turn's event stream, which is what makes Seq
-// trustworthy: numbers are assigned here and nowhere else, one at a time, so
-// they are gap-free and ordered by construction rather than by everyone
-// agreeing to be careful.
+// trustworthy: numbers are taken here and nowhere else, one at a time, at the
+// moment the event is stored, so the stream is gap-free and ordered by
+// construction rather than by everyone agreeing to be careful.
 //
 // The order inside Emit is fixed: store the event, and only then publish it. A
 // client that saw an event the database does not have would be unable to replay
@@ -51,10 +51,11 @@ type Emitter struct {
 	// seq is the number of the last event written, so the next one is seq+1 and
 	// the first of a turn is 1.
 	seq int64
-	// pending is a run of answer text waiting to be written, holding the seq it
-	// was assigned when the run started. The number is taken at that moment and
-	// not at the write, so that a merged run keeps the place in the order that
-	// its first fragment earned.
+	// pending is a run of answer text waiting to be written, holding the event
+	// as it was produced and no number yet: numbers are taken when an event is
+	// stored. What keeps a run in the order of the fragment that started it is
+	// that nothing else is written while it is buffered — Emit flushes it before
+	// writing anything that is not part of the run.
 	pending *event.Event
 	timer   *time.Timer
 	// flushErr is a background flush that failed. Nothing is waiting on that
@@ -118,7 +119,7 @@ func (e *Emitter) Emit(ctx context.Context, record event.Event) error {
 		if err := e.flushLocked(ctx); err != nil {
 			return err
 		}
-		return e.write(ctx, e.assign(record))
+		return e.write(ctx, record)
 	}
 	if e.pending != nil && !sameRun(*e.pending, record) {
 		if err := e.flushLocked(ctx); err != nil {
@@ -126,13 +127,13 @@ func (e *Emitter) Emit(ctx context.Context, record event.Event) error {
 		}
 	}
 	if e.pending == nil {
-		started := e.assign(record)
-		e.pending = &started
+		buffered := record
+		e.pending = &buffered
 		e.timer = time.AfterFunc(e.flushInterval, e.flushFromTimer)
 		// The first fragment of a run can already be too large to hold: a
 		// capability that produces its answer in one piece never gets a second
 		// chance to trip the threshold.
-		if len(started.Content) < contentFlushBytes {
+		if len(buffered.Content) < contentFlushBytes {
 			return nil
 		}
 		return e.flushLocked(ctx)
@@ -197,22 +198,23 @@ func (e *Emitter) flushLocked(ctx context.Context) error {
 // write stores an event and then publishes it. The order is the whole point:
 // storage is the record of what happened, and a subscriber may only be told
 // about something that is already in it.
+//
+// The sequence number is taken here, as part of storing the event, and not when
+// the event is produced. A number taken for an event the database never
+// accepted would leave a hole in the stream, and nothing reading the stream can
+// tell a hole from an event it was never sent — which is what "gap-free" means
+// and why the number is only spent on an event that arrived.
 func (e *Emitter) write(ctx context.Context, record event.Event) error {
+	next := e.seq + 1
+	record.TurnID = e.turnID
+	record.Seq = next
+	record.Timestamp = e.now()
 	if err := e.repository.AppendEvent(ctx, record); err != nil {
 		return err
 	}
+	e.seq = next
 	e.broadcaster.Publish(record.TurnID, record)
 	return nil
-}
-
-// assign takes the next sequence number and stamps the event. Producers
-// describe what happened; when it happened in the stream is not theirs to say.
-func (e *Emitter) assign(record event.Event) event.Event {
-	e.seq++
-	record.TurnID = e.turnID
-	record.Seq = e.seq
-	record.Timestamp = e.now()
-	return record
 }
 
 func (e *Emitter) stopTimerLocked() {
