@@ -21,7 +21,7 @@ X/
 - Gin 1.10.0
 - 标准库 `net/http`
 - 标准库 `log/slog`
-- PostgreSQL
+- seekdb v1.4.0.0（MySQL 协议兼容）
 - GORM
 - Goose（版本化 SQL migration）
 - `golang.org/x/crypto/bcrypt`（密码哈希）
@@ -63,7 +63,7 @@ go vet ./...
 
 - HTTP：`HTTP_ADDR`、`APP_ENV`、`SHUTDOWN_TIMEOUT`、`HTTP_READ_HEADER_TIMEOUT`、`HTTP_READ_TIMEOUT`、`HTTP_WRITE_TIMEOUT`、`HTTP_IDLE_TIMEOUT`
 - 文件上传：`UPLOAD_ROOT`、`UPLOAD_MAX_FILE_BYTES`、`UPLOAD_MAX_REQUEST_BYTES`
-- PostgreSQL：`DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`、`DB_SCHEMA`、`DB_SSLMODE`、`DB_TIMEZONE`、`DB_PING_TIMEOUT`
+- seekdb：`DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`、`DB_CHARSET`、`DB_COLLATION`、`DB_TLS`、`DB_TIMEZONE`、`DB_PING_TIMEOUT`
 - 连接池：`DB_MAX_OPEN_CONNS`、`DB_MAX_IDLE_CONNS`、`DB_CONN_MAX_LIFETIME`、`DB_CONN_MAX_IDLE_TIME`
 - 认证：`AUTH_JWT_SECRET`、`AUTH_JWT_ISSUER`、`AUTH_TOKEN_TTL`
 
@@ -75,7 +75,21 @@ openssl rand -base64 48
 
 [backend/.env.example](backend/.env.example) 中的占位值故意短于 32 字节，照抄模板而不替换会让服务在监听端口前启动失败。`AUTH_TOKEN_TTL` 是 Go duration 字面量（如 `24h`）。密钥值不会出现在任何日志或错误信息中。
 
-API 启动不会自动修改 schema：必须先通过 migration 命令升级到代码要求的版本。数据库配置和密码不会写入日志。
+API 启动不会自动修改 schema：必须先通过 migration 命令升级到代码要求的版本。`cmd/migrate` 会先用一条不选库的连接执行 `CREATE DATABASE IF NOT EXISTS`（运行 migration 的连接无法创建自己指向的库），服务本身不会建库。数据库配置和密码不会写入日志。
+
+### seekdb 约束
+
+`DB_NAME` 只接受小写标识符，因为 seekdb 运行在 `lower_case_table_names=1` 下，混合大小写会被折叠。`DB_CHARSET`、`DB_COLLATION` 和 `DB_TIMEZONE` 也做格式限制，避免任意文本进入连接串。
+
+三个 seekdb 默认值与本服务的约定冲突，全部在连接串或 DDL 中显式钉死，不依赖服务端默认：
+
+| 默认行为 | 后果 | 处理方式 |
+| --- | --- | --- |
+| 默认排序规则 `utf8mb4_general_ci` | `Test` 与 `test` 会被当成同一个用户名 | 所有表 `COLLATE=utf8mb4_bin`；`DB_COLLATION` 必须指定二进制排序规则 |
+| 会话时区默认取宿主偏移（本地为 `+08:00`） | `CURRENT_TIMESTAMP` 按该偏移求值，`creat_time` / `update_time` 全部偏移 | DSN 固定 `time_zone='+00:00'`；`DB_TIMEZONE` 只接受 `UTC` |
+| 没有部分索引（partial index） | 无法表达「仅对未删除行唯一」这类约束 | 删除 5 处部分索引，改为普通索引，语义在应用层保证 |
+
+`DB_PORT` 默认 `2881`。`DB_TLS` 是严格的 `true` / `false`：seekdb 走 MySQL 协议，没有 PostgreSQL 的 `sslmode` 档位；置为 `true` 时使用驱动内置的 `true` TLS 配置。schema 里也不再用 `TEXT` 作为主键、唯一键或外键——seekdb 不支持这类用法（`ERROR 1167` / `1215`），相应列改为带显式长度的 `VARCHAR`。
 
 `UPLOAD_ROOT` 的相对路径以 `backend/.env` 所在目录为基准解析；示例值 `../data/upload` 指向仓库根目录的 `data/upload/`。应用启动时创建 `.staging`、`images`、`pdf`、`ppt`、`doc`、`md`、`mp3` 子目录，目录不可创建时启动失败。
 
@@ -86,7 +100,7 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `GET` | `/` | 服务欢迎信息 |
 | `GET` | `/health` | 基础健康检查 |
 | `GET` | `/healthz` | liveness 检查 |
-| `GET` | `/readyz` | readiness 检查；PostgreSQL 可连接时返回 200，否则返回 503 |
+| `GET` | `/readyz` | readiness 检查；seekdb 可连接时返回 200，否则返回 503 |
 | `POST` | `/api/v1/library/files` | 上传单个文件；`multipart/form-data` 字段固定为 `file`，成功返回 201 |
 | `POST` | `/api/v1/auth/register` | 注册并直接返回登录态，成功返回 201 |
 | `POST` | `/api/v1/auth/login` | 用户名密码登录，成功返回 200 |
@@ -110,7 +124,7 @@ handler 只提供自己的 payload，`request_id` 由 `httpx` 统一附加，成
 
 文件库允许图片（JPG/JPEG/PNG/GIF/WebP）、PDF、PPT/PPTX、DOC/DOCX、Markdown 和 MP3，并按类型写入 `data/upload/` 的固定子目录。服务端流式限制大小、计算 SHA-256、验证扩展名与实际内容、先写 staging 再原子移动；数据库写入失败会补偿删除文件。SVG、宏 Office 文件以及未列出的格式会被拒绝。响应只返回逻辑 metadata，不暴露 `library_path` 或绝对路径，也没有静态目录或下载接口。
 
-当前上传接口没有认证、用户归属、限流、磁盘总配额或恶意文件扫描，只适用于本机或可信网络环境，不应直接暴露到互联网。文件系统与 PostgreSQL 无法共享事务；普通失败会补偿清理，但进程在最终移动后立即崩溃仍可能留下 orphan 文件，当前版本尚无后台 reconciliation。
+当前上传接口没有认证、用户归属、限流、磁盘总配额或恶意文件扫描，只适用于本机或可信网络环境，不应直接暴露到互联网。文件系统与 seekdb 无法共享事务；普通失败会补偿清理，但进程在最终移动后立即崩溃仍可能留下 orphan 文件，当前版本尚无后台 reconciliation。
 
 未知路径返回统一格式的 404 JSON，不支持的方法返回 405。每个请求都会返回 `X-Request-ID`；服务端不会向客户端泄露 panic 详情、堆栈或内部错误。
 
@@ -157,13 +171,13 @@ token 是 HS256 JWT，`iss` 为 `AUTH_JWT_ISSUER`，`sub` 是 `user_id`，有效
 
 已知缺口：没有刷新 token、token 吊销、登出接口、改密与找回密码、邮箱验证、限流与账号锁定、2FA/CAPTCHA；没有基于 `role` 的授权判定（`role` 只作为信息返回）；`/api/v1/library/files` 因为 `library_files` 还没有 owner 列，仍然不需要认证。
 
-当前后端已接入 PostgreSQL 数据基础设施。版本化 SQL 除 `users` 外，conversation migration v2 还创建 `turn_event_types`、`sessions`、`messages`、`summaries`、`turns`、`turn_events`，对应 GORM 映射位于 `internal/data/models`。`turn_event_types` 是 ID 1–15 的稳定整数查找表；summary 按 revision 保留历史，`summary_up_to_msg_id` 是由字符串 message ID 组成的 JSON 数组，不是外键；`turns.assistant_message_id` 是指向 `messages.message_id` 的字符串外键。删除 session 会级联删除其 messages、summaries、turns，删除 turn 会级联删除其 events。
+当前后端已接入 seekdb 数据基础设施。版本化 SQL 除 `users` 外，conversation migration v2 还创建 `turn_event_types`、`sessions`、`messages`、`summaries`、`turns`、`turn_events`，对应 GORM 映射位于 `internal/data/models`。`turn_event_types` 是 ID 1–15 的稳定整数查找表；summary 按 revision 保留历史，`summary_up_to_msg_id` 是由字符串 message ID 组成的 JSON 数组，不是外键；`turns.assistant_message_id` 是指向 `messages.message_id` 的字符串外键。删除 session 会级联删除其 messages、summaries、turns，删除 turn 会级联删除其 events。
 
-PostgreSQL migration v3 新增 quiz/practice 持久化表 `notebook_entries`、`notebook_categories`、`notebook_entry_categories`、`reading_quiz_pending`、`practice_review_state`、`practice_review_events`。`notebook_entries.notebook_entries_id` 是主键，`question_id` 在全表全局唯一；可空的 `session_id`、`turn_id` 分别引用 conversation 表，并使用 `ON DELETE CASCADE`。`reading_quiz_pending` 刻意只保存 `question_id`、`question`、`creat_time`。
+migration v3 新增 quiz/practice 持久化表 `notebook_entries`、`notebook_categories`、`notebook_entry_categories`、`reading_quiz_pending`、`practice_review_state`、`practice_review_events`。`notebook_entries.notebook_entries_id` 是主键，`question_id` 在全表全局唯一；可空的 `session_id`、`turn_id` 分别引用 conversation 表，并使用 `ON DELETE CASCADE`。`reading_quiz_pending` 刻意只保存 `question_id`、`question`、`creat_time`。
 
-PostgreSQL migration v4 新增七张 Mastery Path 表和四张 Reading Workspace 表。Mastery 根表使用 `mastery_paths.mastery_path_id`，子表使用 `path_id` 外键；`mastery_path_sessions`、`reading_workspace_sessions`、`reading_workspace_materials` 使用复合主键。删除 mastery path 会级联清理其子记录；删除 reading workspace 只清理映射，不删除独立 session/material；删除 material 会清理 workspace-material 映射，并把 workspace 与 workspace-session 的 `active_material_id` 置空。`notebook_entries.mastery_path_id` 仍是应用层 ID，不追补数据库外键。
+migration v4 新增七张 Mastery Path 表和四张 Reading Workspace 表。Mastery 根表使用 `mastery_paths.mastery_path_id`，子表使用 `path_id` 外键；`mastery_path_sessions`、`reading_workspace_sessions`、`reading_workspace_materials` 使用复合主键。删除 mastery path 会级联清理其子记录；删除 reading workspace 只清理映射，不删除独立 session/material；删除 material 会清理 workspace-material 映射，并把 workspace 与 workspace-session 的 `active_material_id` 置空。`notebook_entries.mastery_path_id` 仍是应用层 ID，不追补数据库外键。
 
-PostgreSQL migration v5 新增 `library_files` 与 `llm_calls`。文件本体位于本地磁盘，`library_files.library_path` 只保存相对 `UPLOAD_ROOT` 的路径；SHA-256 用于完整性和查询，不限制相同内容重复上传。`llm_calls.usage_json` 使用 PostgreSQL `JSON` 且必须是 object；`session_id` 与 `turn_id` 是历史关联标识，刻意不建立外键，因此 conversation 删除不会删除用量历史。本次不 seed 这两张表：文件 metadata 不能脱离真实文件，LLM 用量也不应伪造。字段、约束、索引和删除规则以 migration SQL 为唯一事实来源。
+migration v5 新增 `library_files` 与 `llm_calls`。文件本体位于本地磁盘，`library_files.library_path` 只保存相对 `UPLOAD_ROOT` 的路径；SHA-256 用于完整性和查询，不限制相同内容重复上传。`library_files` 的路径约束用 `REGEXP` 加三层 `SUBSTRING_INDEX` 复刻了原来的「目录前缀与文件名中的 `lib_<id>` 必须与该行 `id` 一致」，因为 seekdb 没有部分索引也没有等价于 `split_part` 的函数。`llm_calls.usage_json` 是 seekdb `JSON` 且必须是 object；`session_id` 与 `turn_id` 是历史关联标识，刻意不建立外键，因此 conversation 删除不会删除用量历史。本次不 seed 这两张表：文件 metadata 不能脱离真实文件，LLM 用量也不应伪造。字段、约束、索引和删除规则以 migration SQL 为唯一事实来源。
 
 当前已实现 File Library 上传与用户认证两个垂直切片；conversation、quiz/practice、Mastery Path 与 Reading Workspace 的 repository、service、API，以及 LLM 调用写入链路仍属后续工作。现阶段没有 CORS、限流、指标、Tracing、Swagger 或消息队列。`users.password` 只允许保存密码哈希，GORM 模型不得直接作为 API 响应。
 
