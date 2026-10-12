@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -96,7 +97,7 @@ func (c *Client) Stream(ctx context.Context, req Request, onDelta func(Delta) er
 	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return Response{}, readHTTPError(resp)
+		return Response{}, c.readHTTPError(resp)
 	}
 	return c.consume(ctx, resp.Body, onDelta)
 }
@@ -168,7 +169,13 @@ func wrapContext(ctx context.Context, err error) error {
 	return err
 }
 
-func readHTTPError(resp *http.Response) error {
+// readHTTPError turns a failed response into the error the rest of the service
+// reads, with this client's own key taken out of it.
+//
+// The text is the provider's, and providers differ in how much of the request
+// they repeat back: one that echoes the key would otherwise put it in this
+// service's logs, which is the one place configuration says it must never be.
+func (c *Client) readHTTPError(resp *http.Response) error {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	if err != nil {
 		return &HTTPError{StatusCode: resp.StatusCode}
@@ -187,8 +194,16 @@ func readHTTPError(resp *http.Response) error {
 	return &HTTPError{
 		StatusCode: resp.StatusCode,
 		Code:       payload.Error.Code,
-		Message:    payload.Error.Message,
+		Message:    redact(payload.Error.Message, c.apiKey),
 	}
+}
+
+// redact takes a secret out of text this service did not write.
+func redact(text, secret string) string {
+	if secret == "" || !strings.Contains(text, secret) {
+		return text
+	}
+	return strings.ReplaceAll(text, secret, "[redacted]")
 }
 
 // toolCallBuilder reassembles tool calls that arrive as fragments. Fragments

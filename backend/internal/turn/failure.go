@@ -8,6 +8,14 @@ import (
 	"backend/internal/capability"
 )
 
+// retryDecider is a failure that knows whether repeating it could ever work.
+//
+// Whether a call is worth repeating is sometimes the provider's call rather than
+// this service's: a rejected key or a request it will not accept fails the same
+// way every time. A client told to retry one of those has been told something
+// untrue, and it will find out by failing again.
+type retryDecider interface{ Retryable() bool }
+
 // clientMessages is what a client is told about each failure code.
 //
 // The internal reason stays in the log and the database row: a client acts on
@@ -33,6 +41,17 @@ func describe(failure error) Failure {
 		described.Code, described.Retryable = CodeRoundsExhausted, false
 	case errors.Is(failure, context.DeadlineExceeded):
 		described.Code, described.Retryable = CodeTimeout, true
+	}
+
+	// A failure this service could not classify may still have come from
+	// something that classified it itself, and that answer is better than the
+	// default: a provider that rejected the request knows a retry will be
+	// rejected the same way, whatever the text of the failure says.
+	if described.Code == CodeInternalError {
+		var decider retryDecider
+		if errors.As(failure, &decider) {
+			described.Retryable = decider.Retryable()
+		}
 	}
 	return described
 }

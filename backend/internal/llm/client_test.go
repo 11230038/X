@@ -355,7 +355,10 @@ func TestStreamReturnsAProviderErrorWithoutTheAPIKey(t *testing.T) {
 	client := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		if _, err := io.WriteString(w, `{"error":{"message":"Authentication Fails","type":"authentication_error","code":"invalid_api_key"}}`); err != nil {
+		// The body repeats the key back, which is what a gateway that reports
+		// what it received does. The error must not carry it further.
+		body := `{"error":{"message":"Authentication Fails for key ` + testAPIKey + `","type":"authentication_error","code":"invalid_api_key"}}`
+		if _, err := io.WriteString(w, body); err != nil {
 			t.Errorf("write body: %v", err)
 		}
 	})
