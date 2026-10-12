@@ -5,6 +5,7 @@ import (
 
 	"backend/internal/handler"
 	"backend/internal/middleware"
+	"backend/internal/ws"
 	"github.com/gin-gonic/gin"
 )
 
@@ -13,6 +14,9 @@ type Handlers struct {
 	System        *handler.SystemHandler
 	LibraryFiles  *handler.LibraryFilesHandler
 	Auth          *handler.AuthHandler
+	Sessions      *handler.SessionHandler
+	Capabilities  *handler.CapabilityHandler
+	WebSocket     *ws.Handler
 	TokenVerifier middleware.TokenVerifier
 }
 
@@ -48,6 +52,19 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	apiV1.POST("/auth/login", handlers.Auth.Login)
 	authenticated := apiV1.Group("", middleware.RequireAuth(handlers.TokenVerifier, logger))
 	authenticated.GET("/auth/me", handlers.Auth.Me)
+	authenticated.GET("/capabilities", handlers.Capabilities.List)
+	authenticated.POST("/sessions", handlers.Sessions.Create)
+	authenticated.GET("/sessions", handlers.Sessions.List)
+	authenticated.GET("/sessions/:sessionID", handlers.Sessions.Get)
+	authenticated.PATCH("/sessions/:sessionID", handlers.Sessions.Rename)
+	authenticated.DELETE("/sessions/:sessionID", handlers.Sessions.SoftDelete)
+	authenticated.POST("/sessions/:sessionID/restore", handlers.Sessions.Restore)
+	authenticated.DELETE("/sessions/:sessionID/permanent", handlers.Sessions.DeletePermanently)
+	authenticated.GET("/sessions/:sessionID/messages", handlers.Sessions.Messages)
+	// The socket is authenticated by the middleware above before it is
+	// upgraded, so an unauthenticated request is answered as an HTTP request
+	// rather than becoming a connection (WS-06).
+	authenticated.GET("/ws", handlers.WebSocket.Serve)
 	router.NoRoute(handlers.System.NotFound)
 	router.NoMethod(handlers.System.MethodNotAllowed)
 

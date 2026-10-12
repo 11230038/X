@@ -314,6 +314,16 @@ func (r *Runner) ActiveTurn(ctx context.Context, sessionID string) (Turn, error)
 	return r.repository.ActiveTurn(ctx, sessionID)
 }
 
+// LastSeq returns how far a turn's event stream has got, or zero if it has
+// produced nothing yet.
+//
+// It is what a client that is coming back needs: the position it last saw is
+// only useful compared with where the turn actually is, and a client that
+// guessed would either skip events or be sent ones it already had.
+func (r *Runner) LastSeq(ctx context.Context, turnID string) (int64, error) {
+	return r.repository.LastSeq(ctx, turnID)
+}
+
 // Subscribe attaches to a turn's stream from a position in it.
 //
 // Reading the turn's events and reading whether it has already ended are the

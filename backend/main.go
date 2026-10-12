@@ -18,6 +18,7 @@ import (
 	"backend/internal/handler"
 	"backend/internal/library"
 	"backend/internal/server"
+	"backend/internal/session"
 )
 
 func main() {
@@ -90,10 +91,28 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 	if err != nil {
 		return fmt.Errorf("initialize authentication: %w", err)
 	}
+	sessionService, err := session.NewService(session.NewGORMRepository(database.GORM()))
+	if err != nil {
+		return fmt.Errorf("initialize sessions: %w", err)
+	}
+	ai, err := assemble(cfg, logger, database.GORM(), sessionService)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer cancel()
+		if err := ai.close(closeCtx); err != nil {
+			runErr = errors.Join(runErr, err)
+		}
+	}()
 	router := server.NewRouter(logger, cfg.AppEnv, server.Handlers{
 		System:        system,
 		LibraryFiles:  libraryFiles,
 		Auth:          handler.NewAuthHandler(authService, logger),
+		Sessions:      handler.NewSessionHandler(sessionService, logger),
+		Capabilities:  handler.NewCapabilityHandler(ai.capabilities),
+		WebSocket:     ai.socket,
 		TokenVerifier: authService,
 	})
 	httpServer := server.NewHTTPServer(cfg, router)
