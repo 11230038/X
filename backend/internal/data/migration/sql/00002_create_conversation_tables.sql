@@ -1,11 +1,14 @@
 -- +goose Up
+-- seekdb/MySQL: TEXT is neither indexable nor defaultable, so keyed columns are
+-- VARCHAR(n). utf8mb4_bin preserves the byte-exact comparison the previous
+-- PostgreSQL schema had by default.
 CREATE TABLE turn_event_types (
     type_id SMALLINT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT NOT NULL,
+    name VARCHAR(64) NOT NULL,
+    description VARCHAR(255) NOT NULL,
     CONSTRAINT turn_event_types_name_unique UNIQUE (name),
-    CONSTRAINT turn_event_types_name_not_blank CHECK (btrim(name) <> '')
-);
+    CONSTRAINT turn_event_types_name_not_blank CHECK (TRIM(name) <> '')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 INSERT INTO turn_event_types (type_id, name, description) VALUES
     (1, 'stage_start', '阶段开始'),
@@ -25,76 +28,77 @@ INSERT INTO turn_event_types (type_id, name, description) VALUES
     (15, 'wait_for_input', '等待用户输入');
 
 CREATE TABLE sessions (
-    session_id TEXT PRIMARY KEY,
+    session_id VARCHAR(128) PRIMARY KEY,
     title TEXT,
-    creat_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    creat_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     preferences_json JSON,
-    workspace_mode TEXT,
-    CONSTRAINT sessions_id_not_blank CHECK (btrim(session_id) <> '')
-);
+    workspace_mode VARCHAR(64),
+    CONSTRAINT sessions_id_not_blank CHECK (TRIM(session_id) <> '')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE INDEX idx_sessions_update_time ON sessions (update_time DESC);
 
 CREATE TABLE messages (
-    message_id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
+    message_id VARCHAR(128) PRIMARY KEY,
+    session_id VARCHAR(128) NOT NULL,
     content TEXT,
-    role TEXT NOT NULL,
+    role VARCHAR(64) NOT NULL,
     extra JSON,
-    creat_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    creat_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     metadata_json JSON,
     attachments_json JSON,
     event_json JSON,
-    capability TEXT,
-    CONSTRAINT messages_id_not_blank CHECK (btrim(message_id) <> ''),
-    CONSTRAINT messages_role_not_blank CHECK (btrim(role) <> ''),
+    capability VARCHAR(64),
+    CONSTRAINT messages_id_not_blank CHECK (TRIM(message_id) <> ''),
+    CONSTRAINT messages_role_not_blank CHECK (TRIM(role) <> ''),
     CONSTRAINT messages_session_fk FOREIGN KEY (session_id)
         REFERENCES sessions (session_id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE INDEX idx_messages_session_creat
     ON messages (session_id, creat_time, message_id);
 
 CREATE TABLE summaries (
-    summary_id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
+    summary_id VARCHAR(128) PRIMARY KEY,
+    session_id VARCHAR(128) NOT NULL,
     compressed_summary TEXT,
     summary_up_to_msg_id JSON,
     revision BIGINT NOT NULL,
-    creat_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT summaries_id_not_blank CHECK (btrim(summary_id) <> ''),
+    creat_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT summaries_id_not_blank CHECK (TRIM(summary_id) <> ''),
     CONSTRAINT summaries_revision_positive CHECK (revision >= 1),
+    -- MySQL spells the type test as a function and returns the name in upper case.
     CONSTRAINT summaries_message_ids_array CHECK (
         summary_up_to_msg_id IS NULL
-        OR json_typeof(summary_up_to_msg_id) = 'array'
+        OR JSON_TYPE(summary_up_to_msg_id) = 'ARRAY'
     ),
     CONSTRAINT summaries_session_revision_unique UNIQUE (session_id, revision),
     CONSTRAINT summaries_session_fk FOREIGN KEY (session_id)
         REFERENCES sessions (session_id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE INDEX idx_summaries_session_revision
     ON summaries (session_id, revision DESC);
 
 CREATE TABLE turns (
-    turn_id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
+    turn_id VARCHAR(128) PRIMARY KEY,
+    session_id VARCHAR(128) NOT NULL,
     extra JSON,
-    creat_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time TIMESTAMPTZ,
-    finish_time TIMESTAMPTZ,
-    own_id TEXT,
+    creat_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME,
+    finish_time DATETIME,
+    own_id VARCHAR(128),
     fencing_token BIGINT,
     state_version BIGINT NOT NULL DEFAULT 1,
-    status TEXT NOT NULL,
-    capability TEXT,
+    status VARCHAR(64) NOT NULL,
+    capability VARCHAR(64),
     error TEXT,
     retryable SMALLINT,
-    failure_code TEXT,
-    assistant_message_id TEXT,
-    CONSTRAINT turns_id_not_blank CHECK (btrim(turn_id) <> ''),
-    CONSTRAINT turns_status_not_blank CHECK (btrim(status) <> ''),
+    failure_code VARCHAR(128),
+    assistant_message_id VARCHAR(128),
+    CONSTRAINT turns_id_not_blank CHECK (TRIM(turn_id) <> ''),
+    CONSTRAINT turns_status_not_blank CHECK (TRIM(status) <> ''),
     CONSTRAINT turns_fencing_token_nonnegative CHECK (
         fencing_token IS NULL OR fencing_token >= 0
     ),
@@ -106,36 +110,37 @@ CREATE TABLE turns (
         REFERENCES sessions (session_id) ON DELETE CASCADE,
     CONSTRAINT turns_assistant_message_fk FOREIGN KEY (assistant_message_id)
         REFERENCES messages (message_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE INDEX idx_turns_session_update
     ON turns (session_id, update_time DESC);
 CREATE INDEX idx_turns_session_status
     ON turns (session_id, status, update_time DESC);
+-- seekdb has no partial indexes. MySQL treats NULLs as distinct in a unique
+-- index, so dropping the WHERE keeps the same "many NULLs, one value" rule.
 CREATE UNIQUE INDEX idx_turns_assistant_message
-    ON turns (assistant_message_id)
-    WHERE assistant_message_id IS NOT NULL;
+    ON turns (assistant_message_id);
 
 CREATE TABLE turn_events (
-    turn_events_id TEXT PRIMARY KEY,
-    turn_id TEXT NOT NULL,
+    turn_events_id VARCHAR(128) PRIMARY KEY,
+    turn_id VARCHAR(128) NOT NULL,
     seq BIGINT NOT NULL,
-    creat_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    timestamp TIMESTAMPTZ NOT NULL,
+    creat_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `timestamp` DATETIME NOT NULL,
     type SMALLINT NOT NULL,
     extra JSON,
     metadata_json JSON,
     content TEXT,
-    source TEXT,
-    stage TEXT,
-    CONSTRAINT turn_events_id_not_blank CHECK (btrim(turn_events_id) <> ''),
+    source VARCHAR(64),
+    stage VARCHAR(64),
+    CONSTRAINT turn_events_id_not_blank CHECK (TRIM(turn_events_id) <> ''),
     CONSTRAINT turn_events_seq_nonnegative CHECK (seq >= 0),
     CONSTRAINT turn_events_turn_seq_unique UNIQUE (turn_id, seq),
     CONSTRAINT turn_events_turn_fk FOREIGN KEY (turn_id)
         REFERENCES turns (turn_id) ON DELETE CASCADE,
     CONSTRAINT turn_events_type_fk FOREIGN KEY (type)
         REFERENCES turn_event_types (type_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 -- +goose Down
 DROP TABLE turn_events;
