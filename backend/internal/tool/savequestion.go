@@ -404,7 +404,7 @@ func readAnswer(answer string, questionType notebook.QuestionType, options []not
 }
 
 // readChoiceAnswer reads a choice question's answer as the option keys it names,
-// spelled the way the options spell them and in ascending order.
+// spelled the way the options spell them, each of them once, in ascending order.
 //
 // The order is the storage convention (notebook.Question.CorrectAnswer), and
 // sorting here is what keeps the same answer written two ways one stored value:
@@ -412,6 +412,12 @@ func readAnswer(answer string, questionType notebook.QuestionType, options []not
 // question saved again would flicker between them. Stray separators are read the
 // way the judge reads them — an empty piece between two commas says nothing, so
 // "A,,C" is the answer "A,C" and is not worth a round trip.
+//
+// The same goes for a key named twice. The stored answer is the set of keys that
+// are right, and "A,A" is one of them: a model that repeated itself, or named
+// one option in two spellings, has said exactly what "A" says. The convention
+// the judge reads this column by is a list of distinct keys, so anything else
+// would be a stored answer that means less than it says.
 func readChoiceAnswer(answer string, options []notebook.Option) (string, error) {
 	offered := make(map[string]string, len(options))
 	spelling := make([]string, 0, len(options))
@@ -435,7 +441,23 @@ func readChoiceAnswer(answer string, options []notebook.Option) (string, error) 
 			"选择题写选项键，多选写成 \"A,C\"（逗号分隔）。"}
 	}
 	sort.Strings(keys)
-	return strings.Join(keys, ","), nil
+	return strings.Join(once(keys), ","), nil
+}
+
+// once drops the repeats from an ascending list of keys.
+//
+// It compares neighbours rather than keeping a set, because the list is already
+// sorted and the keys are the options' own spellings by now: two pieces that
+// named the same option, however each of them spelled it, are the same string.
+func once(keys []string) []string {
+	distinct := make([]string, 0, len(keys))
+	for index, key := range keys {
+		if index > 0 && key == keys[index-1] {
+			continue
+		}
+		distinct = append(distinct, key)
+	}
+	return distinct
 }
 
 // cleanParts splits an answer the way the judge's reader does: on the separator,
