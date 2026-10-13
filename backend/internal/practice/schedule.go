@@ -273,7 +273,7 @@ func branchOf(outcome Outcome) branch {
 // curve has to be complete rather than partial.
 func qualityOf(branch branch, outcome Outcome) (float64, error) {
 	if outcome.Rating != nil {
-		if math.IsNaN(*outcome.Rating) || *outcome.Rating < 0 || *outcome.Rating > qualityMaximum {
+		if !ratingWithinScale(outcome.Rating) {
 			return 0, fmt.Errorf("%w: the rating is %v, which is not 0 to %d",
 				ErrInvalidReview, *outcome.Rating, qualityMaximum)
 		}
@@ -283,6 +283,23 @@ func qualityOf(branch branch, outcome Outcome) (float64, error) {
 		return qualityMaximum, nil
 	}
 	return qualityWrong, nil
+}
+
+// ratingWithinScale reports whether a self-assessment is on the scale the curve
+// is defined on. No rating at all is on it: the scale is what a rating may be,
+// not what it must be.
+//
+// One rule with two callers, which is why it is a function rather than a
+// condition written twice. The schedule refuses a rating it cannot put into the
+// curve, and a submission is refused before anything is read or judged — a
+// rating off the scale is a client that is not talking about what it thinks it
+// is, and finding that out after paying for a model judgement is finding it out
+// too late.
+func ratingWithinScale(rating *float64) bool {
+	if rating == nil {
+		return true
+	}
+	return !math.IsNaN(*rating) && *rating >= 0 && *rating <= qualityMaximum
 }
 
 // intervalFor is how many days a run of correct answers has earned, as SM-2
