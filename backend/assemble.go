@@ -10,6 +10,7 @@ import (
 	"backend/internal/capability"
 	"backend/internal/chat"
 	"backend/internal/config"
+	"backend/internal/deepquestion"
 	"backend/internal/deepsolve"
 	"backend/internal/embed"
 	"backend/internal/kb"
@@ -66,10 +67,11 @@ func assemble(
 	policy := tool.DefaultPolicy()
 
 	// Every tool here is bound to the runtime, not to a turn: ask_user is
-	// always on, the two source tools are mounted by what a turn carries, and
-	// the four solve tools are mounted by the capability that plans. Each finds
-	// the turn it is being called for in the context of the call, so none of
-	// them can reach past what that turn was given.
+	// always on, the two source tools are mounted by what a turn carries, the
+	// four solve tools are mounted by the capability that plans, and
+	// save_question is mounted by the capability that writes questions. Each
+	// finds the turn it is being called for in the context of the call, so none
+	// of them can reach past what that turn was given.
 	for _, register := range []struct {
 		name string
 		tool tool.Tool
@@ -81,6 +83,7 @@ func assemble(
 		{tool.SolveStepName, tool.NewSolveStepTool()},
 		{tool.SolveReplanName, tool.NewSolveReplanTool()},
 		{tool.SolveFinishName, tool.NewSolveFinishTool()},
+		{tool.SaveQuestionName, tool.NewSaveQuestionTool(turn.Banker{})},
 	} {
 		if err := tools.Register(register.tool); err != nil {
 			return nil, fmt.Errorf("register the %s tool: %w", register.name, err)
@@ -154,6 +157,7 @@ func assemble(
 		Hub:               hub,
 		Sessions:          sessions,
 		Materials:         materials,
+		Questions:         questions,
 		Capabilities:      capabilities,
 		Tools:             tools,
 		Policy:            policy,
@@ -327,6 +331,17 @@ func buildCapabilities(cfg config.Config) (*capability.Registry, error) {
 			return askquestions.New(s)
 		}},
 		{deepsolve.Name, func(s capability.Settings) (capability.Capability, error) { return deepsolve.New(s) }},
+		// The question writer takes two more numbers than the others, and they are
+		// the deployment's own: how many questions a request that says nothing
+		// gets, and how many one request may ask for. Both are read from
+		// configuration here rather than looked up inside the package, so that a
+		// capability has no way to reach the environment.
+		{deepquestion.Name, func(s capability.Settings) (capability.Capability, error) {
+			return deepquestion.New(s, deepquestion.Limits{
+				Default: cfg.Practice.QuestionDefaultCount,
+				Max:     cfg.Practice.QuestionMaxCount,
+			})
+		}},
 	} {
 		built, err := register.build(capabilitySettings(cfg, register.name))
 		if err != nil {

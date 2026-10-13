@@ -50,6 +50,11 @@ type turnRun struct {
 	// citation's number is. It belongs to the turn rather than to a read, so two
 	// reads number one list between them (see number).
 	sources int
+	// filed counts the questions this turn has written into the bank, which is
+	// the "第 N 道" a save_question result reports. It belongs to the turn
+	// rather than to a call for the same reason sources does: a question's
+	// number in the set is a fact about the set.
+	filed int
 	// unavailable counts the material this turn could not read at all — an
 	// attachment that failed to parse, a collection that is gone. It sits beside
 	// sources because the two are read together: how much material a turn had

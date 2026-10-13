@@ -103,8 +103,42 @@ type Saved struct {
 	// Filed is how many questions this turn has filed, counting this one.
 	Filed int
 	// Planned is how many the turn set out to produce, zero when its plan said
-	// nothing — a set with no denominator rather than a set of none.
+	// nothing — a set with no denominator rather than a set of none. It comes
+	// from WithQuestionSet, because the number is the plan the turn laid out
+	// before the model was called and nothing about the calls themselves knows
+	// it.
 	Planned int
+}
+
+// questionSetKey is the context key WithQuestionSet puts the planned count
+// under.
+type questionSetKey struct{}
+
+// WithQuestionSet says how many questions this turn set out to write, so that a
+// question written into the bank can report where it stands in the set.
+//
+// It is the same seam WithSolver is, and for the same reason: the tool is built
+// once for the process while the plan belongs to one turn, so the number is
+// found in the context the call arrives on. The tool does not read it — the
+// bank's implementation does, when it fills in what storing the question did —
+// because the tool has no idea what a plan is and does not need one: all it
+// sends back is whatever the bank reports.
+//
+// A count of zero or less is stored as "no set": a plan of none is a plan whose
+// denominator is unknown, and a progress line that said "第 3/0 道" would be
+// arithmetic the user has to interpret.
+func WithQuestionSet(ctx context.Context, total int) context.Context {
+	return context.WithValue(ctx, questionSetKey{}, total)
+}
+
+// QuestionSetTotal reports how many questions this turn set out to write, and
+// whether the turn said at all.
+func QuestionSetTotal(ctx context.Context) (int, bool) {
+	total, ok := ctx.Value(questionSetKey{}).(int)
+	if !ok || total <= 0 {
+		return 0, false
+	}
+	return total, true
 }
 
 // SaveQuestionTool files one question into the question bank.

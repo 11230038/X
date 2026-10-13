@@ -24,6 +24,7 @@ type runnerFixture struct {
 	repository   *memoryRepository
 	sessions     *stubSessions
 	materials    *stubMaterials
+	questions    *stubQuestions
 	hub          *Hub
 	provider     *scriptedProvider
 	naming       *scriptedProvider
@@ -38,6 +39,7 @@ func newRunnerFixture(t *testing.T, adjust ...func(*Options)) *runnerFixture {
 		repository:   newMemoryRepository(),
 		sessions:     newStubSessions(),
 		materials:    newStubMaterials(),
+		questions:    newStubQuestions(),
 		provider:     &scriptedProvider{},
 		naming:       &scriptedProvider{responses: []llm.Response{{Content: "第一次对话"}}},
 		capabilities: capability.NewRegistry(),
@@ -63,6 +65,7 @@ func newRunnerFixture(t *testing.T, adjust ...func(*Options)) *runnerFixture {
 		Hub:               hub,
 		Sessions:          fixture.sessions,
 		Materials:         fixture.materials,
+		Questions:         fixture.questions,
 		Capabilities:      fixture.capabilities,
 		Tools:             fixture.tools,
 		Policy:            tool.DefaultPolicy(),

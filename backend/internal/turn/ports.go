@@ -9,6 +9,7 @@ import (
 	"backend/internal/event"
 	"backend/internal/kb"
 	"backend/internal/llm"
+	"backend/internal/notebook"
 	"backend/internal/tool"
 )
 
@@ -178,4 +179,94 @@ func (Sourcer) Retrieve(ctx context.Context, query string) (tool.Reading, error)
 		return tool.Reading{}, fmt.Errorf("turn: retrieve was called outside a turn")
 	}
 	return run.retrieve(ctx, query)
+}
+
+// Notebook is the part of the question bank domain the runtime uses: the bank a
+// turn writes the questions it generated into.
+//
+// It is an interface for the same reason Materials is one — a turn is testable
+// without a database behind it — and it is held by the runtime rather than by a
+// capability, because the two facts a stored question is stamped with are the
+// turn's: the conversation it was asked in and the turn that asked it. A
+// capability that could reach the bank would be a capability deciding which
+// conversation a question belongs to, and it has no way to know.
+type Notebook interface {
+	// Save stores one question and reports what that did. A question written
+	// twice is one question: the bank finds the row by content address, so the
+	// second call rewrites the first rather than adding a copy.
+	Save(ctx context.Context, question notebook.Question) (notebook.Upserted, error)
+}
+
+var _ Notebook = (*notebook.Service)(nil)
+
+// Banker routes save_question to the turn it is being called for.
+//
+// It is the same seam Asker and Sourcer are, and it answers the same question in
+// two parts: what material this turn can file a question under, and where the
+// question goes. Neither is an argument the model supplies — a file id would be
+// a material from anywhere, and a session id would be somebody else's
+// conversation — so both are read off the turn the call arrived on.
+type Banker struct{}
+
+var _ tool.QuestionBank = Banker{}
+
+// Carried lists the attachments this turn holds, under the labels the source
+// tools number them by.
+//
+// The id is the stored file rather than the parsed document, partly because a
+// material is what the user attached and the file exists whether or not the
+// parse worked, and partly because the two cannot be told apart later: a
+// question records one id and one word saying which id space it is in, so every
+// question this turn writes has to agree about which of the two it means.
+func (Banker) Carried(ctx context.Context) []tool.Carried {
+	run, ok := ctx.Value(turnKey{}).(*turnRun)
+	if !ok {
+		return nil
+	}
+	carried := make([]tool.Carried, 0, len(run.material.Attachments))
+	for _, attachment := range run.material.Attachments {
+		carried = append(carried, tool.Carried{Label: attachment.Label, MaterialID: attachment.FileID})
+	}
+	return carried
+}
+
+// Save stores one question in this turn's name.
+func (Banker) Save(ctx context.Context, question notebook.Question) (tool.Saved, error) {
+	run, ok := ctx.Value(turnKey{}).(*turnRun)
+	if !ok {
+		return tool.Saved{}, fmt.Errorf("turn: save_question was called outside a turn")
+	}
+	return run.saveQuestion(ctx, question)
+}
+
+// saveQuestion stamps a question with the turn it came from and writes it down.
+//
+// The two stamps are written once and never rewritten (the bank's upsert leaves
+// them alone on a second write), because a question outlives the conversation
+// that produced it: a later turn that regenerates the same question does not
+// take it over.
+//
+// Nothing here is locked, and nothing needs to be: a turn's tool calls are
+// dispatched one at a time by the goroutine running the turn, so the count below
+// is only ever touched by that one goroutine. The mutex on the run is there for
+// the calls that come from outside it.
+func (r *turnRun) saveQuestion(ctx context.Context, question notebook.Question) (tool.Saved, error) {
+	question.SessionID, question.TurnID = r.session.ID, r.turn.ID
+	upserted, err := r.runner.questions.Save(ctx, question)
+	if err != nil {
+		return tool.Saved{}, err
+	}
+	r.filed++
+	saved := tool.Saved{
+		EntryID:    upserted.ID,
+		QuestionID: upserted.QuestionID,
+		Created:    upserted.Created,
+		Filed:      r.filed,
+	}
+	// A turn that never laid out a plan has no denominator, and the count is absent
+	// rather than zero so that "第 1 道" is what is said instead of "第 1/0 道".
+	if total, ok := tool.QuestionSetTotal(ctx); ok {
+		saved.Planned = total
+	}
+	return saved, nil
 }

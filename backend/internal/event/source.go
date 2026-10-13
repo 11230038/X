@@ -17,6 +17,12 @@ const (
 	// this" is told apart from "the material was never looked at" by (AC-06); on
 	// an observation event, the survey's own summary and the same list.
 	MetaGrounding = "grounding"
+	// MetaQuestionPlan carries the set of questions a turn set out to write:
+	// how many, of what kinds, at what difficulty, out of which material. It is
+	// what an observation event says before the first question exists, so that
+	// "我准备出 10 道" is on screen while the model is still being called — and
+	// what the progress each question reports is then counted against.
+	MetaQuestionPlan = "question_plan"
 )
 
 // Source is one piece of material an answer was built from.

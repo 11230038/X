@@ -33,10 +33,15 @@ var _ Sessions = (*session.Service)(nil)
 // one of these would fail in the middle of a turn, where the failure is a
 // half-finished answer, rather than at startup, where it is a message.
 type Options struct {
-	Repository   Repository
-	Hub          *Hub
-	Sessions     Sessions
-	Materials    Materials
+	Repository Repository
+	Hub        *Hub
+	Sessions   Sessions
+	Materials  Materials
+	// Questions is where a turn's save_question calls are stored. It is required
+	// whatever the deployment runs: a runner without a bank would be a build
+	// whose deep_question capability cannot store anything, and the drift check
+	// that would catch that is about names, not about what they can do.
+	Questions    Notebook
 	Capabilities *capability.Registry
 	Tools        *tool.Registry
 	Policy       tool.Policy
@@ -63,6 +68,7 @@ type Runner struct {
 	hub          *Hub
 	sessions     Sessions
 	materials    Materials
+	questions    Notebook
 	capabilities *capability.Registry
 	tools        *tool.Registry
 	policy       tool.Policy
@@ -94,6 +100,7 @@ func NewRunner(options Options) (*Runner, error) {
 		{"Hub", options.Hub != nil},
 		{"Sessions", options.Sessions != nil},
 		{"Materials", options.Materials != nil},
+		{"Questions", options.Questions != nil},
 		{"Capabilities", options.Capabilities != nil},
 		{"Tools", options.Tools != nil},
 		{"Provider", options.Provider != nil},
@@ -116,6 +123,7 @@ func NewRunner(options Options) (*Runner, error) {
 		hub:          options.Hub,
 		sessions:     options.Sessions,
 		materials:    options.Materials,
+		questions:    options.Questions,
 		capabilities: options.Capabilities,
 		tools:        options.Tools,
 		policy:       options.Policy,
