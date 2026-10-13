@@ -38,11 +38,20 @@ func (r *GORMRepository) CreateKnowledgeBase(ctx context.Context, record Knowled
 		return err
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Locking every row of a table with a handful of rows is how two
-		// creators on an empty table are serialised. A plain read would let both
-		// find no default and both claim it.
+		// The read decides the common case — the first base is the default one,
+		// a later base is not — and the unique index on default_marker decides
+		// the race: two creators arriving at an empty table both read "no
+		// default", both try to claim the mark, and the index hands it to one
+		// of them. The other stores its base without the mark, which is what it
+		// wanted anyway.
+		//
+		// A locking read was the first attempt at this, and it was not enough.
+		// It serialises creators while the table has rows to lock, and this
+		// database runs READ-COMMITTED, where a locking read over an empty table
+		// locks nothing at all — so every creator claimed the mark. See the
+		// deviation log.
 		var bases []models.KnowledgeBase
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Find(&bases).Error; err != nil {
+		if err := tx.Find(&bases).Error; err != nil {
 			return fmt.Errorf("read knowledge bases: %w", err)
 		}
 		isDefault := true
@@ -52,13 +61,23 @@ func (r *GORMRepository) CreateKnowledgeBase(ctx context.Context, record Knowled
 				break
 			}
 		}
-		model := models.KnowledgeBase{
-			KBID: record.ID, Name: record.Name,
-			Description: nullableString(record.Description),
-			Provider:    record.Provider, EmbeddingModel: record.EmbeddingModel,
-			IsDefault: isDefault, CreatedAt: record.CreatedAt,
+		create := func(isDefault bool) error {
+			model := models.KnowledgeBase{
+				KBID: record.ID, Name: record.Name,
+				Description: nullableString(record.Description),
+				Provider:    record.Provider, EmbeddingModel: record.EmbeddingModel,
+				IsDefault: isDefault, CreatedAt: record.CreatedAt,
+			}
+			return tx.Create(&model).Error
 		}
-		if err := tx.Create(&model).Error; err != nil {
+		err := create(isDefault)
+		if isDefault && errors.Is(err, gorm.ErrDuplicatedKey) {
+			// Somebody else holds the mark by now. The base is still wanted, so
+			// it is stored without it; a second refusal is a different problem
+			// — the same id twice — and is reported as it is.
+			err = create(false)
+		}
+		if err != nil {
 			return fmt.Errorf("create knowledge base: %w", err)
 		}
 		return nil
@@ -162,10 +181,14 @@ func (r *GORMRepository) SetDefaultKnowledgeBase(ctx context.Context, kbID strin
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// The lock is taken before either write, so two setters applying at once
-		// cannot interleave their clear and their set and leave two defaults.
-		// Locking the whole table is affordable here because a deployment holds
-		// a handful of bases, and it does not depend on where a scan of an
-		// unindexed column happens to stop.
+		// cannot interleave their clear and their set: the second waits, and
+		// then clears the first one's mark before setting its own.
+		//
+		// It is not what keeps the invariant — the unique index on
+		// default_marker is, and it would refuse a second default whatever this
+		// code did. What the lock buys is that the ordinary case does not have
+		// to fail and retry: here the table has rows to lock, so the setter that
+		// arrives second waits rather than colliding.
 		var bases []models.KnowledgeBase
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Find(&bases).Error; err != nil {
 			return fmt.Errorf("lock knowledge bases: %w", err)

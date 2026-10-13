@@ -199,6 +199,10 @@ func (s *Service) AddDocument(ctx context.Context, fileID, kbID string) (Documen
 		// Two callers added the same file at once. The loser's work is thrown
 		// away and the winner's document returned: the request was "make sure
 		// this file is in this base", and it now is.
+		//
+		// This branch is reachable because the schema says so — the unique index
+		// on (file_id, file_scope) refuses the second write (migration 00008).
+		// Without it both writes succeeded and the base held the file twice.
 		if errors.Is(err, ErrConflict) {
 			return s.repository.DocumentForFile(ctx, fileID, kbID)
 		}

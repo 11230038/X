@@ -9,6 +9,9 @@ type KnowledgeBase struct {
 	Description    *string   `gorm:"column:description"`
 	Provider       string    `gorm:"column:provider;not null"`
 	EmbeddingModel string    `gorm:"column:embedding_model;not null"`
+	// IsDefault is what the schema derives its marker from, so that at most one
+	// base can carry the mark (migration 00008). Nothing here writes the marker
+	// itself: it is computed, and a write that tried would be refused.
 	IsDefault      bool      `gorm:"column:is_default;not null;default:false"`
 	CreatedAt      time.Time `gorm:"column:creat_time;autoCreateTime"`
 	UpdatedAt      time.Time `gorm:"column:update_time;autoCreateTime;autoUpdateTime"`
@@ -24,8 +27,11 @@ func (KnowledgeBase) TableName() string {
 // A document with a NULL KbID is an attachment: it exists for the turns that
 // carried it and belongs to no collection.
 type Document struct {
-	DocumentID string  `gorm:"column:document_id;primaryKey;autoIncrement:false"`
-	KbID       *string `gorm:"column:kb_id"`
+	DocumentID string `gorm:"column:document_id;primaryKey;autoIncrement:false"`
+	// KbID and FileID together are one document per file per place, enforced by
+	// the unique index on (file_id, file_scope) from migration 00008, where the
+	// scope is this column's NULL folded to the empty string.
+	KbID *string `gorm:"column:kb_id"`
 	FileID     string  `gorm:"column:file_id;not null"`
 	Filename   string  `gorm:"column:filename;not null"`
 	Engine     string  `gorm:"column:engine;not null"`
