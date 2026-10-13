@@ -4,17 +4,17 @@ import "time"
 
 // KnowledgeBase is the persistence mapping for one retrievable collection.
 type KnowledgeBase struct {
-	KBID           string    `gorm:"column:kb_id;primaryKey;autoIncrement:false"`
-	Name           string    `gorm:"column:name;not null"`
-	Description    *string   `gorm:"column:description"`
-	Provider       string    `gorm:"column:provider;not null"`
-	EmbeddingModel string    `gorm:"column:embedding_model;not null"`
+	KBID           string  `gorm:"column:kb_id;primaryKey;autoIncrement:false"`
+	Name           string  `gorm:"column:name;not null"`
+	Description    *string `gorm:"column:description"`
+	Provider       string  `gorm:"column:provider;not null"`
+	EmbeddingModel string  `gorm:"column:embedding_model;not null"`
 	// IsDefault is what the schema derives its marker from, so that at most one
 	// base can carry the mark (migration 00008). Nothing here writes the marker
 	// itself: it is computed, and a write that tried would be refused.
-	IsDefault      bool      `gorm:"column:is_default;not null;default:false"`
-	CreatedAt      time.Time `gorm:"column:creat_time;autoCreateTime"`
-	UpdatedAt      time.Time `gorm:"column:update_time;autoCreateTime;autoUpdateTime"`
+	IsDefault bool      `gorm:"column:is_default;not null;default:false"`
+	CreatedAt time.Time `gorm:"column:creat_time;autoCreateTime"`
+	UpdatedAt time.Time `gorm:"column:update_time;autoCreateTime;autoUpdateTime"`
 }
 
 // TableName fixes the knowledge_bases table name.
@@ -31,10 +31,10 @@ type Document struct {
 	// KbID and FileID together are one document per file per place, enforced by
 	// the unique index on (file_id, file_scope) from migration 00008, where the
 	// scope is this column's NULL folded to the empty string.
-	KbID *string `gorm:"column:kb_id"`
-	FileID     string  `gorm:"column:file_id;not null"`
-	Filename   string  `gorm:"column:filename;not null"`
-	Engine     string  `gorm:"column:engine;not null"`
+	KbID     *string `gorm:"column:kb_id"`
+	FileID   string  `gorm:"column:file_id;not null"`
+	Filename string  `gorm:"column:filename;not null"`
+	Engine   string  `gorm:"column:engine;not null"`
 	// ExtractedText is the parser's output, and the text char_start/char_end on
 	// each chunk index into. MEDIUMTEXT rather than TEXT: ATT-03 allows 200k
 	// characters in one document.
