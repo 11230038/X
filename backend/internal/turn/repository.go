@@ -67,17 +67,24 @@ func NewGORMRepository(db *gorm.DB) *GORMRepository {
 var _ Repository = (*GORMRepository)(nil)
 
 // Start stores a queued turn unless the session already has an active one.
+//
+// The rule is the schema's: turns carry a unique key over the session an
+// unfinished turn belongs to (migration 00009), so a second one cannot be
+// stored whatever this function does. What is here is the ordinary path — the
+// read that finds the turn already there, and the translation of the insert's
+// refusal into the same answer.
 func (r *GORMRepository) Start(ctx context.Context, record Turn) error {
 	if err := r.ready(); err != nil {
 		return err
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var active models.Turn
-		// A locking read, not a plain one. Two turns started for one session at
-		// the same instant would both read no active turn and both insert; the
-		// lock makes the second wait for the first to commit and then see it.
-		// The lock covers the gap after the matched rows too, which is what
-		// makes it work when there is nothing to match.
+		// The fast path, and the reason an ordinary second ask costs no insert:
+		// a turn that is already there is found by reading. It is not the
+		// guarantee. A locking read over an empty range locks nothing at all on
+		// this engine — it runs READ-COMMITTED, which takes record locks and no
+		// gap locks — so two calls that both find nothing both go on to insert,
+		// which is the race migration 00009 was written for.
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("session_id = ? AND status IN ?", record.SessionID, activeStatusNames()).
 			First(&active).Error
@@ -97,6 +104,15 @@ func (r *GORMRepository) Start(ctx context.Context, record Turn) error {
 			Capability:   stringPointer(record.Capability),
 		}
 		if err := tx.Create(&model).Error; err != nil {
+			// Another writer took the session's slot between the read above and
+			// this insert, and the unique key refused it. That is the same
+			// answer the read would have given, so it is reported as the same
+			// thing: a caller seeing ErrActiveTurnExists retries with the turn
+			// that is running, and a caller seeing a storage failure retries the
+			// insert, which is the wrong thing to do about a rule.
+			if errors.Is(err, gorm.ErrDuplicatedKey) {
+				return fmt.Errorf("%w: session %s", ErrActiveTurnExists, record.SessionID)
+			}
 			return fmt.Errorf("create turn: %w", err)
 		}
 		return nil
