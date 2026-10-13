@@ -10,6 +10,7 @@ import (
 	"backend/internal/capability"
 	"backend/internal/chat"
 	"backend/internal/config"
+	"backend/internal/deepsolve"
 	"backend/internal/embed"
 	"backend/internal/kb"
 	"backend/internal/llm"
@@ -53,9 +54,10 @@ func assemble(
 	policy := tool.DefaultPolicy()
 
 	// Every tool here is bound to the runtime, not to a turn: ask_user is
-	// always on, and the two source tools are mounted by what a turn carries.
-	// Each finds the turn it is being called for in the context of the call, so
-	// none of them can reach past what that turn was given.
+	// always on, the two source tools are mounted by what a turn carries, and
+	// the four solve tools are mounted by the capability that plans. Each finds
+	// the turn it is being called for in the context of the call, so none of
+	// them can reach past what that turn was given.
 	for _, register := range []struct {
 		name string
 		tool tool.Tool
@@ -63,6 +65,10 @@ func assemble(
 		{tool.AskUserName, tool.NewAskUserTool(turn.Asker{})},
 		{tool.ReadSourceName, tool.NewReadSourceTool(turn.Sourcer{})},
 		{tool.RetrieveName, tool.NewRetrieveTool(turn.Sourcer{})},
+		{tool.SolvePlanName, tool.NewSolvePlanTool()},
+		{tool.SolveStepName, tool.NewSolveStepTool()},
+		{tool.SolveReplanName, tool.NewSolveReplanTool()},
+		{tool.SolveFinishName, tool.NewSolveFinishTool()},
 	} {
 		if err := tools.Register(register.tool); err != nil {
 			return nil, fmt.Errorf("register the %s tool: %w", register.name, err)
@@ -283,6 +289,7 @@ func buildCapabilities(cfg config.Config) (*capability.Registry, error) {
 		{askquestions.Name, func(s capability.Settings) (capability.Capability, error) {
 			return askquestions.New(s)
 		}},
+		{deepsolve.Name, func(s capability.Settings) (capability.Capability, error) { return deepsolve.New(s) }},
 	} {
 		built, err := register.build(capabilitySettings(cfg, register.name))
 		if err != nil {
