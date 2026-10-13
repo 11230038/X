@@ -75,8 +75,8 @@ func (e *recordingEmitter) find(kind event.Type) (event.Event, bool) {
 	return event.Event{}, false
 }
 
-func testSettings() Settings {
-	return Settings{
+func testSettings() capability.Settings {
+	return capability.Settings{
 		Model:               "deepseek-chat",
 		Temperature:         0.7,
 		ContextBudgetTokens: 32000,
@@ -85,7 +85,7 @@ func testSettings() Settings {
 	}
 }
 
-func newTestCapability(t *testing.T, settings Settings) *Capability {
+func newTestCapability(t *testing.T, settings capability.Settings) *Capability {
 	t.Helper()
 	created, err := New(settings)
 	if err != nil {
@@ -283,17 +283,17 @@ func TestRunStopsWhenAnEventCannotBeRecorded(t *testing.T) {
 func TestNewRejectsTuningItCouldNotRunWith(t *testing.T) {
 	tests := []struct {
 		name   string
-		change func(*Settings)
+		change func(*capability.Settings)
 	}{
-		{"no model", func(s *Settings) { s.Model = "" }},
-		{"blank model", func(s *Settings) { s.Model = "  " }},
-		{"negative temperature", func(s *Settings) { s.Temperature = -0.1 }},
-		{"temperature above the range", func(s *Settings) { s.Temperature = 2.1 }},
-		{"no context budget", func(s *Settings) { s.ContextBudgetTokens = 0 }},
-		{"no round limit", func(s *Settings) { s.MaxRounds = 0 }},
-		{"exploring has no token limit", func(s *Settings) { delete(s.StageMaxTokens, StageExploring) }},
-		{"responding has no token limit", func(s *Settings) { delete(s.StageMaxTokens, StageResponding) }},
-		{"a stage limit of zero", func(s *Settings) { s.StageMaxTokens[StageResponding] = 0 }},
+		{"no model", func(s *capability.Settings) { s.Model = "" }},
+		{"blank model", func(s *capability.Settings) { s.Model = "  " }},
+		{"negative temperature", func(s *capability.Settings) { s.Temperature = -0.1 }},
+		{"temperature above the range", func(s *capability.Settings) { s.Temperature = 2.1 }},
+		{"no context budget", func(s *capability.Settings) { s.ContextBudgetTokens = 0 }},
+		{"no round limit", func(s *capability.Settings) { s.MaxRounds = 0 }},
+		{"exploring has no token limit", func(s *capability.Settings) { delete(s.StageMaxTokens, StageExploring) }},
+		{"responding has no token limit", func(s *capability.Settings) { delete(s.StageMaxTokens, StageResponding) }},
+		{"a stage limit of zero", func(s *capability.Settings) { s.StageMaxTokens[StageResponding] = 0 }},
 	}
 
 	for _, test := range tests {
@@ -301,7 +301,7 @@ func TestNewRejectsTuningItCouldNotRunWith(t *testing.T) {
 			settings := testSettings()
 			test.change(&settings)
 
-			if _, err := New(settings); !errors.Is(err, ErrInvalidSettings) {
+			if _, err := New(settings); !errors.Is(err, capability.ErrInvalidSettings) {
 				t.Errorf("New() error = %v, want ErrInvalidSettings", err)
 			}
 		})

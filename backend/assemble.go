@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sort"
 
+	"backend/internal/askquestions"
 	"backend/internal/capability"
 	"backend/internal/chat"
 	"backend/internal/config"
@@ -48,7 +49,6 @@ func assemble(
 	sessions *session.Service,
 	files kb.FileSource,
 ) (*ai, error) {
-	capabilities := capability.NewRegistry()
 	tools := tool.NewRegistry()
 	policy := tool.DefaultPolicy()
 
@@ -69,12 +69,9 @@ func assemble(
 		}
 	}
 
-	chatCapability, err := chat.New(chatSettings(cfg))
+	capabilities, err := buildCapabilities(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("initialize the chat capability: %w", err)
-	}
-	if err := capabilities.Register(chatCapability); err != nil {
-		return nil, fmt.Errorf("register the chat capability: %w", err)
+		return nil, err
 	}
 
 	if err := checkDrift(capabilities, policy, tools.Names(), capabilityConfig(cfg)); err != nil {
@@ -270,14 +267,56 @@ func checkDrift(capabilities *capability.Registry, policy tool.Policy, registere
 	return nil
 }
 
-// chatSettings is the chat capability's tuning, resolved from configuration.
-func chatSettings(cfg config.Config) chat.Settings {
-	params := cfg.LLM.Capabilities[chat.Name]
+// buildCapabilities registers every capability this build offers.
+//
+// It is a function rather than a block inside assemble so that the list of
+// capabilities, and the tuning each is built from, can be checked without a
+// database, a socket and a knowledge base service: what a process offers is a
+// property of the build, and a test can ask about it on its own.
+func buildCapabilities(cfg config.Config) (*capability.Registry, error) {
+	registry := capability.NewRegistry()
+	for _, register := range []struct {
+		name  string
+		build func(capability.Settings) (capability.Capability, error)
+	}{
+		{chat.Name, func(s capability.Settings) (capability.Capability, error) { return chat.New(s) }},
+		{askquestions.Name, func(s capability.Settings) (capability.Capability, error) {
+			return askquestions.New(s)
+		}},
+	} {
+		built, err := register.build(capabilitySettings(cfg, register.name))
+		if err != nil {
+			return nil, fmt.Errorf("initialize the %s capability: %w", register.name, err)
+		}
+		if err := registry.Register(built); err != nil {
+			return nil, fmt.Errorf("register the %s capability: %w", register.name, err)
+		}
+	}
+	return registry, nil
+}
+
+// capabilitySettings is one capability's tuning, resolved from configuration.
+//
+// A capability the deployment has not named runs on the general assistant's
+// tuning. The two others are the same model answering the same user in the same
+// language with one stage instead of two, so a deployment that never tunes them
+// should not have to write the same numbers out again under two more names —
+// and a capability being registered should not be a reason for a process that
+// started yesterday to refuse to start today. Naming one in
+// LLM_CAPABILITY_CONFIG_JSON overrides it, which is also how it is tuned.
+//
+// The stage limits are the one part that is not shared blindly: they are keyed
+// by stage name, and the manifest is what says which names are right.
+func capabilitySettings(cfg config.Config, name string) capability.Settings {
+	params, ok := cfg.LLM.Capabilities[name]
+	if !ok {
+		params = cfg.LLM.Capabilities[chat.Name]
+	}
 	stages := make(map[string]int, len(params.Stages))
 	for stage, tuning := range params.Stages {
 		stages[stage] = tuning.MaxTokens
 	}
-	return chat.Settings{
+	return capability.Settings{
 		Model:               cfg.LLM.Model,
 		Temperature:         params.Temperature,
 		ContextBudgetTokens: params.ContextBudgetTokens,
