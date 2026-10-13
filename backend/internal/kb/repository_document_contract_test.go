@@ -12,6 +12,7 @@ import (
 	"slices"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"backend/internal/data"
 	"backend/internal/data/testdb"
@@ -39,7 +40,7 @@ func documentWrite(t *testing.T, doc dbDocument) DocumentWrite {
 	write := DocumentWrite{
 		Document: Document{
 			ID: doc.ID, KBID: doc.KBID, FileID: doc.FileID, Filename: doc.Filename,
-			Engine: parse.EngineText, TextChars: int64(len(doc.Text)),
+			Engine: parse.EngineText, TextChars: int64(utf8.RuneCountInString(doc.Text)),
 			ChunkSize: 20, ChunkOverlap: 5, ActiveRevision: doc.Revision,
 			VectorState: VectorStatePending,
 			CreatedAt:   doc.CreatedAt, UpdatedAt: updated,

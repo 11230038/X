@@ -28,16 +28,25 @@ const vectorDimensions = 1024
 // vector_claimed_at is a DATETIME.
 var claimTime = atSecond(10)
 
-// vectorOf builds a vector whose only non-zero component is the axis given.
+// axisVector is a vector whose only non-zero component is the axis given.
 //
 // Two of them share no direction, so the cosine distance between two of them is
 // 1 while a stored one is at distance 0 from its own axis; mixedVectorOf spreads
 // a vector over two axes and so sits between the two, which is how the ordering
 // test tells a nearest neighbour from a far one without doing the arithmetic.
-func vectorOf(axis int) string {
+//
+// It is a value because a search takes a query vector and a write takes the
+// same vector as the string the column's parser reads, so a test needs both
+// spellings of one vector.
+func axisVector(axis int) embed.Vector {
 	values := make([]float32, vectorDimensions)
 	values[axis] = 1
-	return embed.Vector(values).String()
+	return embed.Vector(values)
+}
+
+// vectorOf is that vector as it is stored.
+func vectorOf(axis int) string {
+	return axisVector(axis).String()
 }
 
 func mixedVectorOf(first, second int) string {

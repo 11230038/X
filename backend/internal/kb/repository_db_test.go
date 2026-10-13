@@ -22,6 +22,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"backend/internal/data"
 	"backend/internal/data/testdb"
@@ -166,6 +167,13 @@ func addDocument(t *testing.T, repo *GORMRepository, doc dbDocument) Document {
 // chunkSpans locates each chunk in the document's text, the way the service
 // lays them out, and fails when a fixture's text does not contain one of its
 // own chunks — that is a mistake in the fixture, not in what is under test.
+//
+// The search for a chunk is by bytes, because that is what strings does, and
+// the span it returns is in characters, because that is the unit the service
+// stores and the unit a citation is read back in. The two are the same number
+// until the text stops being ASCII, which is why the conversion is here rather
+// than left to the fixtures: a Chinese fixture measured in bytes would store a
+// window that reads back as the wrong text.
 func chunkSpans(t *testing.T, text string, chunks []string) [][2]int64 {
 	t.Helper()
 	spans := make([][2]int64, 0, len(chunks))
@@ -177,7 +185,10 @@ func chunkSpans(t *testing.T, text string, chunks []string) [][2]int64 {
 		}
 		start := cursor + offset
 		cursor = start + len(chunk)
-		spans = append(spans, [2]int64{int64(start), int64(cursor)})
+		spans = append(spans, [2]int64{
+			int64(utf8.RuneCountInString(text[:start])),
+			int64(utf8.RuneCountInString(text[:cursor])),
+		})
 	}
 	return spans
 }
