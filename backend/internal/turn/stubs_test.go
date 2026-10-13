@@ -64,6 +64,11 @@ type stubRepository struct {
 	// eventsHold, when set, is waited on before a history read answers. It is
 	// how a test holds a replay open and decides what happens beside it.
 	eventsHold chan struct{}
+	// lastEventHold, when set, is waited on before the end-of-stream question is
+	// answered. It is how a test puts an event in the window between a history
+	// read and that question, which is where the runtime stores a turn's last
+	// event before it publishes it.
+	lastEventHold chan struct{}
 }
 
 func newStubRepository() *stubRepository {
@@ -113,6 +118,9 @@ func (s *stubRepository) Events(_ context.Context, turnID string, afterSeq int64
 }
 
 func (s *stubRepository) LastEvent(_ context.Context, turnID string) (event.Event, error) {
+	if s.lastEventHold != nil {
+		<-s.lastEventHold
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := len(s.appended) - 1; i >= 0; i-- {

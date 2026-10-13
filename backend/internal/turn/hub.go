@@ -233,6 +233,14 @@ func (s *Subscription) finishReplay(ctx context.Context, err error) {
 // otherwise wait on a stream that is already complete. The history just read
 // cannot answer this on its own: a subscriber whose sequence number is already
 // at the end is handed nothing at all.
+//
+// The turn having ended in storage is not the same as this subscriber having
+// been handed the end of it. An event is stored before it is published, so a
+// subscriber that read the history in between is owed whatever was stored after
+// that read — the event that ends the stream, and with it the stream's end.
+// Those are read here rather than waited for, because the publish that would
+// have carried them may have happened while this subscriber was not yet
+// watching, and because storage is where the rest of the turn came from anyway.
 func (s *Subscription) endIfTheTurnDid(ctx context.Context) {
 	last, err := s.hub.repository.LastEvent(ctx, s.turnID)
 	if err != nil {
@@ -244,7 +252,28 @@ func (s *Subscription) endIfTheTurnDid(ctx context.Context) {
 		return
 	}
 	s.mu.Lock()
+	owed := s.lastSent
+	s.mu.Unlock()
+	remaining, err := s.hub.repository.Events(ctx, s.turnID, owed)
+	if err != nil {
+		// The turn has ended as far as the store is concerned, so the stream
+		// ends here whatever the read did: a client that missed an event is one
+		// that reconnects from the last sequence number it saw.
+		remaining = nil
+	}
+	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	for _, record := range remaining {
+		if s.closed {
+			return
+		}
+		if record.Seq > s.lastSent {
+			s.pushLocked(record)
+		}
+	}
 	s.endLocked(nil)
 }
 

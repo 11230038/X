@@ -243,16 +243,55 @@ func TestAnEventPublishedDuringTheReplayIsNeitherLostNorRepeated(t *testing.T) {
 	}
 }
 
-func TestASubscriberThatFallsBehindIsCutOff(t *testing.T) {
+// A turn's last event is stored before it is published, so a subscriber can read
+// the history in the window between the two and be told by storage that the turn
+// has ended before it has been handed the ending. What it is owed is the whole
+// turn: a client waiting for the end of a stream has nothing else to go on.
+func TestTheEndOfAStreamReachesASubscriberThatWasStillReading(t *testing.T) {
 	hub, repository := newTestHub(t)
+	repository.seed(at(1, event.TypeContent), at(2, event.TypeDone))
+
+	// The question "has this turn ended?" is held open while the terminator is
+	// stored and left unpublished: the runtime's own ordering, widened until it
+	// can be seen.
+	repository.lastEventHold = make(chan struct{})
+	subscription, err := hub.Subscribe(context.Background(), "turn_1", 0)
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer subscription.Close()
+
+	// Reading the two events the subscriber already had is what says the history
+	// has been read: it is handed over in one go, before that question is asked.
+	seen := []event.Event{next(t, subscription), next(t, subscription)}
+	repository.seed(at(3, event.TypeSessionMeta))
+	close(repository.lastEventHold)
+	seen = append(seen, drain(t, subscription)...)
+
+	if !sameSeqs(seen, []int64{1, 2, 3}) {
+		t.Errorf("received %v, want 1, 2, 3", seqsOf(seen))
+	}
+	if err := subscription.Err(); err != nil {
+		t.Errorf("Err() = %v, want a stream that ended normally", err)
+	}
+}
+
+func TestASubscriberThatFallsBehindIsCutOff(t *testing.T) {
+	hub, _ := newTestHub(t)
 	hub.buffer = 1
-	repository.seed(at(1, event.TypeContent), at(2, event.TypeContent), at(3, event.TypeContent))
 
 	subscription, err := hub.Subscribe(context.Background(), "turn_1", 0)
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
 	defer subscription.Close()
+
+	// What leaves a subscriber behind is that it is not reading, and a test
+	// cannot make its own reader slow: it holds still instead, while the turn
+	// produces more than the buffer takes. Reading first would be the reader
+	// keeping up, which is a different turn and one that never falls behind.
+	hub.Publish("turn_1", at(1, event.TypeContent))
+	hub.Publish("turn_1", at(2, event.TypeContent))
 
 	seen := drain(t, subscription)
 	// Dropping the rest silently would leave the client with a gap it cannot
@@ -263,7 +302,7 @@ func TestASubscriberThatFallsBehindIsCutOff(t *testing.T) {
 	// What it did receive is a prefix, and it is short of the whole turn: how
 	// much fitted depends on how fast the reader was, but that it stopped early
 	// does not.
-	if len(seen) >= 3 {
+	if len(seen) >= 2 {
 		t.Errorf("received %v, want the stream cut short", seqsOf(seen))
 	}
 	for i, record := range seen {
