@@ -9,17 +9,19 @@ import (
 	"backend/internal/event"
 )
 
-// Refusal is a source tool saying it will not do what was asked, in a sentence
-// the model can act on.
+// Refusal is a tool saying it will not do what was asked, in a sentence the
+// model can act on.
 //
-// It is an error rather than a quiet result because the two things it says are
-// both about the request and not about the material — the label names nothing
-// this turn carries, the query is too short to search with — and a caller that
-// did not know to expect one would render it as an empty read, which reads as
-// "the material does not say this". As an error it becomes the loop's generic
-// failure text instead: wrong, but never misleading. The source tools
-// themselves do expect it and turn it into a failed result carrying Note, which
-// is the only thing that tells the model how to ask differently.
+// It is an error rather than a quiet result because what it says is always about
+// the request and never about the material — the label names nothing this turn
+// carries, the query is too short to search with, the correct answer names an
+// option the question does not offer — and a caller that did not know to expect
+// one would render it as a result that succeeded, which for a read means "the
+// material does not say this" and for a question means a question that was
+// stored. As an error it becomes the loop's generic failure text instead: wrong,
+// but never misleading. The tools themselves do expect it and turn it into a
+// failed result carrying Note, which is the only thing that tells the model how
+// to ask differently.
 type Refusal struct {
 	// Note is what the model is told. It is written in the language the tools
 	// answer in, because it is read by the model and repeated to the user.
