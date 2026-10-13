@@ -18,6 +18,7 @@ import (
 	"backend/internal/notebook"
 	"backend/internal/parse"
 	"backend/internal/practice"
+	"backend/internal/routing"
 	"backend/internal/session"
 	"backend/internal/tool"
 	"backend/internal/turn"
@@ -158,6 +159,7 @@ func assemble(
 		Sessions:          sessions,
 		Materials:         materials,
 		Questions:         questions,
+		Router:            questionRouting(),
 		Capabilities:      capabilities,
 		Tools:             tools,
 		Policy:            policy,
@@ -190,6 +192,29 @@ func assemble(
 		materials: materials, indexing: worker,
 		questions: questions, reviews: reviews,
 	}, nil
+}
+
+// questionRouting is the join between the rule table and the runtime.
+//
+// The two ends are kept apart on purpose — the table is a leaf that knows the
+// language of the product's users and nothing about turns, and the runtime knows
+// what runs a turn and nothing about how a sentence is read — so somebody has to
+// say that these two are the same decision, and this is that place. It is the
+// same seam as the source and question tools: what a turn calls is declared in
+// the turn package, implemented elsewhere, and joined here.
+func questionRouting() turn.RouterFunc {
+	return func(content string) (turn.Routing, bool) {
+		decision, matched := routing.Route(content)
+		if !matched {
+			return turn.Routing{}, false
+		}
+		return turn.Routing{
+			Capability: decision.Capability,
+			By:         decision.By,
+			Reason:     decision.Reason,
+			Confidence: decision.Confidence,
+		}, true
+	}
 }
 
 // newEmbedder builds the provider this process embeds with.

@@ -24,6 +24,12 @@ const (
 	MetaStatus = "status"
 	// MetaTurnTerminal marks an error event as ending the turn.
 	MetaTurnTerminal = "turn_terminal"
+	// MetaRouting says which capability a turn was routed to, on what grounds,
+	// and with what weight. It is on the turn's first event — the session event —
+	// and only on a turn that was routed rather than asked for by name, so that
+	// "how did this conversation end up in question mode" is answerable from the
+	// turn's own stream, once, at the point the mode was decided.
+	MetaRouting = "routing"
 	// MetaUsageSummary carries the token accounting on a result event.
 	MetaUsageSummary = "usage_summary"
 	// MetaCostSummary carries the cost accounting on a result event.

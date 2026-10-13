@@ -146,3 +146,60 @@ type Turn struct {
 	// been written.
 	AssistantMessageID string
 }
+
+// Routing is where a turn that did not ask for a capability was sent, and on
+// what grounds.
+//
+// The four fields are not the runtime's own invention: they are the payload the
+// turn's first event carries, so that "how did this conversation end up writing
+// questions" is answerable from the stream a client already has, without a
+// second lookup or a column on the turn.
+type Routing struct {
+	// Capability is what ran.
+	Capability string
+	// By is how it was decided. A rule table is the only thing this version
+	// decides by, and a decision made some other way would be told apart here.
+	By string
+	// Reason is which rule read the sentence, in one line.
+	Reason string
+	// Confidence is that rule's own weight: not a model's estimate and not
+	// anything measured.
+	Confidence float64
+}
+
+// Router decides which capability a turn that did not ask for one should run.
+//
+// It is one method over one sentence, and it is declared here rather than in the
+// package that implements it for the same reason the source and question tools
+// are declared as interfaces in ports.go: the runtime is told what to run and
+// never learns the rules. The rules are a property of the product's language,
+// they change for product reasons, and a runtime that imported them would make
+// every change to them a change to the turn lifecycle.
+//
+// A Router may be nil, and that is the version before this one: a turn that did
+// not ask for a capability runs the default.
+type Router interface {
+	Route(content string) (Routing, bool)
+}
+
+// RouterFunc lets a function be a Router.
+//
+// The wiring in assemble.go has a rule table that knows nothing about this
+// package — it answers with its own decision type — and one place where the two
+// are joined. Being able to pass the closure that does the joining is what keeps
+// that seam to a handful of lines instead of a type that exists only to be
+// adapted.
+type RouterFunc func(content string) (Routing, bool)
+
+// Route implements Router.
+func (f RouterFunc) Route(content string) (Routing, bool) { return f(content) }
+
+// metadata is the decision as the turn's first event carries it.
+func (r Routing) metadata() map[string]any {
+	return map[string]any{
+		"capability": r.Capability,
+		"by":         r.By,
+		"reason":     r.Reason,
+		"confidence": r.Confidence,
+	}
+}

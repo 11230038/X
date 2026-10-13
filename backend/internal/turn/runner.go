@@ -46,6 +46,11 @@ type turnRun struct {
 	// the reads that follow it cannot disagree about what this turn has.
 	declared Declaration
 	material Material
+	// routing is how this turn came to run the capability it runs, and it is nil
+	// on a turn the client named a capability for. It is set before the turn's
+	// goroutine starts and read once, by begin, which is why it needs no lock:
+	// the decision belongs to the request, not to the turn's progress.
+	routing *Routing
 	// sources counts the sources this turn has handed out, and it is what a
 	// citation's number is. It belongs to the turn rather than to a read, so two
 	// reads number one list between them (see number).
@@ -85,6 +90,7 @@ func (r *Runner) newTurnRun(
 	question string,
 	declared Declaration,
 	emitter *Emitter,
+	routed *Routing,
 ) *turnRun {
 	run := &turnRun{
 		runner:      r,
@@ -93,6 +99,7 @@ func (r *Runner) newTurnRun(
 		question:    question,
 		titleNeeded: conversation.Title == "",
 		declared:    declared,
+		routing:     routed,
 		ctx:         ctx,
 		cancel:      cancel,
 		emitter:     emitter,
@@ -127,8 +134,19 @@ func (r *turnRun) run() {
 
 // begin moves the turn to running and tells the client which conversation it is
 // in, before anything else of the turn is produced.
+//
+// It is also where a routed turn says so. The decision rides on the first event
+// of the stream rather than on the turn's row or on the acknowledgement of the
+// command that started it: an acknowledgement travels on a short-lived in-memory
+// table, so a client that reconnects and replays from a position would never see
+// it, while an event is replayable and always in the same place — before
+// anything the turn produced (TOOL-08).
 func (r *turnRun) begin() error {
-	if err := r.emit(r.ctx, event.Event{Type: event.TypeSession, Content: r.session.ID}); err != nil {
+	opening := event.Event{Type: event.TypeSession, Content: r.session.ID}
+	if r.routing != nil {
+		opening.Metadata = map[string]any{event.MetaRouting: r.routing.metadata()}
+	}
+	if err := r.emit(r.ctx, opening); err != nil {
 		return err
 	}
 	moved, err := r.turn.Transition(StatusRunning, r.runner.now())

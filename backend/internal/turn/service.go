@@ -41,7 +41,11 @@ type Options struct {
 	// whatever the deployment runs: a runner without a bank would be a build
 	// whose deep_question capability cannot store anything, and the drift check
 	// that would catch that is about names, not about what they can do.
-	Questions    Notebook
+	Questions Notebook
+	// Router decides which capability a turn runs when the client did not ask
+	// for one. It is the one optional thing here, and a nil one is this version's
+	// predecessor exactly: every turn that named no capability runs the default.
+	Router       Router
 	Capabilities *capability.Registry
 	Tools        *tool.Registry
 	Policy       tool.Policy
@@ -69,6 +73,7 @@ type Runner struct {
 	sessions     Sessions
 	materials    Materials
 	questions    Notebook
+	router       Router
 	capabilities *capability.Registry
 	tools        *tool.Registry
 	policy       tool.Policy
@@ -124,6 +129,7 @@ func NewRunner(options Options) (*Runner, error) {
 		sessions:     options.Sessions,
 		materials:    options.Materials,
 		questions:    options.Questions,
+		router:       options.Router,
 		capabilities: options.Capabilities,
 		tools:        options.Tools,
 		policy:       options.Policy,
@@ -177,9 +183,18 @@ func (r *Runner) Start(ctx context.Context, request StartRequest) (Started, erro
 	if content == "" {
 		return Started{}, ErrEmptyMessage
 	}
+	// What runs is decided here, before the turn row exists, which is the whole
+	// point of the position: a turn is created already knowing its capability, so
+	// nothing downstream has to ask again, and a routed turn is stored as one
+	// (TOOL-08). An explicit capability is never rewritten — pre-routing fills a
+	// blank and does not overrule an answer.
 	capabilityName := strings.TrimSpace(request.Capability)
+	var routed *Routing
 	if capabilityName == "" {
 		capabilityName = r.fallback
+		if decision, matched := r.route(ctx, content); matched {
+			routed, capabilityName = &decision, decision.Capability
+		}
 	}
 
 	conversation, err := r.conversation(ctx, request.SessionID)
@@ -231,8 +246,35 @@ func (r *Runner) Start(ctx context.Context, request StartRequest) (Started, erro
 	}
 
 	r.launch(r.newTurnRun(runCtx, cancel, record, conversation, content,
-		declarationOf(request.Attachments, request.KnowledgeBases), emitter))
+		declarationOf(request.Attachments, request.KnowledgeBases), emitter, routed))
 	return Started{Session: conversation, Turn: record}, nil
+}
+
+// route asks the router where this turn should go, and checks the answer is one
+// this process can run.
+//
+// The check is here because a rule table is a property of the build while the
+// capabilities a process registers are a property of the deployment. A
+// deployment that took the question writer out would otherwise turn every
+// question-shaped request into a turn that failed with unknown_capability —
+// a mistake in the wiring, reported to the user as if the runtime could not read
+// it (AC-02). Falling back to the default is exactly what the same request would
+// have got before this version; the log is what tells an operator that the table
+// and the registration drifted apart.
+func (r *Runner) route(ctx context.Context, content string) (Routing, bool) {
+	if r.router == nil {
+		return Routing{}, false
+	}
+	decision, matched := r.router.Route(content)
+	if !matched {
+		return Routing{}, false
+	}
+	if _, registered := r.capabilities.Lookup(decision.Capability); !registered {
+		r.logger.WarnContext(ctx, "a routing rule named a capability this build does not register",
+			"capability", decision.Capability, "reason", decision.Reason, "by", decision.By)
+		return Routing{}, false
+	}
+	return decision, true
 }
 
 // conversation continues one that exists, or starts one.
