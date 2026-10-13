@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -29,14 +30,21 @@ type stubFile struct {
 // Open, and records what was opened: "this file was parsed once" is a property
 // worth being able to assert, because parsing is the expensive half of adding a
 // document.
+//
+// The record is behind a lock because two callers adding one file at the same
+// time is a case this package tests: the second Open of one file is a parse
+// paid for and thrown away, which is a thing to see rather than to race on.
 type stubFiles struct {
+	mu     sync.Mutex
 	files  map[string]stubFile
 	err    error
 	opened []string
 }
 
 func (s *stubFiles) Open(_ context.Context, fileID string) (SourceFile, error) {
+	s.mu.Lock()
 	s.opened = append(s.opened, fileID)
+	s.mu.Unlock()
 	if s.err != nil {
 		return SourceFile{}, s.err
 	}
