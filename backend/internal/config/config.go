@@ -63,6 +63,25 @@ var requiredKeys = []string{
 	"LLM_CAPABILITY_CONFIG_JSON",
 	"TURN_INPUT_TIMEOUT",
 	"TURN_MAX_ROUNDS",
+	"TURN_MAX_ATTACHMENT_BYTES",
+	"EMBEDDING_BASE_URL",
+	"EMBEDDING_MODEL",
+	"EMBEDDING_API_KEY",
+	"EMBEDDING_DIMENSION",
+	"EMBEDDING_TIMEOUT",
+	"EMBEDDING_BATCH_SIZE",
+	"PARSER_DEFAULT_ENGINE",
+	"PARSER_DOCLING_BASE_URL",
+	"PARSER_TIMEOUT",
+	"KB_CHUNK_SIZE",
+	"KB_CHUNK_OVERLAP",
+	"KB_RETRIEVAL_TOP_K",
+	"KB_RETRIEVAL_CANDIDATES",
+	"KB_RRF_K",
+	"KB_MAX_CHARS_PER_DOCUMENT",
+	"KB_MAX_CHARS_PER_TURN",
+	"KB_VECTOR_LEASE",
+	"KB_INDEX_WORKERS",
 }
 
 // Config contains all settings required to run the service.
@@ -75,6 +94,9 @@ type Config struct {
 	Auth            AuthConfig
 	Database        DatabaseConfig
 	LLM             LLMConfig
+	Embedding       EmbeddingConfig
+	Parser          ParserConfig
+	KB              KBConfig
 	Turn            TurnConfig
 }
 
@@ -155,6 +177,18 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	embedding, err := loadEmbeddingConfig(values)
+	if err != nil {
+		return Config{}, err
+	}
+	parser, err := loadParserConfig(values)
+	if err != nil {
+		return Config{}, err
+	}
+	kb, err := loadKBConfig(values)
+	if err != nil {
+		return Config{}, err
+	}
 	turn, err := loadTurnConfig(values)
 	if err != nil {
 		return Config{}, err
@@ -169,6 +203,9 @@ func Load(path string) (Config, error) {
 		Auth:            authConfig,
 		Database:        database,
 		LLM:             llm,
+		Embedding:       embedding,
+		Parser:          parser,
+		KB:              kb,
 		Turn:            turn,
 	}
 	if err := cfg.Validate(); err != nil {
@@ -201,6 +238,15 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.LLM.Validate(); err != nil {
+		return err
+	}
+	if err := c.Embedding.Validate(); err != nil {
+		return err
+	}
+	if err := c.Parser.Validate(); err != nil {
+		return err
+	}
+	if err := c.KB.Validate(); err != nil {
 		return err
 	}
 	return c.Turn.Validate()

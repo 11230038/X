@@ -12,6 +12,12 @@ type TurnConfig struct {
 	InputTimeout time.Duration
 	// MaxRounds caps agent-loop iterations so a tool-calling model cannot spin.
 	MaxRounds int
+	// MaxAttachmentBytes bounds one turn's attachments in total, which is a
+	// different limit from UPLOAD_MAX_FILE_BYTES: that one bounds a single
+	// stored file, this one bounds what a single message may carry. Twenty-five
+	// megabytes of text is already far past KB_MAX_CHARS_PER_TURN, so this limit
+	// is about the request rather than about the model's context.
+	MaxAttachmentBytes int64
 }
 
 // Validate checks the turn execution bounds.
@@ -21,6 +27,9 @@ func (c TurnConfig) Validate() error {
 	}
 	if c.MaxRounds <= 0 {
 		return fmt.Errorf("TURN_MAX_ROUNDS must be a positive integer")
+	}
+	if c.MaxAttachmentBytes <= 0 {
+		return fmt.Errorf("TURN_MAX_ATTACHMENT_BYTES must be a positive integer")
 	}
 	return nil
 }
@@ -34,5 +43,13 @@ func loadTurnConfig(values map[string]string) (TurnConfig, error) {
 	if err != nil {
 		return TurnConfig{}, err
 	}
-	return TurnConfig{InputTimeout: inputTimeout, MaxRounds: maxRounds}, nil
+	maxAttachmentBytes, err := parsePositiveInt64(values, "TURN_MAX_ATTACHMENT_BYTES")
+	if err != nil {
+		return TurnConfig{}, err
+	}
+	return TurnConfig{
+		InputTimeout:       inputTimeout,
+		MaxRounds:          maxRounds,
+		MaxAttachmentBytes: maxAttachmentBytes,
+	}, nil
 }
