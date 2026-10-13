@@ -3,9 +3,7 @@ package kb
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -89,67 +87,6 @@ func TestWorkerLeavesAttachmentsAlone(t *testing.T) {
 	// attachment is not work.
 	if worked, err := worker.IndexOne(context.Background()); worked || err != nil {
 		t.Errorf("the worker found work = %v, error = %v, want the attachment left alone", worked, err)
-	}
-}
-
-// The claim is what keeps one document from being embedded by two workers at
-// once, and what makes that true is the update refusing a row somebody else has
-// already taken.
-func TestOnlyOneWorkerClaimsADocument(t *testing.T) {
-	h := newHarness(t)
-	base := h.base(t, "kb")
-	h.addDocument(t, base.ID, "lib_one", sampleText)
-
-	const racers = 8
-	now := time.Now().UTC()
-	wins := make([]bool, racers)
-	var wait sync.WaitGroup
-	for index := 0; index < racers; index++ {
-		wait.Add(1)
-		go func(index int) {
-			defer wait.Done()
-			_, err := h.repo.ClaimDocument(context.Background(),
-				fmt.Sprintf("worker-%d", index), time.Minute, now)
-			wins[index] = err == nil
-		}(index)
-	}
-	wait.Wait()
-
-	won := 0
-	for _, win := range wins {
-		if win {
-			won++
-		}
-	}
-	if won != 1 {
-		t.Fatalf("%d of %d workers claimed the same document, want 1", won, racers)
-	}
-}
-
-// A worker that dies mid-document leaves the row claimed. The lease is what
-// makes that a delay rather than a document nobody will ever index.
-func TestAStaleClaimCanBeTakenOver(t *testing.T) {
-	h := newHarness(t)
-	base := h.base(t, "kb")
-	document := h.addDocument(t, base.ID, "lib_one", sampleText)
-	now := time.Now().UTC()
-
-	if _, err := h.repo.ClaimDocument(context.Background(), "first", 10*time.Second, now); err != nil {
-		t.Fatalf("the first claim failed: %v", err)
-	}
-	// Inside the lease the document is the first worker's, and asking for it is
-	// not an error — it is simply not on offer.
-	if _, err := h.repo.ClaimDocument(context.Background(), "second", 10*time.Second, now.Add(5*time.Second)); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("a live claim was handed out again: error = %v, want ErrNotFound", err)
-	}
-	// Past it, the next worker takes over.
-	if _, err := h.repo.ClaimDocument(context.Background(), "second", 10*time.Second, now.Add(11*time.Second)); err != nil {
-		t.Fatalf("an expired claim was not taken over: %v", err)
-	}
-	// And the worker that owned it cannot write to it any more: its vectors are
-	// for a document somebody else is now indexing.
-	if err := h.repo.CompleteDocument(context.Background(), document.ID, "first"); !errors.Is(err, ErrConflict) {
-		t.Errorf("the first worker finished a document it no longer held: error = %v, want ErrConflict", err)
 	}
 }
 

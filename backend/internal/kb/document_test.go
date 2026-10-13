@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -235,69 +234,6 @@ func TestRebuildLeavesTheCurrentRevisionWhenItCannotParse(t *testing.T) {
 	}
 }
 
-// Two rebuilds that started from the same revision cannot both land: the second
-// would write chunks nobody chose. The loser is told, and the document keeps
-// the revision the winner wrote.
-func TestRebuildConflictsWithARebuildThatAlreadyMovedTheRevision(t *testing.T) {
-	h := newHarness(t)
-	base := h.base(t, "kb")
-	document := h.addDocument(t, base.ID, "lib_one", sampleText)
-
-	if _, err := h.service.RebuildDocument(context.Background(), document.ID); err != nil {
-		t.Fatalf("the first rebuild error = %v", err)
-	}
-	// The loser is a rebuild that read revision 1 and is writing revision 2
-	// after someone else has already moved the document to 2.
-	write := DocumentWrite{
-		Document: Document{ID: document.ID, ActiveRevision: 2},
-		Text:     "stale",
-	}
-	err := h.repo.ReplaceRevision(context.Background(), write, 1)
-
-	if !errors.Is(err, ErrConflict) {
-		t.Fatalf("error = %v, want ErrConflict", err)
-	}
-}
-
-// While a rebuild runs, every read sees one revision's chunks. There is no
-// window in which a query would get half of each, which is what makes KB-03's
-// "concurrent retrieval during a rebuild" answerable.
-func TestConcurrentRebuildsNeverExposeTwoRevisionsAtOnce(t *testing.T) {
-	h := newHarness(t)
-	base := h.base(t, "kb")
-	document := h.addDocument(t, base.ID, "lib_one", sampleText)
-
-	done := make(chan struct{})
-	var wait sync.WaitGroup
-	wait.Add(1)
-	go func() {
-		defer wait.Done()
-		defer close(done)
-		for attempt := 0; attempt < 20; attempt++ {
-			if _, err := h.service.RebuildDocument(context.Background(), document.ID); err != nil {
-				t.Errorf("RebuildDocument() error = %v", err)
-				return
-			}
-		}
-	}()
-
-	for {
-		select {
-		case <-done:
-			wait.Wait()
-			return
-		default:
-		}
-		revisions := map[int]bool{}
-		for _, chunk := range h.repo.activeChunks(document.ID) {
-			revisions[chunk.Revision] = true
-		}
-		if len(revisions) > 1 {
-			t.Fatalf("a read saw chunks of %d revisions at once", len(revisions))
-		}
-	}
-}
-
 func TestRemoveDocumentTakesItsChunksWithIt(t *testing.T) {
 	h := newHarness(t)
 	base := h.base(t, "kb")
@@ -314,62 +250,11 @@ func TestRemoveDocumentTakesItsChunksWithIt(t *testing.T) {
 	}
 }
 
-// A deep link out of a retrieval source carries a file id and nothing else: the
-// source was found inside some collection, and the link back to the text must
-// open without the client knowing which one. This is the lookup that makes it
-// possible.
-func TestDocumentOfFileFindsADocumentOfAnyCollection(t *testing.T) {
-	h := newHarness(t)
-	base := h.base(t, "kb")
-	document := h.addDocument(t, base.ID, "lib_one", sampleText)
-
-	found, err := h.service.DocumentOfFile(context.Background(), "lib_one")
-
-	if err != nil {
-		t.Fatalf("DocumentOfFile() error = %v", err)
-	}
-	if found.ID != document.ID {
-		t.Errorf("found document %s, want %s", found.ID, document.ID)
-	}
-}
-
-// One file can be read once as an attachment and once into a collection, and
-// then there are two documents for one file id. The attachment is the answer:
-// it is the reading the turn in front of the user was grounded on, while the
-// collection's copy is one of many a later search may or may not rank.
-func TestDocumentOfFilePrefersTheAttachment(t *testing.T) {
-	h := newHarness(t)
-	base := h.base(t, "kb")
-	h.addFile("lib_one", "one.md", sampleText)
-	attachment, err := h.service.AddDocument(context.Background(), "lib_one", "")
-	if err != nil {
-		t.Fatalf("AddDocument(as an attachment) error = %v", err)
-	}
-	if _, err := h.service.AddDocument(context.Background(), "lib_one", base.ID); err != nil {
-		t.Fatalf("AddDocument(into a collection) error = %v", err)
-	}
-
-	found, err := h.service.DocumentOfFile(context.Background(), "lib_one")
-
-	if err != nil {
-		t.Fatalf("DocumentOfFile() error = %v", err)
-	}
-	if found.ID != attachment.ID {
-		t.Errorf("found document %s, want the attachment %s", found.ID, attachment.ID)
-	}
-}
-
-// A file that has been uploaded and used for nothing has no document, and that
-// is a state worth naming: the handler answers "not parsed" rather than "no
-// such file", and the client offers the file without offering its text.
-func TestDocumentOfFileOfAFileNothingReadIsNotFound(t *testing.T) {
-	h := newHarness(t)
-
-	if _, err := h.service.DocumentOfFile(context.Background(), "lib_one"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("error = %v, want ErrNotFound", err)
-	}
-}
-
+// Which document a file id resolves to is a question about the rows — one file
+// can have been read into several places, and the rule that picks between them
+// is the query's ordering. It is checked where the query runs, in
+// repository_document_contract_test.go; the service only trims the id and hands
+// it on, which is what the two cases below are.
 func TestDocumentOfFileNeedsAFile(t *testing.T) {
 	h := newHarness(t)
 

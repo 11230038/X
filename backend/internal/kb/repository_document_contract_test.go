@@ -82,6 +82,15 @@ func TestDBDocumentOfFilePrefersTheAttachment(t *testing.T) {
 	if document.ID != "doc_attachment" {
 		t.Errorf("the file resolves to %s, want the attachment", document.ID)
 	}
+
+	// A file the library holds but nothing has read has no document, and that is
+	// a state with its own answer: the client is told the file was not parsed
+	// rather than that it does not exist.
+	unread := libraryFileID(2)
+	addLibraryFile(t, resource, unread)
+	if _, err := repo.DocumentOfFile(context.Background(), unread); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a file nothing has read: %v, want %v", err, ErrNotFound)
+	}
 }
 
 func TestDBDocumentOfFileTakesTheOldestThenTheLowestID(t *testing.T) {

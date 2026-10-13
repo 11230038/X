@@ -80,26 +80,11 @@ func TestGetHidesTheRecycleBin(t *testing.T) {
 	}
 }
 
-func TestListAsksForTheBinOrTheLiveSessions(t *testing.T) {
-	service, repository := newTestService(t)
-
-	if _, err := service.List(context.Background(), ListOptions{Limit: 10, Offset: 20}); err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if _, err := service.List(context.Background(), ListOptions{Deleted: true}); err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-
-	if len(repository.lists) != 2 {
-		t.Fatalf("storage was asked %d times", len(repository.lists))
-	}
-	if repository.lists[0].Deleted || repository.lists[0].Limit != 10 || repository.lists[0].Offset != 20 {
-		t.Errorf("live listing = %+v", repository.lists[0])
-	}
-	if !repository.lists[1].Deleted {
-		t.Errorf("bin listing = %+v", repository.lists[1])
-	}
-}
+// There is no test here that List asks for the bin when it is asked for the
+// bin. It does: the options are handed straight to storage, which the compiler
+// already says, and what the two listings contain — their order, which rows are
+// in each, and how paging cuts them — is the query's, checked against a real
+// database in repository_db_test.go.
 
 func TestRenameTitlesALiveSession(t *testing.T) {
 	service, repository := newTestService(t)

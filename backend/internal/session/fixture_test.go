@@ -14,7 +14,6 @@ type fakeRepository struct {
 	// err, when set, is what every method returns.
 	err error
 
-	lists    []ListOptions
 	renames  []renameCall
 	binCalls []binCall
 	deleted  []string
@@ -65,7 +64,6 @@ func (f *fakeRepository) Session(_ context.Context, sessionID string) (Session, 
 }
 
 func (f *fakeRepository) List(_ context.Context, options ListOptions) ([]Session, error) {
-	f.lists = append(f.lists, options)
 	if f.err != nil {
 		return nil, f.err
 	}
