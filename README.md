@@ -58,6 +58,14 @@ go test ./...
 go vet ./...
 ```
 
+`go test ./...` **以本地 seekdb 为前提**：存储契约（排序、唯一性、级联、CHECK、错误码映射）由真库证明，所以测试会读 `backend/.env`，为每个包建一个 `<DB_NAME>_test_<包名>` 的库（如 `x_test_kb`）并自行跑完 migration，然后只碰这些库——开发库 `x` 不会被打开，所以**测试不需要先迁移开发库**，起容器就够了：
+
+```bash
+docker start seekdb
+```
+
+没有可用数据库时这些用例**失败**而不是跳过——不连库的绿灯没有意义。只跑纯逻辑的包不受这个前提影响。
+
 ### 配置
 
 服务只读取 `backend/.env`，不会从进程环境补值或覆盖。文件缺失、键缺失、空值或非法值都会阻止启动；[backend/.env.example](backend/.env.example) 是完整的非秘密模板，真实 `.env` 不得提交。
@@ -317,7 +325,10 @@ npm run build
 cd backend
 go test ./...
 go vet ./...
+gofmt -l .
 ```
+
+`go test ./...` 会自建 `<DB_NAME>_test_*` 库并在其中跑 migration，所以需要本地 seekdb 在跑（`docker start seekdb`）。测试库用完留在那里即可，`x` 与之无关——`go run ./cmd/migrate up` 是给应用用的，测试不依赖它。
 
 前端：
 
