@@ -121,15 +121,13 @@ func (h *harness) together(t *testing.T, reviews []Review) ([]ReviewResult, []er
 // storeQuestion puts a question in the bank, because that is where the review
 // path expects one: it reads the row the bank writes, and a fixture that wrote
 // its own row would be handing this package a shape it does not decide.
+//
+// It writes the question a day before the reviews in this file happen, so that
+// the question is the older thing. storeQuestionAt is the same write with the
+// instant chosen, for the cases that are about when a question was written.
 func storeQuestion(t *testing.T, resource *data.Resource, entryID string, question notebook.Question) notebook.Question {
 	t.Helper()
-	question.QuestionID = notebook.QuestionID(question.Text, question.Type)
-	_, err := notebook.NewGORMRepository(resource.GORM()).UpsertQuestion(
-		context.Background(), entryID, question, reviewsHappenAt.Add(-24*time.Hour))
-	if err != nil {
-		t.Fatalf("store question %q: %v", question.Text, err)
-	}
-	return question
+	return storeQuestionAt(t, resource, entryID, question, reviewsHappenAt.Add(-24*time.Hour))
 }
 
 func choiceFor(text string) notebook.Question {

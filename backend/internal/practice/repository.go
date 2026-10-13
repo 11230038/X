@@ -36,6 +36,13 @@ type Repository interface {
 
 	// Entry reads a question, its answer face, and the state beside it.
 	Entry(ctx context.Context, questionID string) (StoredEntry, error)
+	// Queue reads the questions to practise now, at most size of them. The time
+	// is the caller's: "due" is a comparison against a clock, and a repository
+	// that read one would make every case about the day it ran on.
+	Queue(ctx context.Context, now time.Time, size int) ([]QueueItem, error)
+	// Stats reads the practice history of one window, bucket by bucket, with the
+	// distribution of that window's questions.
+	Stats(ctx context.Context, query StatsQuery) (Stats, error)
 	// RecordedReview reads an event row by its request id, ErrNotFound when
 	// there is none.
 	RecordedReview(ctx context.Context, requestID string) (StoredReview, error)
