@@ -1,9 +1,13 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
+	"backend/internal/askquestions"
+	"backend/internal/capability"
 	"backend/internal/config"
+	"backend/internal/deepsolve"
 )
 
 // namedChatOnly is the configuration a deployment has when it predates the
@@ -24,41 +28,97 @@ func namedChatOnly() config.Config {
 			},
 		},
 		Turn: config.TurnConfig{MaxRounds: 12},
+		Practice: config.PracticeConfig{
+			QuestionDefaultCount: 5,
+			QuestionMaxCount:     30,
+		},
 	}
 }
 
-// TestEveryCapabilityRunsOnAConfigThatOnlyNamesChat is the reason the tuning
-// lookup falls back to chat's: adding a capability must not be the same thing as
-// adding a key a deployment has to write before the process will start. Every
-// capability this build registers has to come out of this configuration with
-// tuning it can actually run on.
-func TestEveryCapabilityRunsOnAConfigThatOnlyNamesChat(t *testing.T) {
+// configured is the same deployment once it has written the one entry the
+// question writer cannot do without.
+func configured() config.Config {
 	cfg := namedChatOnly()
+	cfg.LLM.Capabilities["deep_question"] = config.CapabilityParams{
+		Temperature:         0.7,
+		ContextBudgetTokens: 32000,
+		Stages: map[string]config.StageParams{
+			"ideation":   {MaxTokens: 512},
+			"generation": {MaxTokens: 4096},
+		},
+	}
+	return cfg
+}
+
+// TestACapabilityThatRunsChatsStagesNeedsNoKeyOfItsOwn is the reason the tuning
+// lookup falls back to chat's: adding a capability whose stages are named the
+// way chat names them must not be the same thing as adding a key a deployment
+// has to write before the process will start.
+func TestACapabilityThatRunsChatsStagesNeedsNoKeyOfItsOwn(t *testing.T) {
+	cfg := namedChatOnly()
+
+	for _, manifest := range []capability.Manifest{askquestions.Manifest(), deepsolve.Manifest()} {
+		settings, err := capabilitySettings(cfg, manifest)
+		if err != nil {
+			t.Fatalf("%s: capabilitySettings() error = %v", manifest.Name, err)
+		}
+		if settings.Temperature != 0.7 || settings.ContextBudgetTokens != 32000 {
+			t.Errorf("%s ran on %+v, want the general assistant's tuning", manifest.Name, settings)
+		}
+		if err := settings.Validate(manifest); err != nil {
+			t.Errorf("%s would not run: %v", manifest.Name, err)
+		}
+	}
+}
+
+// TestACapabilityWithStagesOfItsOwnMustBeConfigured is the other half of that
+// rule, and the reason it is a rule rather than a lookup that always falls back.
+//
+// The per-stage limits are keyed by stage name (CFG-01), so the question writer,
+// whose two stages are not chat's, would inherit a map with no key for anything
+// it runs. That is refused at startup with the stages named and the key to
+// write, because the alternative — the process coming up and then failing on the
+// first question anybody asked for — is a failure reported to a user.
+func TestACapabilityWithStagesOfItsOwnMustBeConfigured(t *testing.T) {
+	_, err := buildCapabilities(namedChatOnly())
+	if err == nil {
+		t.Fatal("a build whose question writer was never configured started")
+	}
+	for _, wanted := range []string{"deep_question", "ideation", "generation", "LLM_CAPABILITY_CONFIG_JSON"} {
+		if !strings.Contains(err.Error(), wanted) {
+			t.Errorf("the refusal does not say %q: %v", wanted, err)
+		}
+	}
+}
+
+// TestEveryCapabilityRunsOnAConfigThatNamesWhatItMust takes the same
+// configuration with that entry written out: every capability this build
+// registers has to come out of it with tuning it can actually run on.
+func TestEveryCapabilityRunsOnAConfigThatNamesWhatItMust(t *testing.T) {
+	cfg := configured()
 
 	registry, err := buildCapabilities(cfg)
 	if err != nil {
 		t.Fatalf("buildCapabilities() error = %v", err)
 	}
 
-	names := registry.Names()
-	if len(names) == 0 {
+	if names := registry.Names(); len(names) == 0 {
 		t.Fatal("the build offers no capabilities")
 	}
 	for _, manifest := range registry.Manifests() {
-		settings := capabilitySettings(cfg, manifest.Name)
+		settings, err := capabilitySettings(cfg, manifest)
+		if err != nil {
+			t.Errorf("%s: capabilitySettings() error = %v", manifest.Name, err)
+			continue
+		}
 		if err := settings.Validate(manifest); err != nil {
 			t.Errorf("%s would not run: %v", manifest.Name, err)
 		}
 	}
-	// The general assistant is the one the configuration names, so it is also the
-	// one a request that names nothing gets (RT-03).
+	// The general assistant is the one the configuration names first, so it is
+	// also the one a request that names nothing gets (RT-03).
 	if _, ok := registry.Lookup("chat"); !ok {
 		t.Error("chat is not registered")
-	}
-	for _, name := range []string{"ask_questions"} {
-		if _, ok := registry.Lookup(name); !ok {
-			t.Errorf("%s is not registered", name)
-		}
 	}
 }
 
@@ -73,7 +133,10 @@ func TestACapabilityNamedInConfigurationUsesItsOwnTuning(t *testing.T) {
 		Stages:              map[string]config.StageParams{"responding": {MaxTokens: 1536}},
 	}
 
-	settings := capabilitySettings(cfg, "ask_questions")
+	settings, err := capabilitySettings(cfg, askquestions.Manifest())
+	if err != nil {
+		t.Fatalf("capabilitySettings() error = %v", err)
+	}
 	if settings.Temperature != 0.1 || settings.ContextBudgetTokens != 8000 {
 		t.Errorf("settings = %+v, want the capability's own", settings)
 	}
@@ -92,12 +155,12 @@ func TestACapabilityNamedInConfigurationUsesItsOwnTuning(t *testing.T) {
 // which is the failure mode of forgetting a line here rather than of writing one
 // wrongly.
 func TestTheRegisteredCapabilitiesAreWhatTheBuildOffers(t *testing.T) {
-	registry, err := buildCapabilities(namedChatOnly())
+	registry, err := buildCapabilities(configured())
 	if err != nil {
 		t.Fatalf("buildCapabilities() error = %v", err)
 	}
 
-	want := []string{"ask_questions", "chat", "deep_solve"}
+	want := []string{"ask_questions", "chat", "deep_question", "deep_solve"}
 	got := registry.Names()
 	if len(got) != len(want) {
 		t.Fatalf("registered %v, want %v", got, want)

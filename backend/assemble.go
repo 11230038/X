@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 
 	"backend/internal/askquestions"
 	"backend/internal/capability"
@@ -348,27 +349,36 @@ func checkDrift(capabilities *capability.Registry, policy tool.Policy, registere
 func buildCapabilities(cfg config.Config) (*capability.Registry, error) {
 	registry := capability.NewRegistry()
 	for _, register := range []struct {
-		name  string
-		build func(capability.Settings) (capability.Capability, error)
+		name     string
+		manifest func() capability.Manifest
+		build    func(capability.Settings) (capability.Capability, error)
 	}{
-		{chat.Name, func(s capability.Settings) (capability.Capability, error) { return chat.New(s) }},
-		{askquestions.Name, func(s capability.Settings) (capability.Capability, error) {
+		{chat.Name, chat.Manifest, func(s capability.Settings) (capability.Capability, error) {
+			return chat.New(s)
+		}},
+		{askquestions.Name, askquestions.Manifest, func(s capability.Settings) (capability.Capability, error) {
 			return askquestions.New(s)
 		}},
-		{deepsolve.Name, func(s capability.Settings) (capability.Capability, error) { return deepsolve.New(s) }},
+		{deepsolve.Name, deepsolve.Manifest, func(s capability.Settings) (capability.Capability, error) {
+			return deepsolve.New(s)
+		}},
 		// The question writer takes two more numbers than the others, and they are
 		// the deployment's own: how many questions a request that says nothing
 		// gets, and how many one request may ask for. Both are read from
 		// configuration here rather than looked up inside the package, so that a
 		// capability has no way to reach the environment.
-		{deepquestion.Name, func(s capability.Settings) (capability.Capability, error) {
+		{deepquestion.Name, deepquestion.Manifest, func(s capability.Settings) (capability.Capability, error) {
 			return deepquestion.New(s, deepquestion.Limits{
 				Default: cfg.Practice.QuestionDefaultCount,
 				Max:     cfg.Practice.QuestionMaxCount,
 			})
 		}},
 	} {
-		built, err := register.build(capabilitySettings(cfg, register.name))
+		settings, err := capabilitySettings(cfg, register.manifest())
+		if err != nil {
+			return nil, err
+		}
+		built, err := register.build(settings)
 		if err != nil {
 			return nil, fmt.Errorf("initialize the %s capability: %w", register.name, err)
 		}
@@ -382,17 +392,21 @@ func buildCapabilities(cfg config.Config) (*capability.Registry, error) {
 // capabilitySettings is one capability's tuning, resolved from configuration.
 //
 // A capability the deployment has not named runs on the general assistant's
-// tuning. The two others are the same model answering the same user in the same
-// language with one stage instead of two, so a deployment that never tunes them
-// should not have to write the same numbers out again under two more names —
+// tuning. Most of them are the same model answering the same user in the same
+// language, with one stage instead of two, so a deployment that never tunes them
+// should not have to write the same numbers out again under three more names —
 // and a capability being registered should not be a reason for a process that
 // started yesterday to refuse to start today. Naming one in
 // LLM_CAPABILITY_CONFIG_JSON overrides it, which is also how it is tuned.
 //
-// The stage limits are the one part that is not shared blindly: they are keyed
-// by stage name, and the manifest is what says which names are right.
-func capabilitySettings(cfg config.Config, name string) capability.Settings {
-	params, ok := cfg.LLM.Capabilities[name]
+// The stage limits are the one part that cannot be inherited blindly: they are
+// keyed by stage name, so a capability whose stages are its own — the question
+// writer has two, and neither is chat's — would receive a tuning with no key for
+// anything it runs. That is refused here with the key to write, rather than left
+// to fail inside the capability, because it is a fact about the deployment's
+// file: it runs a build whose question writer it never configured.
+func capabilitySettings(cfg config.Config, manifest capability.Manifest) (capability.Settings, error) {
+	params, ok := cfg.LLM.Capabilities[manifest.Name]
 	if !ok {
 		params = cfg.LLM.Capabilities[chat.Name]
 	}
@@ -400,13 +414,42 @@ func capabilitySettings(cfg config.Config, name string) capability.Settings {
 	for stage, tuning := range params.Stages {
 		stages[stage] = tuning.MaxTokens
 	}
+	// A tuning with no stages at all is not an inherited one but an absent one:
+	// "nothing is configured" is the capability's own settings refusing, and it
+	// says more about what is missing than this check could.
+	if len(stages) > 0 {
+		missing := make([]string, 0, len(manifest.Stages))
+		for _, stage := range manifest.Stages {
+			if stages[stage] <= 0 {
+				missing = append(missing, stage)
+			}
+		}
+		if len(missing) > 0 {
+			return capability.Settings{}, fmt.Errorf(
+				"%s runs the stages %s and the capability tuning covers %s: give %s an entry of its own "+
+					"in LLM_CAPABILITY_CONFIG_JSON naming those stages (per-stage limits are looked up "+
+					"by stage name, CFG-01)",
+				manifest.Name, strings.Join(missing, ", "), strings.Join(sortedStages(stages), ", "), manifest.Name)
+		}
+	}
 	return capability.Settings{
 		Model:               cfg.LLM.Model,
 		Temperature:         params.Temperature,
 		ContextBudgetTokens: params.ContextBudgetTokens,
 		MaxRounds:           cfg.Turn.MaxRounds,
 		StageMaxTokens:      stages,
+	}, nil
+}
+
+// sortedStages lists the stage names a tuning covers, for a message that says
+// which ones it has when the one being asked for is not among them.
+func sortedStages(stages map[string]int) []string {
+	names := make([]string, 0, len(stages))
+	for stage := range stages {
+		names = append(names, stage)
 	}
+	sort.Strings(names)
+	return names
 }
 
 // kbSettings is the knowledge base domain's tuning, resolved from configuration.
