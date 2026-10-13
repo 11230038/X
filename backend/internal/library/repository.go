@@ -2,6 +2,7 @@ package library
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"backend/internal/data/models"
@@ -32,6 +33,30 @@ func (r *GORMRepository) Create(ctx context.Context, record FileRecord) error {
 		return fmt.Errorf("create library file metadata: %w", err)
 	}
 	return nil
+}
+
+// Find reads one file's metadata back by id.
+//
+// A missing row is ErrNotFound rather than GORM's own sentinel, so that the
+// only thing a caller above this line has to know about storage is that the
+// file is not here.
+func (r *GORMRepository) Find(ctx context.Context, id string) (FileRecord, error) {
+	if r == nil || r.db == nil {
+		return FileRecord{}, fmt.Errorf("library repository is not initialized")
+	}
+	var model models.LibraryFile
+	err := r.db.WithContext(ctx).Where("id = ?", id).First(&model).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return FileRecord{}, fmt.Errorf("%w: %s", ErrNotFound, id)
+	}
+	if err != nil {
+		return FileRecord{}, fmt.Errorf("read library file metadata: %w", err)
+	}
+	return FileRecord{
+		ID: model.ID, SHA256: model.SHA256, Filename: model.Filename,
+		MIMEType: model.MIMEType, SizeBytes: model.SizeBytes,
+		LibraryPath: model.LibraryPath, CreatedAt: model.CreatedAt, UpdatedAt: model.UpdatedAt,
+	}, nil
 }
 
 var _ MetadataRepository = (*GORMRepository)(nil)

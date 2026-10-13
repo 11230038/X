@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,11 +17,34 @@ import (
 type recordingRepository struct {
 	record FileRecord
 	err    error
+	// stored is every record Create was given, by id, which is what Find reads
+	// back. A test that wants a read to answer something Create never wrote sets
+	// it directly: a row is not always a row this process put there.
+	stored map[string]FileRecord
+	// findErr, when set, fails the read the way storage does.
+	findErr error
 }
 
 func (r *recordingRepository) Create(_ context.Context, record FileRecord) error {
 	r.record = record
+	if r.err == nil {
+		if r.stored == nil {
+			r.stored = make(map[string]FileRecord)
+		}
+		r.stored[record.ID] = record
+	}
 	return r.err
+}
+
+func (r *recordingRepository) Find(_ context.Context, id string) (FileRecord, error) {
+	if r.findErr != nil {
+		return FileRecord{}, r.findErr
+	}
+	record, ok := r.stored[id]
+	if !ok {
+		return FileRecord{}, fmt.Errorf("%w: %s", ErrNotFound, id)
+	}
+	return record, nil
 }
 
 func TestNewServiceCreatesStorageDirectories(t *testing.T) {
@@ -181,6 +206,98 @@ func TestUploadRejectsInvalidFileAndCleansStaging(t *testing.T) {
 	}
 	assertStagingEmpty(t, root)
 	assertCategoryEmpty(t, root, "pdf")
+}
+
+func TestOpenReadsAStoredFileBackWithItsCategory(t *testing.T) {
+	root := t.TempDir()
+	repository := &recordingRepository{}
+	service, err := NewService(Options{Root: root, MaxFileBytes: 1024}, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := "# 数学分析\n\n拉格朗日中值定理。\n"
+	uploaded, err := service.Upload(context.Background(), UploadInput{
+		Filename: "notes.md", DeclaredMIME: "text/markdown", Content: strings.NewReader(content),
+	})
+	if err != nil {
+		t.Fatalf("Upload() error = %v", err)
+	}
+
+	file, err := service.Open(context.Background(), uploaded.ID)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = file.Content.Close() }()
+
+	read, err := io.ReadAll(file.Content)
+	if err != nil {
+		t.Fatalf("read the stored file: %v", err)
+	}
+	if string(read) != content {
+		t.Errorf("Open() gave %q, want what was uploaded", read)
+	}
+	// The category is what a parser is chosen by, so it has to come back with the
+	// bytes and agree with where they were stored.
+	if file.Category != "md" || file.Filename != "notes.md" || file.MIMEType != "text/markdown" {
+		t.Errorf("Open() = %+v, want the uploaded file's metadata", file)
+	}
+}
+
+func TestOpenReportsAFileThatIsNotThere(t *testing.T) {
+	service, err := NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024}, &recordingRepository{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.Open(context.Background(), "lib_missing")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Open() error = %v, want ErrNotFound", err)
+	}
+	if _, err := service.Open(context.Background(), "  "); !errors.Is(err, ErrInvalidFile) {
+		t.Errorf("Open(blank) error = %v, want ErrInvalidFile", err)
+	}
+	// A record with no file behind it is the same answer: the bytes are not
+	// here, and which half is missing is not something the caller can act on
+	// differently.
+	repository := &recordingRepository{stored: map[string]FileRecord{
+		"lib_gone": {ID: "lib_gone", Filename: "gone.md", LibraryPath: "md/lib_gone.md"},
+	}}
+	service, err = NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024}, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Open(context.Background(), "lib_gone"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Open(record without a file) error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestOpenRefusesAPathItWouldNotHaveWritten(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		path string
+	}{
+		{name: "escapes the root", path: "../outside.md"},
+		{name: "absolute", path: "/etc/passwd"},
+		{name: "no category directory", path: "loose.md"},
+		{name: "empty category", path: "/md/file.md"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repository := &recordingRepository{stored: map[string]FileRecord{
+				"lib_odd": {ID: "lib_odd", Filename: "odd.md", LibraryPath: tt.path},
+			}}
+			service, err := NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024}, repository)
+			if err != nil {
+				t.Fatal(err)
+			}
+			file, err := service.Open(context.Background(), "lib_odd")
+			if err == nil {
+				_ = file.Content.Close()
+				t.Fatalf("Open(%q) opened a file outside the library", tt.path)
+			}
+			if errors.Is(err, ErrNotFound) {
+				t.Errorf("Open(%q) error = %v, want a refusal rather than a missing file", tt.path, err)
+			}
+		})
+	}
 }
 
 func TestSafeJoinRejectsEscapingPaths(t *testing.T) {

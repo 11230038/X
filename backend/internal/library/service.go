@@ -110,6 +110,60 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (UploadResult, 
 	}, nil
 }
 
+// Open reads one stored file back: its metadata, and a reader over its bytes.
+//
+// The caller closes the reader. The path is resolved the same way it was when
+// the file was stored — the metadata's relative path joined to the root, then
+// checked to be inside it — so that a row that says something else cannot be
+// used to read outside the library.
+func (s *Service) Open(ctx context.Context, id string) (StoredFile, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return StoredFile{}, ErrInvalidFile
+	}
+	record, err := s.repository.Find(ctx, id)
+	if err != nil {
+		return StoredFile{}, err
+	}
+	category, err := categoryOf(record.LibraryPath)
+	if err != nil {
+		return StoredFile{}, err
+	}
+	full, err := safeJoin(s.root, record.LibraryPath)
+	if err != nil {
+		// A row whose path escapes the root is not a file that is missing; it is
+		// one this library would not have written. Saying so is more use than
+		// opening whatever the path turns out to point at.
+		return StoredFile{}, fmt.Errorf("resolve stored path for %s: %w", id, err)
+	}
+	content, err := os.Open(full)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return StoredFile{}, fmt.Errorf("%w: %s has a record but no file", ErrNotFound, id)
+		}
+		return StoredFile{}, fmt.Errorf("open stored file %s: %w", id, err)
+	}
+	return StoredFile{
+		ID: record.ID, Filename: record.Filename, MIMEType: record.MIMEType,
+		Category: category, SizeBytes: record.SizeBytes, Content: content,
+	}, nil
+}
+
+// categoryOf reads the category back out of where the file was stored.
+//
+// The category is not a column: it is the directory the bytes are in, written
+// from the same classification that produced the name. Reading it from the path
+// is what keeps the two from disagreeing — a parser chosen by one answer and a
+// file opened at another is a file read by the wrong engine, which fails
+// silently with text nobody can use.
+func categoryOf(libraryPath string) (string, error) {
+	category, _, found := strings.Cut(libraryPath, "/")
+	if !found || category == "" {
+		return "", fmt.Errorf("stored path %q is not one this library writes", libraryPath)
+	}
+	return category, nil
+}
+
 func (s *Service) writeStaging(ctx context.Context, stagingPath string, source io.Reader) (int64, string, error) {
 	file, err := os.OpenFile(stagingPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, filePermissions)
 	if err != nil {
