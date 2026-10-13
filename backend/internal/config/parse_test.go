@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"backend/internal/parse"
 )
 
 func validParserConfig() ParserConfig {
@@ -11,6 +13,31 @@ func validParserConfig() ParserConfig {
 		DefaultEngine:  ParserEngineText,
 		DoclingBaseURL: "http://127.0.0.1:5001",
 		Timeout:        2 * time.Minute,
+	}
+}
+
+// The engine names are written in both packages — here so that a typo in the
+// key is a configuration error naming it, and in the registry because that is
+// where the engines are. This keeps the pair from drifting apart: a name only
+// one side knows would be accepted at startup and then fail as an unavailable
+// engine on the first document.
+func TestParserEngineNamesMatchTheRegistry(t *testing.T) {
+	if ParserEngineText != parse.EngineText {
+		t.Errorf("ParserEngineText = %q, want %q", ParserEngineText, parse.EngineText)
+	}
+	if ParserEngineDocling != parse.EngineDocling {
+		t.Errorf("ParserEngineDocling = %q, want %q", ParserEngineDocling, parse.EngineDocling)
+	}
+
+	known := make(map[string]bool)
+	for _, name := range parse.EngineNames() {
+		known[name] = true
+	}
+	for _, name := range []string{ParserEngineText, ParserEngineDocling} {
+		if !known[name] {
+			t.Errorf("this package offers the engine name %q, which the registry does not have; "+
+				"it has %s", name, strings.Join(parse.EngineNames(), ", "))
+		}
 	}
 }
 
