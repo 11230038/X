@@ -26,8 +26,8 @@ func TestNotebookModelMappings(t *testing.T) {
 				"question_id", "question", "question_type", "question_illustration", "extra",
 				"creat_time", "update_time", "difficulty", "user_answer", "user_answer_image",
 				"options", "correct_answer", "explanation", "quality", "assessment_type", "is_correct",
-				"result", "resolved", "attempt_count", "bookmarked", "source", "mastery_path_id",
-				"knowledge_point_id", "session_id", "turn_id",
+				"result", "resolved", "attempt_count", "bookmarked", "source", "material_id",
+				"mastery_path_id", "knowledge_point_id", "session_id", "turn_id",
 			},
 		},
 		{
@@ -80,7 +80,8 @@ func TestNotebookNullableFields(t *testing.T) {
 		entry.QuestionIllustration, entry.UpdatedAt, entry.Difficulty, entry.UserAnswer,
 		entry.CorrectAnswer, entry.Explanation, entry.Quality, entry.AssessmentType,
 		entry.IsCorrect, entry.Result, entry.Resolved, entry.AttemptCount, entry.Bookmarked,
-		entry.Source, entry.MasteryPathID, entry.KnowledgePointID, entry.SessionID, entry.TurnID,
+		entry.Source, entry.MaterialID, entry.MasteryPathID, entry.KnowledgePointID,
+		entry.SessionID, entry.TurnID,
 	}
 	for index, field := range fields {
 		if reflect.TypeOf(field).Kind() != reflect.Ptr {

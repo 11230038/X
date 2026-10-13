@@ -24,7 +24,7 @@ func TestPracticeModelMappings(t *testing.T) {
 			primaryKey: []string{"notebook_entries_id"},
 			columns: []string{
 				"first_wrong_time", "due_time", "last_review_time", "is_mistake",
-				"case", "streak", "review_count", "lapses", "extra",
+				"case", "streak", "review_count", "lapses", "version", "extra",
 			},
 		},
 		{
@@ -61,7 +61,7 @@ func TestPracticeNullableFields(t *testing.T) {
 	state := PracticeReviewState{}
 	stateFields := []any{
 		state.FirstWrongTime, state.DueTime, state.LastReviewTime, state.IsMistake,
-		state.Case, state.Streak, state.ReviewCount, state.Lapses,
+		state.Case, state.Streak, state.ReviewCount, state.Lapses, state.Version,
 	}
 	for index, field := range stateFields {
 		if reflect.TypeOf(field).Kind() != reflect.Ptr {

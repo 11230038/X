@@ -16,7 +16,7 @@ import (
 var migrationFiles embed.FS
 
 const (
-	latestVersion    int64 = 9
+	latestVersion    int64 = 10
 	versionTableName       = "goose_db_version"
 )
 

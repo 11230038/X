@@ -8,16 +8,21 @@ import (
 
 // PracticeReviewState stores the current review state for an entry.
 type PracticeReviewState struct {
-	NotebookEntriesID string         `gorm:"column:notebook_entries_id;primaryKey;autoIncrement:false"`
-	FirstWrongTime    *time.Time     `gorm:"column:first_wrong_time"`
-	DueTime           *time.Time     `gorm:"column:due_time"`
-	LastReviewTime    *time.Time     `gorm:"column:last_review_time"`
-	IsMistake         *bool          `gorm:"column:is_mistake"`
-	Case              *float64       `gorm:"column:case"`
-	Streak            *int32         `gorm:"column:streak"`
-	ReviewCount       *int32         `gorm:"column:review_count"`
-	Lapses            *int32         `gorm:"column:lapses"`
-	Extra             datatypes.JSON `gorm:"column:extra;type:json"`
+	NotebookEntriesID string     `gorm:"column:notebook_entries_id;primaryKey;autoIncrement:false"`
+	FirstWrongTime    *time.Time `gorm:"column:first_wrong_time"`
+	DueTime           *time.Time `gorm:"column:due_time"`
+	LastReviewTime    *time.Time `gorm:"column:last_review_time"`
+	IsMistake         *bool      `gorm:"column:is_mistake"`
+	Case              *float64   `gorm:"column:case"`
+	Streak            *int32     `gorm:"column:streak"`
+	ReviewCount       *int32     `gorm:"column:review_count"`
+	Lapses            *int32     `gorm:"column:lapses"`
+	// Version is what a writer compares against to find out whether it is
+	// updating the row it read. It is not nullable in the table; it is a pointer
+	// here because every other column on this row is, and a struct of pointers
+	// with one value in it invites reading a zero as "no version".
+	Version *int64         `gorm:"column:version"`
+	Extra   datatypes.JSON `gorm:"column:extra;type:json"`
 }
 
 // TableName fixes the practice review state table name.

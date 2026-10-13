@@ -30,6 +30,7 @@ type NotebookEntry struct {
 	AttemptCount         *int32         `gorm:"column:attempt_count"`
 	Bookmarked           *bool          `gorm:"column:bookmarked"`
 	Source               *string        `gorm:"column:source"`
+	MaterialID           *string        `gorm:"column:material_id"`
 	MasteryPathID        *string        `gorm:"column:mastery_path_id"`
 	KnowledgePointID     *string        `gorm:"column:knowledge_point_id"`
 	SessionID            *string        `gorm:"column:session_id"`
