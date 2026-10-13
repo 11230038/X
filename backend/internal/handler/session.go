@@ -2,9 +2,7 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -15,9 +13,6 @@ import (
 	"backend/internal/session"
 	"github.com/gin-gonic/gin"
 )
-
-// maxSessionRequestBytes bounds a body that carries a title.
-const maxSessionRequestBytes int64 = 4 << 10
 
 // Sessions is the session use case consumed by the HTTP handler.
 type Sessions interface {
@@ -147,7 +142,7 @@ func (h *SessionHandler) Rename(c *gin.Context) {
 		return
 	}
 	var request renameRequest
-	if !h.decode(c, &request) {
+	if !readJSON(c, maxSessionRequestBytes, &request) {
 		return
 	}
 	renamed, err := h.sessions.Rename(c.Request.Context(), c.Param("sessionID"), request.Title)
@@ -245,24 +240,6 @@ func (h *SessionHandler) fail(c *gin.Context, code string, err error) {
 	}
 	h.logger.Error("session request failed", "error", err, "request_id", httpx.RequestID(c))
 	httpx.WriteError(c, http.StatusInternalServerError, code, "the session request failed")
-}
-
-// decode reads a small JSON body, refusing one that is malformed or oversized.
-func (h *SessionHandler) decode(c *gin.Context, into any) bool {
-	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxSessionRequestBytes))
-	if err != nil {
-		httpx.WriteError(c, http.StatusBadRequest, "invalid_request", "the request body could not be read")
-		return false
-	}
-	if len(strings.TrimSpace(string(body))) == 0 {
-		httpx.WriteError(c, http.StatusBadRequest, "invalid_request", "a request body is required")
-		return false
-	}
-	if err := json.Unmarshal(body, into); err != nil {
-		httpx.WriteError(c, http.StatusBadRequest, "invalid_request", "the request body is not a JSON object")
-		return false
-	}
-	return true
 }
 
 func toSessionView(record session.Session) sessionView {

@@ -247,6 +247,16 @@ func (f Filter) Validate() error {
 	return nil
 }
 
+// Category is one filing label, with how many questions carry it.
+//
+// The count is here because the label is listed for the sake of its count: the
+// surface offers these as filters, and what a reader wants to know about a name
+// is whether there is anything under it.
+type Category struct {
+	Name  string
+	Count int
+}
+
 // Change is a property change: the marks that are set on a question directly
 // rather than by answering it.
 //
@@ -283,6 +293,15 @@ type Repository interface {
 	// Mark applies a property change and reports ErrNotFound when the question
 	// is not there.
 	Mark(ctx context.Context, questionID string, change Change) error
+	// SetCategories replaces the labels a question is filed under with exactly
+	// the given names, creating the ones that are not there yet. It removes,
+	// which is the difference between it and AddCategories: that one is the
+	// write side of generating a question, and this one is the write side of a
+	// user editing the filing.
+	SetCategories(ctx context.Context, questionID string, names []string) error
+	// Categories lists the labels the bank is filed under, each with how many
+	// questions carry it, most used first.
+	Categories(ctx context.Context) ([]Category, error)
 }
 
 // Listing defaults. A listing with no bound is a listing that grows without one.

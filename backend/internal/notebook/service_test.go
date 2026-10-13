@@ -21,8 +21,13 @@ type fakeRepository struct {
 	upserted []Question
 	filed    []string
 	filedFor []string
-	marks    int
-	listed   int
+	// refiled is SetCategories' own record, kept apart from the filing a save
+	// does: the two write the same thing to a different rule, and a test that
+	// could not tell which of them ran would be testing neither.
+	refiled    []string
+	refiledFor []string
+	marks      int
+	listed     int
 
 	upsertErr error
 	fileErr   error
@@ -63,6 +68,19 @@ func (f *fakeRepository) Mark(_ context.Context, _ string, _ Change) error {
 	}
 	f.marks++
 	return nil
+}
+
+func (f *fakeRepository) SetCategories(_ context.Context, questionID string, names []string) error {
+	if f.fileErr != nil {
+		return f.fileErr
+	}
+	f.refiledFor = append(f.refiledFor, questionID)
+	f.refiled = append(f.refiled, names...)
+	return nil
+}
+
+func (f *fakeRepository) Categories(_ context.Context) ([]Category, error) {
+	return nil, f.listErr
 }
 
 func newFakeService(t *testing.T) (*Service, *fakeRepository) {
@@ -214,5 +232,22 @@ func TestMarkRefusesAChangeThatNamesNothing(t *testing.T) {
 	}
 	if repository.marks != 0 {
 		t.Error("a change with no subject reached storage anyway")
+	}
+}
+
+// TestSetCategoriesAnswersAnEmptyList is the one thing this call decides above
+// storage: unfiling a question is a request and not an error. The labels a
+// question carries are the user's to set, and "none" is one of the values they
+// can set them to.
+func TestSetCategoriesAnswersAnEmptyList(t *testing.T) {
+	service, repository := newFakeService(t)
+	if err := service.SetCategories(context.Background(), "qn_1", nil); err != nil {
+		t.Fatalf("unfile a question: %v", err)
+	}
+	if len(repository.refiledFor) != 1 || repository.refiledFor[0] != "qn_1" {
+		t.Fatalf("storage was handed %v", repository.refiledFor)
+	}
+	if len(repository.refiled) != 0 {
+		t.Errorf("an empty list was filed under %v", repository.refiled)
 	}
 }

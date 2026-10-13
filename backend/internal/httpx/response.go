@@ -44,8 +44,20 @@ func WriteSuccess(c *gin.Context, status int, data interface{}) {
 
 // WriteError writes the common error envelope and aborts the request.
 func WriteError(c *gin.Context, status int, code, message string) {
+	WriteErrorDetails(c, status, code, message, nil)
+}
+
+// WriteErrorDetails writes the error envelope with a machine-readable payload
+// beside the message.
+//
+// The details are for a client that has to *act* on the refusal rather than
+// show it: a conflict that carries the state it is about can be answered in one
+// round trip, where a bare conflict leaves the client to fetch that state and
+// be told the same thing again. It is not a place for the error's own text —
+// the message is where the sentence goes.
+func WriteErrorDetails(c *gin.Context, status int, code, message string, details interface{}) {
 	c.AbortWithStatusJSON(status, ErrorResponse{
-		Error:     ErrorBody{Code: code, Message: message},
+		Error:     ErrorBody{Code: code, Message: message, Details: details},
 		RequestID: RequestID(c),
 	})
 }

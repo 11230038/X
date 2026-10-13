@@ -2,9 +2,7 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -16,10 +14,6 @@ import (
 	"backend/internal/parse"
 	"github.com/gin-gonic/gin"
 )
-
-// maxKBRequestBytes bounds a knowledge base request body. The largest one is a
-// query, and this is far more than a query needs.
-const maxKBRequestBytes int64 = 8 << 10
 
 // KnowledgeBases is the knowledge base use case consumed by the HTTP handler.
 //
@@ -139,7 +133,7 @@ func (h *KBHandler) Create(c *gin.Context) {
 		return
 	}
 	var request createKnowledgeBaseRequest
-	if !h.decode(c, &request) {
+	if !readJSON(c, maxKBRequestBytes, &request) {
 		return
 	}
 	created, err := h.bases.CreateKnowledgeBase(c.Request.Context(), request.Name, request.Description)
@@ -238,7 +232,7 @@ func (h *KBHandler) AddDocument(c *gin.Context) {
 		return
 	}
 	var request addDocumentRequest
-	if !h.decode(c, &request) {
+	if !readJSON(c, maxKBRequestBytes, &request) {
 		return
 	}
 	document, err := h.bases.AddDocument(c.Request.Context(), request.FileID, c.Param("kbID"))
@@ -281,7 +275,7 @@ func (h *KBHandler) Rebuild(c *gin.Context) {
 		return
 	}
 	var request rebuildRequest
-	if !h.decode(c, &request) {
+	if !readJSON(c, maxKBRequestBytes, &request) {
 		return
 	}
 	document, ok := h.documentIn(c, c.Param("kbID"), request.DocumentID)
@@ -304,7 +298,7 @@ func (h *KBHandler) Search(c *gin.Context) {
 		return
 	}
 	var request searchRequest
-	if !h.decode(c, &request) {
+	if !readJSON(c, maxKBRequestBytes, &request) {
 		return
 	}
 	result, err := h.bases.Retrieve(c.Request.Context(), kb.RetrieveInput{
@@ -394,24 +388,6 @@ func detail(err error, sentinel error) string {
 		return strings.TrimPrefix(text, prefix)
 	}
 	return text
-}
-
-// decode reads a small JSON body, refusing one that is malformed or oversized.
-func (h *KBHandler) decode(c *gin.Context, into any) bool {
-	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxKBRequestBytes))
-	if err != nil {
-		httpx.WriteError(c, http.StatusBadRequest, "invalid_request", "the request body could not be read")
-		return false
-	}
-	if len(strings.TrimSpace(string(body))) == 0 {
-		httpx.WriteError(c, http.StatusBadRequest, "invalid_request", "a request body is required")
-		return false
-	}
-	if err := json.Unmarshal(body, into); err != nil {
-		httpx.WriteError(c, http.StatusBadRequest, "invalid_request", "the request body is not a JSON object")
-		return false
-	}
-	return true
 }
 
 func toKnowledgeBaseView(record kb.KnowledgeBase) knowledgeBaseView {

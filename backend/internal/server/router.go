@@ -17,6 +17,8 @@ type Handlers struct {
 	KnowledgeBase *handler.KBHandler
 	Auth          *handler.AuthHandler
 	Sessions      *handler.SessionHandler
+	Questions     *handler.QuestionHandler
+	Practice      *handler.PracticeHandler
 	Capabilities  *handler.CapabilityHandler
 	WebSocket     *ws.Handler
 	TokenVerifier middleware.TokenVerifier
@@ -79,6 +81,17 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	authenticated.POST("/sessions/:sessionID/restore", handlers.Sessions.Restore)
 	authenticated.DELETE("/sessions/:sessionID/permanent", handlers.Sessions.DeletePermanently)
 	authenticated.GET("/sessions/:sessionID/messages", handlers.Sessions.Messages)
+	// The question bank and reviewing are behind the token along with everything
+	// else a person's own material goes through: what these answer is what this
+	// user has been asked, answered and got wrong.
+	authenticated.GET("/questions", handlers.Questions.List)
+	authenticated.GET("/questions/:questionID", handlers.Questions.Get)
+	authenticated.PATCH("/questions/:questionID", handlers.Questions.Patch)
+	authenticated.GET("/question-categories", handlers.Questions.Categories)
+	authenticated.GET("/practice/queue", handlers.Practice.Queue)
+	authenticated.POST("/practice/reviews", handlers.Practice.Submit)
+	authenticated.GET("/practice/reviews/:requestID", handlers.Practice.Read)
+	authenticated.GET("/practice/stats", handlers.Practice.Stats)
 	// The socket is authenticated by the middleware above before it is
 	// upgraded, so an unauthenticated request is answered as an HTTP request
 	// rather than becoming a connection (WS-06).

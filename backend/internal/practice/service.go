@@ -224,12 +224,47 @@ func (s *Service) record(ctx context.Context, repository Repository, review Revi
 	return result, nil
 }
 
-// replay answers a submission that has already been recorded.
-func replay(review Review, recorded StoredReview) (ReviewResult, error) {
+// Recorded reads back one submission that was recorded, by its request id.
+//
+// It answers with exactly what a retry of that submission is answered with, and
+// that is why it exists: "the same request id produces one review" is otherwise
+// only observable by sending the submission twice and reading two responses,
+// which is a second review's worth of machinery to believe a rule about the
+// first.
+//
+// The stored body is returned as it is, `replayed` included — false, because the
+// body is the answer the first submission was given. Reading it back is not a
+// replay: nothing is being asked for a second time, and saying it was would be
+// the wrong word for it. A review that is not there is ErrNotFound, which the
+// surface answers as a review that does not exist rather than as a failure.
+func (s *Service) Recorded(ctx context.Context, requestID string) (ReviewResult, error) {
+	recorded, err := s.repository.RecordedReview(ctx, requestID)
+	if err != nil {
+		return ReviewResult{}, err
+	}
+	return readOutcome(recorded)
+}
+
+// readOutcome decodes the response a submission stored, which is what a retry of
+// it is answered with and what reading it back hands over.
+//
+// The decoding is one rule in one place because the stored bytes are the answer
+// to more than one question: a retry compares against them, and a read returns
+// them. A second decoder is a second idea of what was recorded.
+func readOutcome(recorded StoredReview) (ReviewResult, error) {
 	var result ReviewResult
 	if err := json.Unmarshal(recorded.Outcome, &result); err != nil {
 		return ReviewResult{}, fmt.Errorf("%w: the review recorded under %s cannot be read: %v",
-			ErrInvalidRequest, review.RequestID, err)
+			ErrInvalidRequest, recorded.RequestID, err)
+	}
+	return result, nil
+}
+
+// replay answers a submission that has already been recorded.
+func replay(review Review, recorded StoredReview) (ReviewResult, error) {
+	result, err := readOutcome(recorded)
+	if err != nil {
+		return ReviewResult{}, err
 	}
 	field, err := difference(review, result, recorded)
 	if err != nil {

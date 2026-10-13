@@ -86,6 +86,18 @@ func (s *Service) Mark(ctx context.Context, questionID string, change Change) er
 	return s.repository.Mark(ctx, questionID, change)
 }
 
+// SetCategories replaces the labels one question is filed under. An empty list
+// is a request to unfile it, and it is answered rather than refused: the labels
+// a question carries are the user's to set, including to none.
+func (s *Service) SetCategories(ctx context.Context, questionID string, names []string) error {
+	return s.repository.SetCategories(ctx, questionID, names)
+}
+
+// Categories lists the labels the bank is filed under, most used first.
+func (s *Service) Categories(ctx context.Context) ([]Category, error) {
+	return s.repository.Categories(ctx)
+}
+
 // newID returns a readable row id with the given prefix.
 //
 // The row key is random while the question's address is derived, and the two are

@@ -14,7 +14,9 @@ import (
 	"backend/internal/embed"
 	"backend/internal/kb"
 	"backend/internal/llm"
+	"backend/internal/notebook"
 	"backend/internal/parse"
+	"backend/internal/practice"
 	"backend/internal/session"
 	"backend/internal/tool"
 	"backend/internal/turn"
@@ -36,6 +38,12 @@ type ai struct {
 	// indexing is closed when the index worker has stopped, which is what makes
 	// a shutdown able to wait for the document it is in the middle of.
 	indexing <-chan struct{}
+	// questions is the question bank, and reviews is reviewing what is in it.
+	// Both are here because this is where the things they are built from are:
+	// the bank is a second read of the same database the runtime writes to, and
+	// the judge is the same provider and the same model the turns run on.
+	questions *notebook.Service
+	reviews   *practice.Service
 }
 
 // assemble builds the turn runtime from configuration.
@@ -111,6 +119,27 @@ func assemble(
 	}
 
 	provider := llm.NewClient(cfg.LLM.BaseURL, cfg.LLM.APIKey, cfg.LLM.Timeout)
+	// The question bank and the review path share this database with everything
+	// else, and each gets its own service over it: a question is written by the
+	// turns that generate it, read by the bank's endpoints, and advanced by a
+	// review somebody submits.
+	questions, err := notebook.NewService(notebook.NewGORMRepository(db))
+	if err != nil {
+		return nil, fmt.Errorf("initialize the question bank: %w", err)
+	}
+	// The judge runs on the conversation model rather than the task one, and its
+	// output budget is the one key that is only about judging: judging is a
+	// fixed question with a written answer, not a role, so it is not a
+	// capability and has no entry in the capability configuration.
+	judge, err := practice.NewJudge(provider, cfg.LLM.Model, cfg.Practice.JudgeMaxTokens)
+	if err != nil {
+		return nil, fmt.Errorf("initialize the answer judge: %w", err)
+	}
+	reviews, err := practice.NewService(practice.NewGORMRepository(db), judge)
+	if err != nil {
+		return nil, fmt.Errorf("initialize the review service: %w", err)
+	}
+
 	titler, err := turn.NewTitler(provider, cfg.LLM.TaskModel, cfg.LLM.TaskMaxTokens)
 	if err != nil {
 		return nil, fmt.Errorf("initialize session naming: %w", err)
@@ -155,6 +184,7 @@ func assemble(
 	return &ai{
 		turns: runner, socket: socket, capabilities: capabilities,
 		materials: materials, indexing: worker,
+		questions: questions, reviews: reviews,
 	}, nil
 }
 

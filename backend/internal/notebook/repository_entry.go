@@ -51,7 +51,7 @@ func (r *GORMRepository) Mark(ctx context.Context, questionID string, change Cha
 		return fmt.Errorf("%w: no marks were named", ErrEmptyChange)
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := requireEntry(tx, questionID); err != nil {
+		if _, err := lockedEntryID(tx, questionID); err != nil {
 			return err
 		}
 		if err := tx.Table("notebook_entries").
@@ -63,26 +63,27 @@ func (r *GORMRepository) Mark(ctx context.Context, questionID string, change Cha
 	})
 }
 
-// requireEntry reports a question that is not stored, checking by reading it
-// rather than by what an update of it reports.
+// lockedEntryID reports whether a question is stored, and hands back the row
+// key the tables beside it are filed under.
 //
-// The row count an update returns is the number of rows whose values actually
-// changed, which is zero for a row written back the values it already holds:
-// marking an already-bookmarked question reports none, and read as "no such
-// question" it would turn a repeated click into an error about a question that
-// is right there. The read is a locking one, so what it reports still holds
-// when the write that follows lands.
-func requireEntry(tx *gorm.DB, questionID string) error {
+// The check is a read rather than what an update of the row reports. The row
+// count an update returns is the number of rows whose values actually changed,
+// which is zero for a row written back the values it already holds: marking an
+// already-bookmarked question reports none, and read as "no such question" it
+// would turn a repeated click into an error about a question that is right
+// there. The read takes the row's lock, so what it reports still holds when the
+// write that follows lands.
+func lockedEntryID(tx *gorm.DB, questionID string) (string, error) {
 	var stored models.NotebookEntry
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		First(&stored, "question_id = ?", questionID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return fmt.Errorf("%w: %s", ErrNotFound, questionID)
+		return "", fmt.Errorf("%w: %s", ErrNotFound, questionID)
 	}
 	if err != nil {
-		return fmt.Errorf("look for question %s: %w", questionID, err)
+		return "", fmt.Errorf("look for question %s: %w", questionID, err)
 	}
-	return nil
+	return stored.NotebookEntriesID, nil
 }
 
 // categoriesOf returns the category names of each given question, in one query.
