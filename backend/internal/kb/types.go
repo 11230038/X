@@ -301,6 +301,31 @@ type Repository interface {
 	// citation can be opened without loading the document.
 	DocumentText(ctx context.Context, documentID string, offset, length int64) (string, error)
 
+	// Vector indexing. A worker claims a document rather than a chunk, so that
+	// one document is embedded by one worker; every write back is guarded by the
+	// owner the claim was taken with, and a claim that has been taken away (a
+	// rebuild clears it) is one the worker must not write over.
+	//
+	// ClaimDocument returns ErrNotFound when there is nothing to claim, which
+	// includes losing the race to another worker. now is a parameter rather than
+	// read from the clock so that a lease is a thing a test can move.
+	ClaimDocument(ctx context.Context, owner string, lease time.Duration, now time.Time) (Document, error)
+	// PendingChunks reads the chunks of one revision that have no vector yet.
+	PendingChunks(ctx context.Context, documentID string, revision int) ([]ChunkRecord, error)
+	// SaveEmbeddings stores the vectors of one group, so that a failure later in
+	// the document does not throw away the ones already paid for.
+	SaveEmbeddings(ctx context.Context, chunks []ChunkRecord) error
+	// CompleteDocument marks a document's vectors as done.
+	CompleteDocument(ctx context.Context, documentID, owner string) error
+	// FailDocument marks a document as one the provider refused, with the reason
+	// kept for whoever looks next.
+	FailDocument(ctx context.Context, documentID, owner, message string) error
+	// RetryDocument releases a claim back to the queue, keeping the reason. It is
+	// how a provider that is temporarily unwell is waited out, and how a worker
+	// that is stopping hands its document back instead of leaving it claimed
+	// until the lease expires.
+	RetryDocument(ctx context.Context, documentID, owner, message string) error
+
 	// Retrieval. Both return active chunks of the given bases, best first.
 	SearchVector(ctx context.Context, kbIDs []string, vector embed.Vector, limit int) ([]string, error)
 	SearchFullText(ctx context.Context, kbIDs []string, query string, limit int) ([]string, error)

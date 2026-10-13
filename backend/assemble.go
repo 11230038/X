@@ -9,6 +9,8 @@ import (
 	"backend/internal/capability"
 	"backend/internal/chat"
 	"backend/internal/config"
+	"backend/internal/embed"
+	"backend/internal/kb"
 	"backend/internal/llm"
 	"backend/internal/session"
 	"backend/internal/tool"
@@ -17,12 +19,16 @@ import (
 	"gorm.io/gorm"
 )
 
-// ai is the assembled AI side of the process: the runtime that runs turns, and
-// the endpoint that shows them to a client.
+// ai is the assembled AI side of the process: the runtime that runs turns, the
+// endpoint that shows them to a client, and the background work that catches the
+// knowledge base up with what has been added to it.
 type ai struct {
 	turns        *turn.Runner
 	socket       *ws.Handler
 	capabilities *capability.Registry
+	// indexing is closed when the index worker has stopped, which is what makes
+	// a shutdown able to wait for the document it is in the middle of.
+	indexing <-chan struct{}
 }
 
 // assemble builds the turn runtime from configuration.
@@ -30,7 +36,10 @@ type ai struct {
 // Everything that can be checked before the first request is checked here: the
 // cost of a drift that starts the process anyway is a turn that fails with a
 // message about a tool nobody registered, an hour later, in front of a user.
-func assemble(cfg config.Config, logger *slog.Logger, db *gorm.DB, sessions *session.Service) (*ai, error) {
+//
+// ctx is the process's own context, and it is what the background worker runs
+// on: the worker stops when the process is asked to stop, not when a request is.
+func assemble(ctx context.Context, cfg config.Config, logger *slog.Logger, db *gorm.DB, sessions *session.Service) (*ai, error) {
 	capabilities := capability.NewRegistry()
 	tools := tool.NewRegistry()
 	policy := tool.DefaultPolicy()
@@ -84,7 +93,52 @@ func assemble(cfg config.Config, logger *slog.Logger, db *gorm.DB, sessions *ses
 	if err != nil {
 		return nil, fmt.Errorf("initialize the websocket endpoint: %w", err)
 	}
-	return &ai{turns: runner, socket: socket, capabilities: capabilities}, nil
+
+	// The index worker is what embeds documents that are already readable by
+	// the full-text path. It is built here and started on the process's own
+	// context, so that it stops when the process is asked to stop and not when
+	// the last request is.
+	worker, err := indexWorker(ctx, cfg, logger, db)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ai{turns: runner, socket: socket, capabilities: capabilities, indexing: worker}, nil
+}
+
+// indexWorker builds the embedding queue's worker and starts it, returning the
+// channel that closes when it has stopped.
+//
+// The channel rather than the worker itself, because nothing outside this file
+// has anything to say to a worker: it has no state to read and no method to
+// call, only a job to do and a way to ask it to stop.
+func indexWorker(ctx context.Context, cfg config.Config, logger *slog.Logger, db *gorm.DB) (<-chan struct{}, error) {
+	embedder, err := embed.NewClient(embed.Options{
+		BaseURL:   cfg.Embedding.BaseURL,
+		APIKey:    cfg.Embedding.APIKey,
+		Model:     cfg.Embedding.Model,
+		Dimension: cfg.Embedding.Dimension,
+		Timeout:   cfg.Embedding.Timeout,
+		BatchSize: cfg.Embedding.BatchSize,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize the embedding provider: %w", err)
+	}
+	worker, err := kb.NewWorker(kb.WorkerOptions{
+		Lease:          cfg.KB.VectorLease,
+		Workers:        cfg.KB.IndexWorkers,
+		EmbedBatchSize: cfg.Embedding.BatchSize,
+		Logger:         logger,
+	}, kb.NewGORMRepository(db), embedder)
+	if err != nil {
+		return nil, fmt.Errorf("initialize the index worker: %w", err)
+	}
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		worker.Run(ctx)
+	}()
+	return stopped, nil
 }
 
 // turnRuntime adapts the turn runtime to what the protocol layer drives.
@@ -107,11 +161,15 @@ func (t turnRuntime) Subscribe(ctx context.Context, turnID string, afterSeq int6
 	return subscription, nil
 }
 
-// close stops the socket and then the turns.
+// close stops the socket, then the turns, then the index worker.
 //
 // The order matters: a turn that is ending publishes its ending, and a client
 // that is still connected is told what it ended as. Closing the runtime first
 // would leave whoever is watching a stream that stops without saying why.
+//
+// The worker goes last and its wait is bounded by ctx, which is the shutdown
+// timeout: a document half embedded is one whose claim the lease will hand back
+// on the next start, so giving up on it is a delay rather than a loss.
 func (a *ai) close(ctx context.Context) error {
 	if err := a.socket.Close(ctx); err != nil {
 		return fmt.Errorf("close websocket connections: %w", err)
@@ -119,7 +177,15 @@ func (a *ai) close(ctx context.Context) error {
 	if err := a.turns.Close(ctx); err != nil {
 		return fmt.Errorf("stop running turns: %w", err)
 	}
-	return nil
+	if a.indexing == nil {
+		return nil
+	}
+	select {
+	case <-a.indexing:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("stop the index worker: %w", ctx.Err())
+	}
 }
 
 // checkDrift refuses a configuration that does not describe this build.

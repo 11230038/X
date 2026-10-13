@@ -186,7 +186,7 @@ func writeChunks(tx *gorm.DB, write DocumentWrite) error {
 	return nil
 }
 
-// Chunks reads one revision of one document in text order.
+// documentModel is one document row as it is written.
 func documentModel(write DocumentWrite) *models.Document {
 	return &models.Document{
 		DocumentID: write.Document.ID,

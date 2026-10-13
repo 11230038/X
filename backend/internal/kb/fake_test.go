@@ -41,6 +41,9 @@ type fakeRepository struct {
 	// switches counts the revision flips, so a test can tell a rebuild that
 	// happened from one that was only attempted.
 	switches int
+	// holds is who has claimed which document for indexing, which is the part of
+	// the claim the document row itself does not carry here.
+	holds map[string]claim
 }
 
 // storedChunk is a chunk row: the chunk, whether its revision is the active
@@ -55,6 +58,7 @@ func newFakeRepository() *fakeRepository {
 	return &fakeRepository{
 		bases: map[string]KnowledgeBase{}, documents: map[string]Document{},
 		texts: map[string]string{}, chunks: map[string][]storedChunk{},
+		holds: map[string]claim{},
 	}
 }
 

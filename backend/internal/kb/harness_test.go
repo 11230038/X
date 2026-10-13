@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"backend/internal/embed"
 	"backend/internal/parse"
@@ -54,19 +55,54 @@ func (s *stubFiles) Open(_ context.Context, fileID string) (SourceFile, error) {
 type stubEmbedder struct {
 	vector embed.Vector
 	err    error
-	texts  []string
+	// errs are handed out one per call before err is looked at, so a test can
+	// fail one call and have the next succeed — which is what "the provider came
+	// back" looks like from here. A nil entry is a call that goes through.
+	errs  []error
+	texts []string
+	// calls counts the provider calls, which is how "no further request after
+	// the caller stopped" is checked.
+	calls int
+	// onCall runs before a call is answered, which is where a test makes the
+	// caller stop halfway through.
+	onCall func(call int)
 }
 
 func (e *stubEmbedder) Embed(_ context.Context, texts []string) (embed.Result, error) {
+	e.calls++
+	if e.onCall != nil {
+		e.onCall(e.calls)
+	}
 	e.texts = append(e.texts, texts...)
-	if e.err != nil {
+	if len(e.errs) > 0 {
+		err := e.errs[0]
+		e.errs = e.errs[1:]
+		if err != nil {
+			return embed.Result{}, err
+		}
+	} else if e.err != nil {
 		return embed.Result{}, e.err
 	}
 	vectors := make([]embed.Vector, len(texts))
-	for index := range texts {
-		vectors[index] = e.vector
+	for index, text := range texts {
+		if len(e.vector) > 0 {
+			vectors[index] = e.vector
+			continue
+		}
+		vectors[index] = derivedVector(text)
 	}
 	return embed.Result{Vectors: vectors}, nil
+}
+
+// derivedVector is a text's vector when a test wants the vectors told apart
+// rather than all being the same one. It is a function of the text, so a test
+// can work out what a chunk's vector should be without asking the stand-in.
+func derivedVector(text string) embed.Vector {
+	sum := 0
+	for _, r := range text {
+		sum += int(r)
+	}
+	return embed.Vector{float32(utf8.RuneCountInString(text)), float32(sum % 9973)}
 }
 
 // harness is one service with its stand-ins, wired the way the composition root
@@ -142,3 +178,34 @@ func (h *harness) addDocument(t *testing.T, kbID, fileID, content string) Docume
 }
 
 const sampleText = "闭包是一个函数和它捕获的环境。\n\n第二段说的是另一件事，比较长一些，用来产生多个分块。"
+
+// worker builds an index worker over the same stand-ins the service uses, wired
+// the way the composition root wires it.
+func (h *harness) worker(t *testing.T, adjust ...func(*WorkerOptions)) *Worker {
+	t.Helper()
+	options := WorkerOptions{
+		Lease: time.Second, Workers: 1, EmbedBatchSize: 2, Poll: time.Millisecond,
+	}
+	for _, apply := range adjust {
+		apply(&options)
+	}
+	// The other tests hand out one vector for every text, which is all a
+	// retrieval cares about. An index test wants to say which chunk got which
+	// vector, so the stand-in switches to the text-derived one.
+	h.embedder.vector = nil
+	worker, err := NewWorker(options, h.repo, h.embedder)
+	if err != nil {
+		t.Fatalf("build the index worker: %v", err)
+	}
+	return worker
+}
+
+// stored reads a document back, asserting it is still there.
+func (h *harness) stored(t *testing.T, documentID string) Document {
+	t.Helper()
+	document, err := h.repo.Document(context.Background(), documentID)
+	if err != nil {
+		t.Fatalf("read document %s: %v", documentID, err)
+	}
+	return document
+}

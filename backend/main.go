@@ -95,7 +95,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 	if err != nil {
 		return fmt.Errorf("initialize sessions: %w", err)
 	}
-	ai, err := assemble(cfg, logger, database.GORM(), sessionService)
+	ai, err := assemble(ctx, cfg, logger, database.GORM(), sessionService)
 	if err != nil {
 		return err
 	}
