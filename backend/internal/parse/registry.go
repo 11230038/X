@@ -18,8 +18,11 @@ type Options struct {
 	// reads a markdown file when both could.
 	DefaultEngine string
 	// DoclingBaseURL is a prefix, not an endpoint: the adapter appends
-	// /v1/convert/file. An empty value means the engine is not configured,
-	// which is a supported deployment and not an error.
+	// /v1/convert/file. A non-empty value is what configures the engine at all:
+	// with an empty one docling is not registered, and a category only it reads
+	// is refused as parser_unavailable naming this key. This package treats that
+	// as an ordinary state rather than an error; the configuration layer is what
+	// requires the key, so this build never reaches the empty case.
 	DoclingBaseURL string
 	// Timeout bounds one call to an external engine.
 	Timeout time.Duration

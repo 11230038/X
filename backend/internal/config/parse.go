@@ -21,10 +21,12 @@ type ParserConfig struct {
 	// DefaultEngine is the engine a document is parsed with unless something
 	// more specific is asked for.
 	DefaultEngine string
-	// DoclingBaseURL is required only when the default engine is docling. A
-	// deployment that only ever parses text is not made to name a service it
-	// does not call; when it is named it is checked like any other base URL, and
-	// it is a prefix rather than an endpoint.
+	// DoclingBaseURL is a required key: requiredKeys names it, so the file must
+	// carry a non-empty value whatever the default engine is, including in a
+	// deployment that only ever parses text and never calls the service. What the
+	// default engine decides is whether the value is checked at all — it is
+	// validated as a base URL only when the default engine is docling. Like every
+	// base URL here it is a prefix rather than an endpoint.
 	DoclingBaseURL string
 	// Timeout bounds one external parse call, so a document cannot hold a worker
 	// indefinitely. A timeout fails that document as parse_failed rather than
