@@ -50,6 +50,12 @@ type turnRun struct {
 	// citation's number is. It belongs to the turn rather than to a read, so two
 	// reads number one list between them (see number).
 	sources int
+	// unavailable counts the material this turn could not read at all — an
+	// attachment that failed to parse, a collection that is gone. It sits beside
+	// sources because the two are read together: how much material a turn had
+	// and how much of it was never seen is what says whether an answer with no
+	// evidence had nothing to lean on or was never given anything (AC-06).
+	unavailable int
 
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -166,6 +172,7 @@ func (r *turnRun) runCapability() error {
 		tools:    definitions,
 		messages: messages,
 		loop:     loop,
+		run:      r,
 	})
 }
 

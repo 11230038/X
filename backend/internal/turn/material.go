@@ -246,13 +246,19 @@ func (r *turnRun) retrieve(ctx context.Context, query string) (tool.Reading, err
 	}
 	reading := tool.Reading{Sources: r.number(retrieval.Sources)}
 	for _, kbID := range retrieval.Unavailable {
-		// KB-07: a collection that is gone is reported and nothing takes its
-		// place. The id is the only name it still has — the row that held its
-		// name is the row that was deleted — so the id is what is reported.
-		reading.Unavailable = append(reading.Unavailable,
-			fmt.Sprintf("知识库 %s 已经不存在，本轮没有检索它，也没有用别的来源替代它", kbID))
+		reading.Unavailable = append(reading.Unavailable, goneKB(kbID))
 	}
 	return reading, nil
+}
+
+// goneKB is what a collection that is gone is reported as (KB-07).
+//
+// The id is the only name it still has — the row that held its name is the row
+// that was deleted — so the id is what is reported, and nothing takes its place.
+// Both readers of a scope say it this way: the model asking through the tool,
+// and the survey the runtime runs before the first call.
+func goneKB(kbID string) string {
+	return fmt.Sprintf("知识库 %s 已经不存在，本轮没有检索它，也没有用别的来源替代它", kbID)
 }
 
 // explainRefusal turns a query the index cannot answer into something the model

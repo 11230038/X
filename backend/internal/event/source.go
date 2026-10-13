@@ -11,6 +11,12 @@ const (
 	// model's own words and is not rewritten, and no source is invented to make
 	// a number add up.
 	MetaUnresolvedCitations = "unresolved_citations"
+	// MetaGrounding carries what a turn's material amounted to: on a result
+	// event, how many sources the turn handed out and how much of its material
+	// could not be read at all — which is what "the material does not answer
+	// this" is told apart from "the material was never looked at" by (AC-06); on
+	// an observation event, the survey's own summary and the same list.
+	MetaGrounding = "grounding"
 )
 
 // Source is one piece of material an answer was built from.

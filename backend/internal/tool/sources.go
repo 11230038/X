@@ -78,22 +78,32 @@ type Reading struct {
 	Unavailable []string
 }
 
-// renderReading turns what a read found into what the model is given.
+// SourcesText renders a list of sources the way the model is shown them: the
+// number an answer cites, the document's title, and the text.
 //
-// The model sees a number, a title and the text, and nothing else. The locator,
-// the page and the character span are this service's own bookkeeping and never
-// pass through a model, which is the whole of how a citation's coordinates
-// become impossible to invent: the model writes down numbers it was handed and
-// has never seen a page it could get wrong (AIQ-02).
+// It is one function rather than two because the two callers — a read the model
+// asked for, and the pre-survey the runtime ran before the first call — are the
+// same list seen at different moments, and a model that learned one shape and
+// then met another would have to guess which numbers it may cite (AIQ-02). The
+// locator, the page and the character span are deliberately absent: they are
+// this service's bookkeeping, and coordinates the model never saw are
+// coordinates it cannot invent.
+func SourcesText(sources []event.Source) string {
+	var content strings.Builder
+	for _, source := range sources {
+		fmt.Fprintf(&content, "[%d] %s\n%s\n\n", source.Index, source.Title, source.Snippet)
+	}
+	return content.String()
+}
+
+// renderReading turns what a read found into what the model is given.
 //
 // A read that found nothing still answers: it says so, and it says what it could
 // not look at, because "the material does not mention this" and "the material
 // could not be read" are different sentences and only one of them is true.
 func renderReading(reading Reading) Result {
 	var content strings.Builder
-	for _, source := range reading.Sources {
-		fmt.Fprintf(&content, "[%d] %s\n%s\n\n", source.Index, source.Title, source.Snippet)
-	}
+	content.WriteString(SourcesText(reading.Sources))
 	if len(reading.Sources) == 0 {
 		content.WriteString("这一轮携带的材料里没有找到相关的片段。\n")
 	}

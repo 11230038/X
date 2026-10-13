@@ -120,18 +120,11 @@ func (c *Capability) Manifest() capability.Manifest { return Manifest() }
 
 // Run plays a turn out: work out what is being asked, then answer it.
 func (c *Capability) Run(ctx context.Context, rc capability.RunContext) error {
-	if err := c.explore(ctx, rc); err != nil {
+	grounding, err := c.explore(ctx, rc)
+	if err != nil {
 		return err
 	}
-	return c.respond(ctx, rc)
-}
-
-// explore marks the stage the runtime uses to assemble context.
-func (c *Capability) explore(ctx context.Context, rc capability.RunContext) error {
-	if err := c.emit(ctx, rc, event.TypeStageStart, StageExploring); err != nil {
-		return err
-	}
-	return c.emit(ctx, rc, event.TypeStageEnd, StageExploring)
+	return c.respond(ctx, rc, grounding)
 }
 
 // respond calls the model and reports what it cost.
@@ -139,7 +132,7 @@ func (c *Capability) explore(ctx context.Context, rc capability.RunContext) erro
 // The loop's error is returned unchanged: a cancelled turn, an exhausted round
 // limit and a provider failure are the runtime's to turn into a terminal state,
 // and translating them here would lose which one it was.
-func (c *Capability) respond(ctx context.Context, rc capability.RunContext) error {
+func (c *Capability) respond(ctx context.Context, rc capability.RunContext, grounding capability.Grounding) error {
 	if err := c.emit(ctx, rc, event.TypeStageStart, StageResponding); err != nil {
 		return err
 	}
@@ -149,7 +142,7 @@ func (c *Capability) respond(ctx context.Context, rc capability.RunContext) erro
 		Model:               c.settings.Model,
 		Temperature:         c.settings.Temperature,
 		MaxTokens:           c.settings.StageMaxTokens[StageResponding],
-		Messages:            c.messages(rc),
+		Messages:            c.messages(rc, grounding),
 		Tools:               rc.Tools(),
 		MaxRounds:           c.settings.MaxRounds,
 		ContextBudgetTokens: c.settings.ContextBudgetTokens,
@@ -164,17 +157,27 @@ func (c *Capability) respond(ctx context.Context, rc capability.RunContext) erro
 	return c.emit(ctx, rc, event.TypeStageEnd, StageResponding)
 }
 
-// messages is the conversation the model is shown: this capability's prompt,
-// then the turn's history.
+// messages is the conversation the model is shown: this capability's prompt, the
+// survey of this turn's material when there is one, then the turn's history.
 //
-// The prompt is prepended rather than stored with the history, so that what is
-// persisted stays a record of what was said. A prompt that changed between
+// The first two are prepended rather than stored with the history, so that what
+// is persisted stays a record of what was said. A prompt that changed between
 // versions would otherwise be frozen into older sessions, and a branch would
-// inherit the prompt of the day it was forked.
-func (c *Capability) messages(rc capability.RunContext) []llm.Message {
+// inherit the prompt of the day it was forked; the survey is not part of the
+// conversation at all, since it is this turn's material re-read rather than
+// anything anyone said.
+//
+// Both are system messages, which is also what keeps them: the loop trims a
+// conversation that overruns its budget from the oldest end, and a system
+// message is never what gets dropped. The material an answer stands on is the
+// last thing that should go.
+func (c *Capability) messages(rc capability.RunContext, grounding capability.Grounding) []llm.Message {
 	history := rc.Messages()
-	messages := make([]llm.Message, 0, len(history)+1)
+	messages := make([]llm.Message, 0, len(history)+2)
 	messages = append(messages, llm.Message{Role: llm.RoleSystem, Content: systemPrompt})
+	if grounding.Message.Content != "" {
+		messages = append(messages, grounding.Message)
+	}
 	return append(messages, history...)
 }
 

@@ -49,4 +49,40 @@ type RunContext interface {
 	// per stage — the model and its sampling — are the capability's to supply,
 	// because only it knows what the stage is for.
 	RunLoop(ctx context.Context, req agentloop.Request) (agentloop.Result, error)
+	// Ground runs the read-only context pre-survey for this turn's material.
+	// It reads sources, writes nothing, and returns the findings as both a
+	// citation-ready list and a message ready to prepend to a model call.
+	//
+	// It is here rather than absent because the survey's product has to reach the
+	// model, and a capability can build messages but cannot read material. The
+	// only other way to give it one would be for a capability to import the
+	// knowledge base package, which would make the layer that decides what a turn
+	// does depend on the layer that stores what it reads.
+	Ground(ctx context.Context, query string) (Grounding, error)
+}
+
+// Grounding is what a turn's own material offers for one question.
+//
+// It is what the runtime makes of the material, handed to a capability that has
+// no way to reach the material itself: scope stays the turn's (KB-07), and a
+// capability decides only whether and when to survey, never what.
+type Grounding struct {
+	// Sources are the passages the survey found, in the turn's own numbering and
+	// ready to cite. They are the same list a sources event carries.
+	Sources []event.Source
+	// Message is the folded conclusion, ready to put in front of a model call:
+	// what this turn carries, what was found in it, and what could not be read.
+	//
+	// It is a system message, because it is the service's account of the turn's
+	// material rather than anything anyone said. A turn that carries nothing gets
+	// a zero Message, and that is what "there was nothing to survey" looks like:
+	// a capability that sent the empty message anyway would put a blank system
+	// turn in front of every conversation.
+	Message llm.Message
+	// Unavailable says what this turn was to read and could not, with the reason:
+	// an attachment that is a picture, a document that failed to parse, a
+	// collection that has been deleted. It has to reach both sides — the model,
+	// which has to know what it does not have, and the user, who has to be told
+	// which material is missing (ATT-04, KB-07).
+	Unavailable []string
 }

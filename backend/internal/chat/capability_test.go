@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"backend/internal/agentloop"
+	"backend/internal/capability"
 	"backend/internal/event"
 	"backend/internal/llm"
 	"backend/internal/tool"
@@ -22,6 +23,12 @@ type fakeRunContext struct {
 	requests []agentloop.Request
 	result   agentloop.Result
 	err      error
+	// grounding is what the runtime's survey answers with, and queries is what it
+	// was asked; groundErr is the turn's own failure, which is the only kind the
+	// survey is allowed to raise.
+	grounding capability.Grounding
+	groundErr error
+	queries   []string
 }
 
 func (f *fakeRunContext) Emitter() event.Emitter   { return f.emitter }
@@ -31,6 +38,11 @@ func (f *fakeRunContext) Messages() []llm.Message  { return f.messages }
 func (f *fakeRunContext) RunLoop(_ context.Context, req agentloop.Request) (agentloop.Result, error) {
 	f.requests = append(f.requests, req)
 	return f.result, f.err
+}
+
+func (f *fakeRunContext) Ground(_ context.Context, query string) (capability.Grounding, error) {
+	f.queries = append(f.queries, query)
+	return f.grounding, f.groundErr
 }
 
 type recordingEmitter struct {
