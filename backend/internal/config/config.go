@@ -1,9 +1,9 @@
 // Package config reads the service's settings from its dotenv file. Each section
 // of settings lives in the file named after it — http.go, upload.go, auth.go,
-// database.go, llm.go, embedding.go, parse.go, kb.go, turn.go — holding that
-// section's struct, the loader that fills it, and the Validate that guards it.
-// This file is the composition: what the whole configuration is, how the file is
-// read into it, and the order the sections are checked in.
+// database.go, llm.go, embedding.go, parse.go, kb.go, turn.go, practice.go —
+// holding that section's struct, the loader that fills it, and the Validate that
+// guards it. This file is the composition: what the whole configuration is, how
+// the file is read into it, and the order the sections are checked in.
 package config
 
 import (
@@ -71,6 +71,10 @@ var requiredKeys = []string{
 	"KB_MAX_CHARS_PER_TURN",
 	"KB_VECTOR_LEASE",
 	"KB_INDEX_WORKERS",
+	"QUESTION_DEFAULT_COUNT",
+	"QUESTION_MAX_COUNT",
+	"PRACTICE_QUEUE_SIZE",
+	"PRACTICE_JUDGE_MAX_TOKENS",
 }
 
 // Config contains all settings required to run the service.
@@ -87,6 +91,7 @@ type Config struct {
 	Parser          ParserConfig
 	KB              KBConfig
 	Turn            TurnConfig
+	Practice        PracticeConfig
 }
 
 // Load reads configuration exclusively from the dotenv file at path. The path
@@ -141,6 +146,10 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	practice, err := loadPracticeConfig(values)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
 		HTTPAddr:        strings.TrimSpace(values["HTTP_ADDR"]),
@@ -155,6 +164,7 @@ func Load(path string) (Config, error) {
 		Parser:          parser,
 		KB:              kb,
 		Turn:            turn,
+		Practice:        practice,
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -199,5 +209,8 @@ func (c Config) Validate() error {
 	if err := c.KB.Validate(); err != nil {
 		return err
 	}
-	return c.Turn.Validate()
+	if err := c.Turn.Validate(); err != nil {
+		return err
+	}
+	return c.Practice.Validate()
 }

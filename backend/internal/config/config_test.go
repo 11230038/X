@@ -463,6 +463,10 @@ func validValues() map[string]string {
 		"KB_MAX_CHARS_PER_TURN":      "150000",
 		"KB_VECTOR_LEASE":            "5m",
 		"KB_INDEX_WORKERS":           "2",
+		"QUESTION_DEFAULT_COUNT":     "5",
+		"QUESTION_MAX_COUNT":         "30",
+		"PRACTICE_QUEUE_SIZE":        "20",
+		"PRACTICE_JUDGE_MAX_TOKENS":  "1024",
 	}
 }
 
