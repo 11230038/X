@@ -124,13 +124,57 @@ func TestReferencedCoversEveryMountableName(t *testing.T) {
 	}
 }
 
-func TestDefaultPolicyRegistersEveryNameItMounts(t *testing.T) {
+func TestDefaultPolicyIsThePlaneThisBuildShips(t *testing.T) {
 	policy := DefaultPolicy()
-	if want := []string{"ask_user"}; !reflect.DeepEqual(policy.Referenced(), want) {
+	// Every name it can mount, in one list, so the startup check has something
+	// to compare the registry against: a name only ever reachable through a gate
+	// would otherwise go missing until a turn tried to mount it.
+	if want := []string{"retrieve", "read_source", "ask_user"}; !reflect.DeepEqual(policy.Referenced(), want) {
 		t.Errorf("Referenced() = %v, want %v", policy.Referenced(), want)
 	}
-	// The default plane offers nothing switchable, so a request cannot widen it.
-	if got := policy.Compose(Request{Enabled: []string{"ask_user"}}); !reflect.DeepEqual(got, []string{"ask_user"}) {
+
+	for _, test := range []struct {
+		name  string
+		flags map[string]bool
+		want  []string
+	}{
+		{
+			name: "a turn carrying nothing",
+			// Name for name and in the order V1 sent it, which is the plane a
+			// turn got before there was any material to mount for.
+			want: []string{"ask_user"},
+		},
+		{
+			name:  "a turn carrying attachments",
+			flags: map[string]bool{FlagAttachments: true},
+			want:  []string{"read_source", "ask_user"},
+		},
+		{
+			name:  "a turn carrying collections",
+			flags: map[string]bool{FlagKnowledgeBase: true},
+			want:  []string{"retrieve", "ask_user"},
+		},
+		{
+			name:  "a turn carrying both",
+			flags: map[string]bool{FlagAttachments: true, FlagKnowledgeBase: true},
+			want:  []string{"retrieve", "read_source", "ask_user"},
+		},
+		{
+			name:  "a flag no gate watches",
+			flags: map[string]bool{"notebook": true},
+			want:  []string{"ask_user"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := policy.Compose(Request{Flags: test.flags}); !reflect.DeepEqual(got, test.want) {
+				t.Errorf("Compose() = %v, want %v", got, test.want)
+			}
+		})
+	}
+
+	// Nothing is switchable yet, so a request cannot widen the plane: the
+	// optional list is an allow-list, and this one is empty.
+	if got := policy.Compose(Request{Enabled: []string{"retrieve", "read_source"}}); !reflect.DeepEqual(got, []string{"ask_user"}) {
 		t.Errorf("Compose() = %v, want just the always-on tool", got)
 	}
 }

@@ -2,6 +2,9 @@ package tool
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 
 	"backend/internal/event"
 )
@@ -36,7 +39,7 @@ func (r *Refusal) Error() string { return "tool: refused: " + r.Note }
 // and retrieve searches the turn's collections and nothing else.
 type Sources interface {
 	// ReadSource reads part of one of this turn's attachments. A label the turn
-	// does not carry is refused with ErrUnknownSource.
+	// does not carry is refused with Refusal.
 	ReadSource(ctx context.Context, request ReadRequest) (Reading, error)
 	// Retrieve searches the knowledge bases this turn carries.
 	Retrieve(ctx context.Context, query string) (Reading, error)
@@ -73,4 +76,46 @@ type Reading struct {
 	// would leave the model to say "the material does not mention this" when what
 	// happened is that the material could not be looked at.
 	Unavailable []string
+}
+
+// renderReading turns what a read found into what the model is given.
+//
+// The model sees a number, a title and the text, and nothing else. The locator,
+// the page and the character span are this service's own bookkeeping and never
+// pass through a model, which is the whole of how a citation's coordinates
+// become impossible to invent: the model writes down numbers it was handed and
+// has never seen a page it could get wrong (AIQ-02).
+//
+// A read that found nothing still answers: it says so, and it says what it could
+// not look at, because "the material does not mention this" and "the material
+// could not be read" are different sentences and only one of them is true.
+func renderReading(reading Reading) Result {
+	var content strings.Builder
+	for _, source := range reading.Sources {
+		fmt.Fprintf(&content, "[%d] %s\n%s\n\n", source.Index, source.Title, source.Snippet)
+	}
+	if len(reading.Sources) == 0 {
+		content.WriteString("这一轮携带的材料里没有找到相关的片段。\n")
+	}
+	for _, note := range reading.Unavailable {
+		content.WriteString(note)
+		content.WriteString("\n")
+	}
+	// A read that ran is a successful call whatever it found: the alternative is
+	// a "failure" whose content the model would have to be told to trust anyway.
+	return Result{Content: strings.TrimSpace(content.String()), Success: true}
+}
+
+// refused turns a source tool's refusal into the result the model reads.
+//
+// The sentence is the whole point: the loop's generic failure text would tell
+// the model the tool could not be run, and the model would try the same thing
+// again. A refusal it can act on says what it asked for that this turn has not
+// got, or how to ask in a way the index can answer.
+func refused(err error) (Result, error) {
+	var refusal *Refusal
+	if errors.As(err, &refusal) {
+		return Result{Content: refusal.Note, Success: false}, nil
+	}
+	return Result{}, err
 }

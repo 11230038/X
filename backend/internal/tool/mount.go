@@ -110,12 +110,21 @@ func (p Policy) Referenced() []string {
 
 // DefaultPolicy is the tool plane this build ships.
 //
-// Nothing is user-switchable yet, and every tool it registers is always on, so
-// the optional and gated tiers are empty. The tiers above are nevertheless the
-// contract: V2 adds rows to them and changes nothing else here.
+// Nothing is user-switchable yet, so the optional tier is still empty and both
+// knowledge tools are mounted by what a turn carries rather than by what the
+// user asked for: a turn with no material gets the plane it got before there was
+// material at all.
+//
+// The gate order is the design's, and it is what a turn carrying both sources
+// sees: the collections it can search, then the files it can read, then the one
+// tool every capability has.
 func DefaultPolicy() Policy {
 	return Policy{
-		AlwaysOn: []string{"ask_user"},
+		Gates: []Gate{
+			{Flag: FlagKnowledgeBase, Tools: []string{RetrieveName}},
+			{Flag: FlagAttachments, Tools: []string{ReadSourceName}},
+		},
+		AlwaysOn: []string{AskUserName},
 	}
 }
 

@@ -52,10 +52,21 @@ func assemble(
 	tools := tool.NewRegistry()
 	policy := tool.DefaultPolicy()
 
-	// ask_user is always on, and the runtime is its asker: the tool does not
-	// know how a turn is paused, so the thing that does is what it is bound to.
-	if err := tools.Register(tool.NewAskUserTool(turn.Asker{})); err != nil {
-		return nil, fmt.Errorf("register the ask_user tool: %w", err)
+	// Every tool here is bound to the runtime, not to a turn: ask_user is
+	// always on, and the two source tools are mounted by what a turn carries.
+	// Each finds the turn it is being called for in the context of the call, so
+	// none of them can reach past what that turn was given.
+	for _, register := range []struct {
+		name string
+		tool tool.Tool
+	}{
+		{tool.AskUserName, tool.NewAskUserTool(turn.Asker{})},
+		{tool.ReadSourceName, tool.NewReadSourceTool(turn.Sourcer{})},
+		{tool.RetrieveName, tool.NewRetrieveTool(turn.Sourcer{})},
+	} {
+		if err := tools.Register(register.tool); err != nil {
+			return nil, fmt.Errorf("register the %s tool: %w", register.name, err)
+		}
 	}
 
 	chatCapability, err := chat.New(chatSettings(cfg))
