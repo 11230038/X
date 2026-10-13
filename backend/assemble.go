@@ -12,6 +12,7 @@ import (
 	"backend/internal/embed"
 	"backend/internal/kb"
 	"backend/internal/llm"
+	"backend/internal/parse"
 	"backend/internal/session"
 	"backend/internal/tool"
 	"backend/internal/turn"
@@ -39,7 +40,14 @@ type ai struct {
 //
 // ctx is the process's own context, and it is what the background worker runs
 // on: the worker stops when the process is asked to stop, not when a request is.
-func assemble(ctx context.Context, cfg config.Config, logger *slog.Logger, db *gorm.DB, sessions *session.Service) (*ai, error) {
+func assemble(
+	ctx context.Context,
+	cfg config.Config,
+	logger *slog.Logger,
+	db *gorm.DB,
+	sessions *session.Service,
+	files kb.FileSource,
+) (*ai, error) {
 	capabilities := capability.NewRegistry()
 	tools := tool.NewRegistry()
 	policy := tool.DefaultPolicy()
@@ -62,6 +70,28 @@ func assemble(ctx context.Context, cfg config.Config, logger *slog.Logger, db *g
 		return nil, err
 	}
 
+	parsers, err := parse.NewRegistry(parse.Options{
+		DefaultEngine:  cfg.Parser.DefaultEngine,
+		DoclingBaseURL: cfg.Parser.DoclingBaseURL,
+		Timeout:        cfg.Parser.Timeout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize the parser registry: %w", err)
+	}
+	// One repository and one embedding client, shared by the two things that use
+	// them: the runtime, which reads the material a turn carries, and the worker,
+	// which embeds what was added to a collection. Two clients would be two pools
+	// and two independent rates against the same provider.
+	documents := kb.NewGORMRepository(db)
+	embedder, err := newEmbedder(cfg)
+	if err != nil {
+		return nil, err
+	}
+	materials, err := kb.NewService(kbSettings(cfg, logger), documents, parsers, files, embedder)
+	if err != nil {
+		return nil, fmt.Errorf("initialize the knowledge base service: %w", err)
+	}
+
 	provider := llm.NewClient(cfg.LLM.BaseURL, cfg.LLM.APIKey, cfg.LLM.Timeout)
 	titler, err := turn.NewTitler(provider, cfg.LLM.TaskModel, cfg.LLM.TaskMaxTokens)
 	if err != nil {
@@ -76,6 +106,7 @@ func assemble(ctx context.Context, cfg config.Config, logger *slog.Logger, db *g
 		Repository:        repository,
 		Hub:               hub,
 		Sessions:          sessions,
+		Materials:         materials,
 		Capabilities:      capabilities,
 		Tools:             tools,
 		Policy:            policy,
@@ -98,7 +129,7 @@ func assemble(ctx context.Context, cfg config.Config, logger *slog.Logger, db *g
 	// the full-text path. It is built here and started on the process's own
 	// context, so that it stops when the process is asked to stop and not when
 	// the last request is.
-	worker, err := indexWorker(ctx, cfg, logger, db)
+	worker, err := indexWorker(ctx, cfg, logger, documents, embedder)
 	if err != nil {
 		return nil, err
 	}
@@ -106,13 +137,12 @@ func assemble(ctx context.Context, cfg config.Config, logger *slog.Logger, db *g
 	return &ai{turns: runner, socket: socket, capabilities: capabilities, indexing: worker}, nil
 }
 
-// indexWorker builds the embedding queue's worker and starts it, returning the
-// channel that closes when it has stopped.
+// newEmbedder builds the provider this process embeds with.
 //
-// The channel rather than the worker itself, because nothing outside this file
-// has anything to say to a worker: it has no state to read and no method to
-// call, only a job to do and a way to ask it to stop.
-func indexWorker(ctx context.Context, cfg config.Config, logger *slog.Logger, db *gorm.DB) (<-chan struct{}, error) {
+// It is built once, for the two things that embed: a document as it is indexed,
+// and a question as it is searched for. Both have to be the same model — the
+// base they meet in is the one that recorded which model its vectors came from.
+func newEmbedder(cfg config.Config) (embed.Embedder, error) {
 	embedder, err := embed.NewClient(embed.Options{
 		BaseURL:   cfg.Embedding.BaseURL,
 		APIKey:    cfg.Embedding.APIKey,
@@ -124,12 +154,28 @@ func indexWorker(ctx context.Context, cfg config.Config, logger *slog.Logger, db
 	if err != nil {
 		return nil, fmt.Errorf("initialize the embedding provider: %w", err)
 	}
+	return embedder, nil
+}
+
+// indexWorker builds the embedding queue's worker and starts it, returning the
+// channel that closes when it has stopped.
+//
+// The channel rather than the worker itself, because nothing outside this file
+// has anything to say to a worker: it has no state to read and no method to
+// call, only a job to do and a way to ask it to stop.
+func indexWorker(
+	ctx context.Context,
+	cfg config.Config,
+	logger *slog.Logger,
+	documents kb.Repository,
+	embedder embed.Embedder,
+) (<-chan struct{}, error) {
 	worker, err := kb.NewWorker(kb.WorkerOptions{
 		Lease:          cfg.KB.VectorLease,
 		Workers:        cfg.KB.IndexWorkers,
 		EmbedBatchSize: cfg.Embedding.BatchSize,
 		Logger:         logger,
-	}, kb.NewGORMRepository(db), embedder)
+	}, documents, embedder)
 	if err != nil {
 		return nil, fmt.Errorf("initialize the index worker: %w", err)
 	}
@@ -226,6 +272,19 @@ func chatSettings(cfg config.Config) chat.Settings {
 		ContextBudgetTokens: params.ContextBudgetTokens,
 		MaxRounds:           cfg.Turn.MaxRounds,
 		StageMaxTokens:      stages,
+	}
+}
+
+// kbSettings is the knowledge base domain's tuning, resolved from configuration.
+func kbSettings(cfg config.Config, logger *slog.Logger) kb.Options {
+	return kb.Options{
+		Chunking:            kb.Chunking{Size: cfg.KB.ChunkSize, Overlap: cfg.KB.ChunkOverlap},
+		RetrievalTopK:       cfg.KB.RetrievalTopK,
+		Candidates:          cfg.KB.RetrievalCandidates,
+		RRFK:                cfg.KB.RRFK,
+		MaxCharsPerDocument: cfg.KB.MaxCharsPerDocument,
+		EmbeddingModel:      cfg.Embedding.Model,
+		Logger:              logger,
 	}
 }
 

@@ -39,6 +39,17 @@ type turnRun struct {
 	// titleNeeded is whether this turn is the one that names the session: the
 	// first turn of an untitled one.
 	titleNeeded bool
+	// declared is what the client said this turn was carrying, and material is
+	// what the service made of it. Both are set before the turn's capability
+	// runs and read only by the goroutine running it: the declaration arrives
+	// with the request, and the material is resolved once, so the tool plane and
+	// the reads that follow it cannot disagree about what this turn has.
+	declared Declaration
+	material Material
+	// sources counts the sources this turn has handed out, and it is what a
+	// citation's number is. It belongs to the turn rather than to a read, so two
+	// reads number one list between them (see number).
+	sources int
 
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -61,6 +72,7 @@ func (r *Runner) newTurnRun(
 	turn Turn,
 	conversation session.Session,
 	question string,
+	declared Declaration,
 	emitter *Emitter,
 ) *turnRun {
 	run := &turnRun{
@@ -69,6 +81,7 @@ func (r *Runner) newTurnRun(
 		session:     conversation,
 		question:    question,
 		titleNeeded: conversation.Title == "",
+		declared:    declared,
 		ctx:         ctx,
 		cancel:      cancel,
 		emitter:     emitter,
@@ -87,6 +100,10 @@ func (r *turnRun) run() {
 
 	err := r.begin()
 	if err == nil {
+		// The material is resolved before the tool plane is composed, because the
+		// plane is what the material mounts: which source tools this turn is
+		// offered is decided by what it turned out to be carrying.
+		r.resolveMaterial(r.ctx)
 		err = r.runCapability()
 	}
 
@@ -129,7 +146,10 @@ func (r *turnRun) runCapability() error {
 	// What the model is shown and what it may call are decided together and
 	// once: the plane below answers from this same list, so a tool the model
 	// was not offered cannot be called however it was named (TOOL-07).
-	names := r.runner.policy.Compose(tool.Request{Capability: manifest.Tools})
+	names := r.runner.policy.Compose(tool.Request{
+		Capability: manifest.Tools,
+		Flags:      r.material.flags(),
+	})
 	definitions, err := r.runner.tools.Definitions(names)
 	if err != nil {
 		return err

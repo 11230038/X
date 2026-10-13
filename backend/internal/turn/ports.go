@@ -99,3 +99,32 @@ func (Asker) AskUser(ctx context.Context, question string) (string, error) {
 	}
 	return run.askUser(ctx, question)
 }
+
+// Sourcer routes the source tools to the turn they are being called for.
+//
+// It is the same seam Asker uses, and for the same reason: the tools are built
+// once for the process while the material they may read belongs to one turn. So
+// the turn is found in the context the call arrives on, and there is no way for
+// a call to name a file or a collection of its own — which is what makes the
+// scope rule a property of the code rather than of the model's restraint.
+type Sourcer struct{}
+
+var _ tool.Sources = Sourcer{}
+
+// ReadSource reads part of one attachment this turn carries.
+func (Sourcer) ReadSource(ctx context.Context, request tool.ReadRequest) (tool.Reading, error) {
+	run, ok := ctx.Value(turnKey{}).(*turnRun)
+	if !ok {
+		return tool.Reading{}, fmt.Errorf("turn: read_source was called outside a turn")
+	}
+	return run.readSource(ctx, request)
+}
+
+// Retrieve searches the collections this turn carries.
+func (Sourcer) Retrieve(ctx context.Context, query string) (tool.Reading, error) {
+	run, ok := ctx.Value(turnKey{}).(*turnRun)
+	if !ok {
+		return tool.Reading{}, fmt.Errorf("turn: retrieve was called outside a turn")
+	}
+	return run.retrieve(ctx, query)
+}

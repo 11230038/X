@@ -36,6 +36,7 @@ type Options struct {
 	Repository   Repository
 	Hub          *Hub
 	Sessions     Sessions
+	Materials    Materials
 	Capabilities *capability.Registry
 	Tools        *tool.Registry
 	Policy       tool.Policy
@@ -61,6 +62,7 @@ type Runner struct {
 	repository   Repository
 	hub          *Hub
 	sessions     Sessions
+	materials    Materials
 	capabilities *capability.Registry
 	tools        *tool.Registry
 	policy       tool.Policy
@@ -91,6 +93,7 @@ func NewRunner(options Options) (*Runner, error) {
 		{"Repository", options.Repository != nil},
 		{"Hub", options.Hub != nil},
 		{"Sessions", options.Sessions != nil},
+		{"Materials", options.Materials != nil},
 		{"Capabilities", options.Capabilities != nil},
 		{"Tools", options.Tools != nil},
 		{"Provider", options.Provider != nil},
@@ -112,6 +115,7 @@ func NewRunner(options Options) (*Runner, error) {
 		repository:   options.Repository,
 		hub:          options.Hub,
 		sessions:     options.Sessions,
+		materials:    options.Materials,
 		capabilities: options.Capabilities,
 		tools:        options.Tools,
 		policy:       options.Policy,
@@ -135,6 +139,14 @@ type StartRequest struct {
 	Capability string
 	// Content is what the user said.
 	Content string
+	// Attachments are the stored files this turn carries, in the order they were
+	// given. The order is what the turn's attachment numbers are: the first file
+	// here is the one the model reads as "1".
+	Attachments []string
+	// KnowledgeBases are the collections this turn may search. Empty means the
+	// turn carries none, which is not the same as carrying a default one: a turn
+	// that named no collection searches nothing (KB-07).
+	KnowledgeBases []string
 }
 
 // Started is what starting a turn produced.
@@ -210,7 +222,8 @@ func (r *Runner) Start(ctx context.Context, request StartRequest) (Started, erro
 		return Started{}, err
 	}
 
-	r.launch(r.newTurnRun(runCtx, cancel, record, conversation, content, emitter))
+	r.launch(r.newTurnRun(runCtx, cancel, record, conversation, content,
+		declarationOf(request.Attachments, request.KnowledgeBases), emitter))
 	return Started{Session: conversation, Turn: record}, nil
 }
 

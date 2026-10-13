@@ -2,6 +2,16 @@ package tool
 
 import "sort"
 
+// The context sources a turn can carry. Each is one name used twice — the turn
+// reports it in Request.Flags and the gate table watches for it — so it is a
+// constant rather than a string written out at both ends.
+const (
+	// FlagAttachments is set when a turn carried files with it.
+	FlagAttachments = "attachments"
+	// FlagKnowledgeBase is set when a turn carried collections to search.
+	FlagKnowledgeBase = "knowledge_base"
+)
+
 // Gate mounts a group of tools when a context source is present, such as a
 // knowledge base or an attachment. A gate is data rather than a predicate so
 // that the whole auto-mount table can be read and tested in one place.

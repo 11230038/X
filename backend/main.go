@@ -95,7 +95,11 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 	if err != nil {
 		return fmt.Errorf("initialize sessions: %w", err)
 	}
-	ai, err := assemble(ctx, cfg, logger, database.GORM(), sessionService)
+	// The file source is the one place that knows both the library and the
+	// knowledge base domain, so neither has to know the other: the knowledge
+	// base reads a file by id through this, and never learns where bytes live.
+	ai, err := assemble(ctx, cfg, logger, database.GORM(), sessionService,
+		fileSource{library: libraryService})
 	if err != nil {
 		return err
 	}

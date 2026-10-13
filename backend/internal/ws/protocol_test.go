@@ -2,6 +2,7 @@ package ws
 
 import (
 	"errors"
+	"reflect"
 	"strconv"
 	"testing"
 )
@@ -79,18 +80,21 @@ func TestDecodingACommand(t *testing.T) {
 	}
 }
 
-// sameCommand compares two commands by what they mean. The watermark travels as
-// a pointer, so a plain == would compare addresses and never agree.
+// sameCommand compares two commands by what they mean.
+//
+// The watermark travels as a pointer, so a plain == would compare addresses and
+// never agree, and the material lists are slices, which no command can be
+// compared with at all. Both are handled here rather than field by field, so a
+// field added later is compared by default instead of being silently skipped.
 func sameCommand(a, b command) bool {
-	if a.AfterSeq == nil || b.AfterSeq == nil {
-		if a.AfterSeq != b.AfterSeq {
-			return false
-		}
-	} else if *a.AfterSeq != *b.AfterSeq {
+	if (a.AfterSeq == nil) != (b.AfterSeq == nil) {
+		return false
+	}
+	if a.AfterSeq != nil && *a.AfterSeq != *b.AfterSeq {
 		return false
 	}
 	a.AfterSeq, b.AfterSeq = nil, nil
-	return a == b
+	return reflect.DeepEqual(a, b)
 }
 
 func TestAMissingWatermarkMeansTheBeginning(t *testing.T) {

@@ -151,6 +151,14 @@ type command struct {
 	TurnID     string `json:"turn_id"`
 	Capability string `json:"capability"`
 	Content    string `json:"content"`
+	// Attachments are the stored files this turn carries, and KnowledgeBases the
+	// collections it may search. Both are optional, and both stay inside the
+	// start_turn command: material belongs to one turn, so it has nowhere else
+	// to live. Neither field changes the protocol version — a client that never
+	// sends them sends exactly the frames it sent before, which is also why they
+	// are read from the wire rather than made required.
+	Attachments    []string `json:"attachments"`
+	KnowledgeBases []string `json:"knowledge_bases"`
 	// AfterSeq is where a subscription starts reading. Absent means zero, which
 	// is the beginning of the turn — the zero value is already the useful
 	// default, so a client that omits it is asking for everything.
