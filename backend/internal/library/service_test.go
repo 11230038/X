@@ -300,6 +300,71 @@ func TestOpenRefusesAPathItWouldNotHaveWritten(t *testing.T) {
 	}
 }
 
+// Find answers in the shape Upload answered in, which is the point: the client
+// that stored the file and the one that comes back for it a week later are
+// reading one resource, and the preview beside it names the file the same way.
+func TestFindReturnsTheFileAsUploadDid(t *testing.T) {
+	repository := &recordingRepository{}
+	service, err := NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024 * 1024}, repository)
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	content := []byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n")
+	uploaded, err := service.Upload(context.Background(), UploadInput{
+		Filename: "notes.pdf", DeclaredMIME: "application/pdf", Content: bytes.NewReader(content),
+	})
+	if err != nil {
+		t.Fatalf("Upload() error = %v", err)
+	}
+
+	found, err := service.Find(context.Background(), uploaded.ID)
+	if err != nil {
+		t.Fatalf("Find() error = %v", err)
+	}
+
+	if found != uploaded {
+		t.Errorf("Find() = %+v, want the upload's own answer %+v", found, uploaded)
+	}
+	if found.Category != "pdf" {
+		t.Errorf("category = %q, want it read back from where the file was stored", found.Category)
+	}
+}
+
+// The category is read from the directory the file is in rather than from a
+// column: the directory is the classification, and a second copy of it is a
+// second thing that can disagree. A path with no directory at all is therefore
+// not one this process wrote, and the read says so rather than answering with a
+// category nothing means.
+func TestFindRefusesARecordWithNoCategory(t *testing.T) {
+	repository := &recordingRepository{stored: map[string]FileRecord{
+		"lib_odd": {ID: "lib_odd", Filename: "odd.md", LibraryPath: "loose.md"},
+	}}
+	service, err := NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024}, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.Find(context.Background(), "lib_odd"); err == nil {
+		t.Fatal("Find() error = nil, want a refusal")
+	}
+}
+
+func TestFindReportsAMissingFileAndAnEmptyId(t *testing.T) {
+	service, err := NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024}, &recordingRepository{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.Find(context.Background(), "lib_missing"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Find(unknown) error = %v, want ErrNotFound", err)
+	}
+	// An empty id is not a file that is missing: nothing was asked for, and the
+	// empty string is not an id anything was ever stored under.
+	if _, err := service.Find(context.Background(), "  "); !errors.Is(err, ErrInvalidFile) {
+		t.Errorf("Find(blank) error = %v, want ErrInvalidFile", err)
+	}
+}
+
 func TestSafeJoinRejectsEscapingPaths(t *testing.T) {
 	root := t.TempDir()
 	if _, err := safeJoin(root, "../outside.pdf"); err == nil {

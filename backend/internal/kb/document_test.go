@@ -314,6 +314,130 @@ func TestRemoveDocumentTakesItsChunksWithIt(t *testing.T) {
 	}
 }
 
+// A deep link out of a retrieval source carries a file id and nothing else: the
+// source was found inside some collection, and the link back to the text must
+// open without the client knowing which one. This is the lookup that makes it
+// possible.
+func TestDocumentOfFileFindsADocumentOfAnyCollection(t *testing.T) {
+	h := newHarness(t)
+	base := h.base(t, "kb")
+	document := h.addDocument(t, base.ID, "lib_one", sampleText)
+
+	found, err := h.service.DocumentOfFile(context.Background(), "lib_one")
+
+	if err != nil {
+		t.Fatalf("DocumentOfFile() error = %v", err)
+	}
+	if found.ID != document.ID {
+		t.Errorf("found document %s, want %s", found.ID, document.ID)
+	}
+}
+
+// One file can be read once as an attachment and once into a collection, and
+// then there are two documents for one file id. The attachment is the answer:
+// it is the reading the turn in front of the user was grounded on, while the
+// collection's copy is one of many a later search may or may not rank.
+func TestDocumentOfFilePrefersTheAttachment(t *testing.T) {
+	h := newHarness(t)
+	base := h.base(t, "kb")
+	h.addFile("lib_one", "one.md", sampleText)
+	attachment, err := h.service.AddDocument(context.Background(), "lib_one", "")
+	if err != nil {
+		t.Fatalf("AddDocument(as an attachment) error = %v", err)
+	}
+	if _, err := h.service.AddDocument(context.Background(), "lib_one", base.ID); err != nil {
+		t.Fatalf("AddDocument(into a collection) error = %v", err)
+	}
+
+	found, err := h.service.DocumentOfFile(context.Background(), "lib_one")
+
+	if err != nil {
+		t.Fatalf("DocumentOfFile() error = %v", err)
+	}
+	if found.ID != attachment.ID {
+		t.Errorf("found document %s, want the attachment %s", found.ID, attachment.ID)
+	}
+}
+
+// A file that has been uploaded and used for nothing has no document, and that
+// is a state worth naming: the handler answers "not parsed" rather than "no
+// such file", and the client offers the file without offering its text.
+func TestDocumentOfFileOfAFileNothingReadIsNotFound(t *testing.T) {
+	h := newHarness(t)
+
+	if _, err := h.service.DocumentOfFile(context.Background(), "lib_one"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestDocumentOfFileNeedsAFile(t *testing.T) {
+	h := newHarness(t)
+
+	if _, err := h.service.DocumentOfFile(context.Background(), "  "); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("error = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestDocumentOfFilePassesAStorageFailureThrough(t *testing.T) {
+	h := newHarness(t)
+	failure := errors.New("connection reset")
+	h.repo.setError("DocumentOfFile", failure)
+
+	if _, err := h.service.DocumentOfFile(context.Background(), "lib_one"); !errors.Is(err, failure) {
+		t.Fatalf("error = %v, want the storage failure", err)
+	}
+}
+
+// The boundaries a citation's character span is read against are the active
+// revision's: after a rebuild the spans move to the new chunks, which is what
+// keeps an old citation opening on the text it was made from only until the
+// document changes, and on the new text after.
+func TestChunkSpansAreTheActiveRevisionsBoundaries(t *testing.T) {
+	h := newHarness(t)
+	base := h.base(t, "kb")
+	document := h.addDocument(t, base.ID, "lib_one", sampleText)
+
+	spans, err := h.service.ChunkSpans(context.Background(), document.ID)
+	if err != nil {
+		t.Fatalf("ChunkSpans() error = %v", err)
+	}
+	chunks := h.repo.activeChunks(document.ID)
+	if len(spans) != len(chunks) {
+		t.Fatalf("got %d boundaries for %d chunks", len(spans), len(chunks))
+	}
+	for index, span := range spans {
+		if span.Ordinal != index {
+			t.Errorf("boundary %d has ordinal %d", index, span.Ordinal)
+		}
+		if span.ChunkID != chunks[index].ChunkID || span.CharStart != chunks[index].CharStart ||
+			span.CharEnd != chunks[index].CharEnd {
+			t.Errorf("boundary %d = %+v, want the chunk's own coordinates", index, span)
+		}
+	}
+
+	if _, err := h.service.RebuildDocument(context.Background(), document.ID); err != nil {
+		t.Fatalf("RebuildDocument() error = %v", err)
+	}
+	after, err := h.service.ChunkSpans(context.Background(), document.ID)
+	if err != nil {
+		t.Fatalf("ChunkSpans() after the rebuild error = %v", err)
+	}
+	if len(after) == 0 {
+		t.Fatal("the rebuilt document has no boundaries")
+	}
+	if after[0].ChunkID == spans[0].ChunkID {
+		t.Error("the boundaries still point at the revision the rebuild replaced")
+	}
+}
+
+func TestChunkSpansOfAnUnknownDocumentAreNotFound(t *testing.T) {
+	h := newHarness(t)
+
+	if _, err := h.service.ChunkSpans(context.Background(), "doc_missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestNewServiceRefusesIncompleteWiring(t *testing.T) {
 	registry, err := parse.NewRegistry(parse.Options{DefaultEngine: parse.EngineText, Timeout: time.Second})
 	if err != nil {

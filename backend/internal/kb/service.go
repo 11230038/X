@@ -129,6 +129,27 @@ func (s *Service) Document(ctx context.Context, documentID string) (Document, er
 	return s.repository.Document(ctx, strings.TrimSpace(documentID))
 }
 
+// DocumentOfFile returns a document parsed from one file, for a caller that
+// knows the file rather than the place it is used (ATT-02's preview).
+func (s *Service) DocumentOfFile(ctx context.Context, fileID string) (Document, error) {
+	fileID = strings.TrimSpace(fileID)
+	if fileID == "" {
+		return Document{}, fmt.Errorf("%w: a document is read by the file it came from", ErrInvalidInput)
+	}
+	return s.repository.DocumentOfFile(ctx, fileID)
+}
+
+// ChunkSpans returns where the chunk boundaries of a document's active revision
+// fall, which is what a preview of the text marks and what a citation's
+// character span refers to.
+func (s *Service) ChunkSpans(ctx context.Context, documentID string) ([]ChunkSpan, error) {
+	document, err := s.repository.Document(ctx, strings.TrimSpace(documentID))
+	if err != nil {
+		return nil, err
+	}
+	return s.repository.ChunkSpans(ctx, document.ID, document.ActiveRevision)
+}
+
 // RemoveDocument removes one document.
 func (s *Service) RemoveDocument(ctx context.Context, documentID string) error {
 	return s.repository.DeleteDocument(ctx, strings.TrimSpace(documentID))

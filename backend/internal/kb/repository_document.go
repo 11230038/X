@@ -50,6 +50,31 @@ func (r *GORMRepository) DocumentForFile(ctx context.Context, fileID, kbID strin
 	return toDocument(model), nil
 }
 
+// DocumentOfFile returns a document parsed from one file, for a caller that is
+// asking about the file rather than about where it is used.
+//
+// The attachment wins when there is one, and the ordering says so rather than a
+// second query: `kb_id IS NULL` sorts true first under DESC. After that the
+// oldest document is taken, which is the one every rebuild of the same bytes is
+// a newer revision of.
+func (r *GORMRepository) DocumentOfFile(ctx context.Context, fileID string) (Document, error) {
+	if err := r.ready(); err != nil {
+		return Document{}, err
+	}
+	var model models.Document
+	err := r.db.WithContext(ctx).
+		Where("file_id = ?", fileID).
+		Order("kb_id IS NULL DESC, creat_time ASC, document_id ASC").
+		First(&model).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return Document{}, fmt.Errorf("%w: file %s is not parsed anywhere", ErrNotFound, fileID)
+		}
+		return Document{}, fmt.Errorf("read document of file: %w", err)
+	}
+	return toDocument(model), nil
+}
+
 // Documents lists a base's documents in the order they were added, or an empty
 // base's nothing when kbID is empty.
 func (r *GORMRepository) Documents(ctx context.Context, kbID string) ([]Document, error) {

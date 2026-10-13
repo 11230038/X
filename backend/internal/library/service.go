@@ -110,6 +110,35 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (UploadResult, 
 	}, nil
 }
 
+// Find reads one stored file's metadata, without opening its bytes.
+//
+// It answers in the shape the upload answered in, because it is the same file
+// read at a different time: a client that stored a file and one that comes back
+// for it later are reading one resource, and two shapes for it would be two
+// things to keep in step.
+func (s *Service) Find(ctx context.Context, id string) (UploadResult, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return UploadResult{}, ErrInvalidFile
+	}
+	record, err := s.repository.Find(ctx, id)
+	if err != nil {
+		return UploadResult{}, err
+	}
+	// Read from the path rather than from a column, for the same reason Open
+	// does: the directory is the classification, and a second copy of it is a
+	// second thing that can disagree.
+	category, err := categoryOf(record.LibraryPath)
+	if err != nil {
+		return UploadResult{}, err
+	}
+	return UploadResult{
+		ID: record.ID, SHA256: record.SHA256, Filename: record.Filename,
+		MIMEType: record.MIMEType, SizeBytes: record.SizeBytes,
+		Category: category, CreatedAt: record.CreatedAt,
+	}, nil
+}
+
 // Open reads one stored file back: its metadata, and a reader over its bytes.
 //
 // The caller closes the reader. The path is resolved the same way it was when

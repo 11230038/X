@@ -37,6 +37,41 @@ func (r *GORMRepository) Chunks(ctx context.Context, documentID string, revision
 	return chunks, nil
 }
 
+// ChunkSpans reads one revision's boundaries.
+//
+// The same primary-key range as Chunks, with the text column left out of the
+// select: this is what a preview draws its chunk marks from, and a document at
+// the character limit would otherwise be read twice to draw them.
+func (r *GORMRepository) ChunkSpans(ctx context.Context, documentID string, revision int) ([]ChunkSpan, error) {
+	if err := r.ready(); err != nil {
+		return nil, err
+	}
+	low, high := chunkRange(ChunkIDPrefix(documentID, revision))
+	var rows []struct {
+		ChunkID   string `gorm:"column:chunk_id"`
+		Ordinal   int    `gorm:"column:ordinal"`
+		CharStart int64  `gorm:"column:char_start"`
+		CharEnd   int64  `gorm:"column:char_end"`
+		Page      *int   `gorm:"column:page"`
+	}
+	err := r.db.WithContext(ctx).Model(&models.DocumentChunk{}).
+		Select("chunk_id, ordinal, char_start, char_end, page").
+		Where("chunk_id >= ? AND chunk_id < ?", low, high).
+		Order("chunk_id ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("read chunk spans: %w", err)
+	}
+	spans := make([]ChunkSpan, 0, len(rows))
+	for _, row := range rows {
+		spans = append(spans, ChunkSpan{
+			ChunkID: row.ChunkID, Ordinal: row.Ordinal,
+			CharStart: row.CharStart, CharEnd: row.CharEnd, Page: row.Page,
+		})
+	}
+	return spans, nil
+}
+
 // chunkSourceRow is one chunk joined to its document, as the query returns it.
 type chunkSourceRow struct {
 	ChunkID    string `gorm:"column:chunk_id"`

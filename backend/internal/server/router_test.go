@@ -13,6 +13,7 @@ import (
 
 	"backend/internal/auth"
 	"backend/internal/handler"
+	"backend/internal/kb"
 	"backend/internal/library"
 	"github.com/gin-gonic/gin"
 )
@@ -34,9 +35,34 @@ func newTestRouter(t *testing.T, checker readyChecker) *gin.Engine {
 	return NewRouter(logger, "development", Handlers{
 		System:        system,
 		LibraryFiles:  libraryFiles,
+		LibraryReads:  handler.NewLibraryReadHandler(routerFileStub{}, routerMaterialStub{}, logger),
 		Auth:          handler.NewAuthHandler(authenticator, logger),
 		TokenVerifier: authenticator,
+		// KnowledgeBase is deliberately left out. This file is about which
+		// routes exist and which group they sit in; what a knowledge base
+		// endpoint answers is handler/kb_test.go's business, and wiring a stub
+		// here would say nothing the other file does not already say.
 	})
+}
+
+type routerFileStub struct{}
+
+func (routerFileStub) Find(context.Context, string) (library.UploadResult, error) {
+	return library.UploadResult{ID: "lib_1", SHA256: strings.Repeat("a", 64), Filename: "手册.pdf"}, nil
+}
+
+type routerMaterialStub struct{}
+
+func (routerMaterialStub) DocumentOfFile(context.Context, string) (kb.Document, error) {
+	return kb.Document{ID: "doc_1", KBID: "kb_1", FileID: "lib_1", TextChars: 12}, nil
+}
+
+func (routerMaterialStub) ReadWindow(context.Context, string, int64, int64) (kb.Window, error) {
+	return kb.Window{Document: kb.Document{ID: "doc_1", TextChars: 12}, Text: "保修期是两年。", CharEnd: 7, TotalChars: 12}, nil
+}
+
+func (routerMaterialStub) ChunkSpans(context.Context, string) ([]kb.ChunkSpan, error) {
+	return nil, nil
 }
 
 type routerUploaderStub struct{}
@@ -267,6 +293,79 @@ func TestRouterRegistersAuthRoutes(t *testing.T) {
 			t.Fatalf("body = %s", recorder.Body.String())
 		}
 	})
+}
+
+// TestRouterRegistersTheKnowledgeBaseAndReadRoutes pins the two things this
+// file is the only place for: that each route exists at the path and method a
+// client was told, and that it is behind the token.
+//
+// Reading a file is reading the material a turn was grounded on, and the
+// knowledge bases beside it are the collections that material lives in, so
+// neither can be public the way an upload still is.
+func TestRouterRegistersTheKnowledgeBaseAndReadRoutes(t *testing.T) {
+	router := newTestRouter(t, readyChecker{})
+
+	routes := []struct{ name, method, path string }{
+		{"file", http.MethodGet, "/api/v1/library/files/lib_1"},
+		{"file text", http.MethodGet, "/api/v1/library/files/lib_1/text"},
+		{"create base", http.MethodPost, "/api/v1/knowledge-bases"},
+		{"list bases", http.MethodGet, "/api/v1/knowledge-bases"},
+		{"get base", http.MethodGet, "/api/v1/knowledge-bases/kb_1"},
+		{"delete base", http.MethodDelete, "/api/v1/knowledge-bases/kb_1"},
+		{"add document", http.MethodPost, "/api/v1/knowledge-bases/kb_1/documents"},
+		{"remove document", http.MethodDelete, "/api/v1/knowledge-bases/kb_1/documents/doc_1"},
+		{"rebuild", http.MethodPost, "/api/v1/knowledge-bases/kb_1/rebuild"},
+		{"search", http.MethodPost, "/api/v1/knowledge-bases/kb_1/search"},
+		{"set default", http.MethodPost, "/api/v1/knowledge-bases/kb_1/default"},
+	}
+
+	for _, route := range routes {
+		t.Run(route.name+" without a token", func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(route.method, route.path, nil))
+			if recorder.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
+			}
+			if !strings.Contains(recorder.Body.String(), `"code":"authorization_required"`) {
+				t.Fatalf("body = %s", recorder.Body.String())
+			}
+		})
+
+		t.Run(route.name+" with a token", func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(route.method, route.path, nil)
+			request.Header.Set("Authorization", "Bearer "+routerAcceptedToken)
+			router.ServeHTTP(recorder, request)
+			// Anything but these two means the route is there and a handler
+			// answered it: a wrong path is 404 and a wrong method is 405.
+			if recorder.Code == http.StatusNotFound || recorder.Code == http.StatusMethodNotAllowed {
+				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestRouterReadsAFileForWhoeverHoldsTheToken(t *testing.T) {
+	router := newTestRouter(t, readyChecker{})
+
+	for _, test := range []struct{ path, want string }{
+		{"/api/v1/library/files/lib_1", `"filename":"手册.pdf"`},
+		{"/api/v1/library/files/lib_1/text", `"text":"保修期是两年。"`},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, test.path, nil)
+			request.Header.Set("Authorization", "Bearer "+routerAcceptedToken)
+			router.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+			}
+			if !strings.Contains(recorder.Body.String(), test.want) {
+				t.Fatalf("body = %s, want %s", recorder.Body.String(), test.want)
+			}
+		})
+	}
 }
 
 func TestRouterRecoversFromPanic(t *testing.T) {

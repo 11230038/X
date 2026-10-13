@@ -113,6 +113,8 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 	router := server.NewRouter(logger, cfg.AppEnv, server.Handlers{
 		System:        system,
 		LibraryFiles:  libraryFiles,
+		LibraryReads:  handler.NewLibraryReadHandler(libraryService, ai.materials, logger),
+		KnowledgeBase: handler.NewKBHandler(ai.materials, logger),
 		Auth:          handler.NewAuthHandler(authService, logger),
 		Sessions:      handler.NewSessionHandler(sessionService, logger),
 		Capabilities:  handler.NewCapabilityHandler(ai.capabilities),

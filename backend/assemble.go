@@ -29,6 +29,10 @@ type ai struct {
 	turns        *turn.Runner
 	socket       *ws.Handler
 	capabilities *capability.Registry
+	// materials is the knowledge base the turns read through, kept here because
+	// the HTTP endpoints that manage it are built beside the rest of the
+	// handlers rather than in here: it is the same service, reached two ways.
+	materials *kb.Service
 	// indexing is closed when the index worker has stopped, which is what makes
 	// a shutdown able to wait for the document it is in the middle of.
 	indexing <-chan struct{}
@@ -148,7 +152,10 @@ func assemble(
 		return nil, err
 	}
 
-	return &ai{turns: runner, socket: socket, capabilities: capabilities, indexing: worker}, nil
+	return &ai{
+		turns: runner, socket: socket, capabilities: capabilities,
+		materials: materials, indexing: worker,
+	}, nil
 }
 
 // newEmbedder builds the provider this process embeds with.

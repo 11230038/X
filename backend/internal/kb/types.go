@@ -119,6 +119,21 @@ type ChunkRecord struct {
 	Embedding string
 }
 
+// ChunkSpan is where one chunk of a document's text begins and ends.
+//
+// It carries no content, and that is the point: a preview of the text a model
+// was shown needs to mark the chunk boundaries the sources were located by, and
+// reading every chunk's content to draw them would read the whole document
+// again. The coordinates are the ones a locator carries, so a client can line a
+// boundary up against a citation.
+type ChunkSpan struct {
+	ChunkID   string
+	Ordinal   int
+	CharStart int64
+	CharEnd   int64
+	Page      *int
+}
+
 // ChunkSource is a stored chunk joined to the document it belongs to: every
 // field a Source needs, in one read.
 type ChunkSource struct {
@@ -284,6 +299,12 @@ type Repository interface {
 	// this file", which is a different row from the same file inside a base.
 	Document(ctx context.Context, documentID string) (Document, error)
 	DocumentForFile(ctx context.Context, fileID, kbID string) (Document, error)
+	// DocumentOfFile reads a file's document when the caller has no collection
+	// in mind: the attachment if the file has one, otherwise the oldest document
+	// of any collection. A file is parsed from the same bytes wherever it is
+	// used, so for the question a preview asks — what text did the model get —
+	// any of them answers the same.
+	DocumentOfFile(ctx context.Context, fileID string) (Document, error)
 	Documents(ctx context.Context, kbID string) ([]Document, error)
 	CreateDocument(ctx context.Context, write DocumentWrite) error
 	// ReplaceRevision writes a document's new revision and moves the document's
@@ -296,6 +317,8 @@ type Repository interface {
 	// Chunks. Chunks reads one revision of one document through the chunk id
 	// prefix, because nothing indexes document_id.
 	Chunks(ctx context.Context, documentID string, revision int) ([]ChunkRecord, error)
+	// ChunkSpans reads one revision's boundaries without their text.
+	ChunkSpans(ctx context.Context, documentID string, revision int) ([]ChunkSpan, error)
 	ChunkSources(ctx context.Context, chunkIDs []string) ([]ChunkSource, error)
 	// DocumentText reads a window of a document's text in characters, so that a
 	// citation can be opened without loading the document.

@@ -13,6 +13,8 @@ import (
 type Handlers struct {
 	System        *handler.SystemHandler
 	LibraryFiles  *handler.LibraryFilesHandler
+	LibraryReads  *handler.LibraryReadHandler
+	KnowledgeBase *handler.KBHandler
 	Auth          *handler.AuthHandler
 	Sessions      *handler.SessionHandler
 	Capabilities  *handler.CapabilityHandler
@@ -46,11 +48,27 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	router.GET("/readyz", handlers.System.Readiness)
 	apiV1 := router.Group("/api/v1")
 	// The file library has no ownership model yet, so its upload route stays public
-	// until a later slice adds one.
+	// until a later slice adds one. Reading a file back is a different request:
+	// what it answers with is the material a turn was grounded on, and the
+	// knowledge base endpoints beside it are the collections that material lives
+	// in, so both are behind the token.
 	apiV1.POST("/library/files", handlers.LibraryFiles.Upload)
 	apiV1.POST("/auth/register", handlers.Auth.Register)
 	apiV1.POST("/auth/login", handlers.Auth.Login)
 	authenticated := apiV1.Group("", middleware.RequireAuth(handlers.TokenVerifier, logger))
+	authenticated.GET("/library/files/:fileID", handlers.LibraryReads.Get)
+	authenticated.GET("/library/files/:fileID/text", handlers.LibraryReads.Text)
+	authenticated.POST("/knowledge-bases", handlers.KnowledgeBase.Create)
+	authenticated.GET("/knowledge-bases", handlers.KnowledgeBase.List)
+	authenticated.GET("/knowledge-bases/:kbID", handlers.KnowledgeBase.Get)
+	authenticated.DELETE("/knowledge-bases/:kbID", handlers.KnowledgeBase.Delete)
+	authenticated.POST("/knowledge-bases/:kbID/documents", handlers.KnowledgeBase.AddDocument)
+	authenticated.DELETE("/knowledge-bases/:kbID/documents/:documentID", handlers.KnowledgeBase.RemoveDocument)
+	// Rebuilding is per document: the path says which collection the request is
+	// about, and the body says which document in it to re-read.
+	authenticated.POST("/knowledge-bases/:kbID/rebuild", handlers.KnowledgeBase.Rebuild)
+	authenticated.POST("/knowledge-bases/:kbID/search", handlers.KnowledgeBase.Search)
+	authenticated.POST("/knowledge-bases/:kbID/default", handlers.KnowledgeBase.SetDefault)
 	authenticated.GET("/auth/me", handlers.Auth.Me)
 	authenticated.GET("/capabilities", handlers.Capabilities.List)
 	authenticated.POST("/sessions", handlers.Sessions.Create)
