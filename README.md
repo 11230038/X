@@ -82,6 +82,9 @@ docker start seekdb
 - 嵌入模型（V2）：`EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_API_KEY`、`EMBEDDING_DIMENSION`、`EMBEDDING_TIMEOUT`、`EMBEDDING_BATCH_SIZE`
 - 解析（V2）：`PARSER_DEFAULT_ENGINE`、`PARSER_DOCLING_BASE_URL`、`PARSER_TIMEOUT`
 - 知识库（V2）：`KB_CHUNK_SIZE`、`KB_CHUNK_OVERLAP`、`KB_RETRIEVAL_TOP_K`、`KB_RETRIEVAL_CANDIDATES`、`KB_RRF_K`、`KB_MAX_CHARS_PER_DOCUMENT`、`KB_MAX_CHARS_PER_TURN`、`KB_VECTOR_LEASE`、`KB_INDEX_WORKERS`
+- 出题与练习（V3）：`QUESTION_DEFAULT_COUNT`、`QUESTION_MAX_COUNT`、`PRACTICE_QUEUE_SIZE`、`PRACTICE_JUDGE_MAX_TOKENS`
+
+`QUESTION_MAX_COUNT` 必须**不小于** `QUESTION_DEFAULT_COUNT`——默认值大于上限时，一句没说几道的出题请求会每次都拒绝自己。`QUESTION_DEFAULT_COUNT` / `QUESTION_MAX_COUNT` 是"一次出几道题"，`PRACTICE_QUEUE_SIZE` 是"练习队列一次取几道"，`PRACTICE_JUDGE_MAX_TOKENS` 是主观题判分那一次调用的输出预算。`LLM_CAPABILITY_CONFIG_JSON` 里 `deep_question` 的条目是**必需**的：它声明的阶段名（`ideation` / `generation`）与 `chat` 的（`exploring` / `responding`）不同，按阶段名取 `max_tokens` 的查找在继承来的配置里查不到，服务会带着"缺哪几个阶段、该写哪个键"的信息拒绝启动。
 
 `LLM_API_KEY`、`EMBEDDING_API_KEY` 与 `AUTH_JWT_SECRET` 同级：不写日志、不进错误信息、不进响应体，占位值不替换会让服务停在启动阶段。
 
@@ -144,6 +147,14 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `POST` | `/api/v1/knowledge-bases/{id}/rebuild` | 重建一份文档，body `{"document_id"}` |
 | `POST` | `/api/v1/knowledge-bases/{id}/search` | 检索调试面，body `{"query","top_k"?}` |
 | `POST` | `/api/v1/knowledge-bases/{id}/default` | 把某个库标为默认（只是标记，不改检索范围） |
+| `GET` | `/api/v1/questions` | 题库列表；`?source=&material_id=&difficulty=&resolved=&bookmarked=&question_type=&category=&q=&limit=&offset=` 逐条收窄，认不出的取值报 400 而不是忽略 |
+| `GET` | `/api/v1/questions/{questionID}` | 单题：题干面、作答面、分类。**对外的 id 只有 `question_id`** |
+| `PATCH` | `/api/v1/questions/{questionID}` | 收藏 / 已解决 / 改分类；body 里**出现过的**字段才被改（`{"bookmarked":true}`、`{"resolved":false}`、`{"categories":["第三章"]}`；`[]` 表示取消归类） |
+| `GET` | `/api/v1/question-categories` | 分类名列表，只列出还能筛出题的那些 |
+| `GET` | `/api/v1/practice/queue` | 练习队列：错题插队、到期的按逾期程度、新题在后；长度是部署的 `PRACTICE_QUEUE_SIZE`，不由请求指定 |
+| `POST` | `/api/v1/practice/reviews` | 提交一次复习，body 即 `practice.Review`：`request_id`、`question_id`、`user_answer`、`marker`?（`mastered` / `needs_review` / `skipped` / `bookmarked`）、`rating`?、`version`? |
+| `GET` | `/api/v1/practice/reviews/{requestID}` | 读回一次提交的结果，与重发同一 `request_id` 拿到的那一份逐字相同 |
+| `GET` | `/api/v1/practice/stats` | 练习趋势；`?bucket=day|week`、`?from=&to=`（日期或 RFC3339），窗口向外对齐到整桶并在响应里说明实际覆盖的范围 |
 
 除 `/`、`/health*` 与上传外，全部路由要求 `Authorization: Bearer <token>`；缺 token 返回 401 `authorization_required`。
 
@@ -291,6 +302,28 @@ migration v7（V2）新增 `knowledge_bases`、`documents`、`document_chunks`�
 **启动期的三处一致性校验**（不一致就拒绝启动，不回退）：`EMBEDDING_DIMENSION` 必须等于 schema 里 `VECTOR(N)` 的 N；`PARSER_DEFAULT_ENGINE` 必须在解析器注册表里；库里已有知识库的 `embedding_model` 必须等于 `EMBEDDING_MODEL`（换模型要重建，重建之后才启动得起来）。
 
 **已知缺口**：`docling` 需要自己跑起来（默认 `http://127.0.0.1:5001`），本仓库不含它；嵌入用独立供应商，DeepSeek 没有 embedding 接口，所以 `EMBEDDING_*` 与 `LLM_*` 是两套配置；检索参数是全局的，不按库配置；模型目前只读文本，`VISION_*` 配了也没有消费方；上传与知识库都还没有属主列，权限只到"有没有登录"这一层。
+
+### 出题、题库与练习（V3）
+
+第四个能力 `deep_question` 出的是**题库里的记录**，不是一段话。它有两个阶段，其中一个不调用模型：
+
+1. `ideation`——向运行时问这一轮携带的材料，用**规则**把用户那句话读成一份题组规格（数量、题型、难度、分类），然后把两者作为 `observation` 摊开。规格不来自模型：它是能算出来的东西，而它的价值在于出现在屏幕上。附带的结果是**进度从第一次调用起就是真的**——「第 3 道，共 10 道」不等模型写完再回头数。
+2. `generation`——调用模型，每道题一次 `save_question` 工具调用，逐题写进题库。
+
+一轮完整的事件顺序：`stage_start(ideation)` → `sources`（**有材料才发**）→ `observation`（带 `question_plan`）→ `stage_end(ideation)` → `stage_start(generation)` → 每道题一对 `tool_call`/`tool_result`（`metadata` 是 `step` / `total` / `label`，成功时还有 `created`）→ `stage_end(generation)` → `result`。模型只讲不落库时 `saved: 0`——那是一个要画出来的状态，不是失败。
+
+`save_question` 在写的时候拒绝的，正是判题在读的时候会拒绝的：选项少于 2 个或多于 8 个、`correct_answer` 不在 `options` 里、答案是空的、题型不在封闭集合内。拒绝是**结构化的**，带一句能让模型当场改对的话——模型还在看着这道题，这是它改得动的时刻。存储约定只写在工具 schema 的描述里：选择题答案是逗号分隔的选项键（升序、去重），填空用 `|` 分隔多个可接受写法。题目的 `material_id` 记的是**附件文件**而不是解析出来的文档（文件在解析失败时也还在）；`source_label` 只能指这一轮真正携带的材料，和多带几个附件时不猜。
+
+**预路由（TOOL-08）**：客户端没有指定 capability 时，`Runner.Start` 在创建回合行**之前**按规则表读一遍那句话。三条同时成立才路由——话里有「出题动词 + 题目名词」、没有「考考我」这类要逐题被考的意图（`deep_question` 是出题器，不是逐题问答的运行器）、客户端确实没指定（显式指定永远优先，预路由是填空不是改写）。「给我题库」「一道题多少钱」这类含"题"字的话都不路由。命中但目标没注册时退回默认并记一条日志。决定落在该轮第一个 `session` 事件的 `metadata.routing`（`capability` / `by` / `reason` / `confidence`），断线重放也看得到。
+
+**练习**是八条 REST 路由，都要求登录，形状见上面的接口一览：
+
+- **判题分两支**：选择题与填空题由服务端比对（`judgment.kind = "objective"`、`model` 为 null、不产生任何模型调用）；主观题是一次模型调用（`kind = "model_judgment"`），温度 0.2，理由与采分点随判分一起回来。判不出来（密钥错、供应商不答、返回不是约定形状）报 **503 `judge_unavailable`**——它可重试，且**绝不会**被当成"答对了"。
+- **提交可以安全重发**：`request_id` 是持久幂等的凭据（事件表的键），重启服务后重发同一份仍拿回同一份结果；`replayed` 只说这次是重放还是新记了一次；`version` 做乐观并发（`409 stale_review` 带回当前状态），同一个 `request_id` 换了内容则是 `409 conflicting_request_id`。重发请**沿用同一个 `request_id`**。
+- **队列是一次查询**，不是后台作业：没有队列表、没有定时器，三种来源（错题插队 / 到期 / 没见过的题）在一条 JOIN 里排序。跳过只推进时钟，不发号、不计次数。
+- **统计**从历次复习记录算出来，窗口按 `day` / `week` 对齐，没数据的桶也占一个点——否则图表会把隔着的两天画成相邻的两天。跳过既不算对也不算错（一天的"全跳过"与"全答错"靠旁边的计数分开）。
+
+**已知缺口（V3）**：知识点只以标签形式落在 `extra.knowledge_points` 上，没有可跳转的对象；正确率走 `practice_review_events.outcome_json` 提取，没有索引；题目的来源会话或材料被删之后会变成"没有归属"，界面要能表达来源已删除；预路由只认中英文那几种写法，写别的说法就留在通用助手里。
 
 ## 前端
 
