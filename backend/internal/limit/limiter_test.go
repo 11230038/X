@@ -61,9 +61,9 @@ func takeRefused(t *testing.T, limiter *Limiter, account int64, action Action) t
 }
 
 func TestTheLimiterRefusesNumbersItCouldNotBound(t *testing.T) {
-	// Two keys are in every message and one is not: the rates are named so that
-	// a deployment knows which of the four to look at, and the burst says
-	// nothing about what was wrong with it beyond the fact that it was.
+	// Every message names the key it is about, so that a deployment with four
+	// numbers in front of it is told which line of the file to look at rather
+	// than left to work out which number "the burst" was.
 	tests := []struct {
 		name  string
 		opts  Options
