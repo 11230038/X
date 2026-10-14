@@ -20,15 +20,21 @@ import (
 // provider and by source, and a field inside a JSON document cannot be indexed.
 // The two are written from one source and only the columns are read back.
 type LLMCall struct {
-	CallID    string         `gorm:"column:call_id;primaryKey;autoIncrement:false"`
-	StartedAt time.Time      `gorm:"column:started_at;not null"`
-	SessionID string         `gorm:"column:session_id;not null"`
-	TurnID    string         `gorm:"column:turn_id;not null"`
+	CallID    string    `gorm:"column:call_id;primaryKey;autoIncrement:false"`
+	StartedAt time.Time `gorm:"column:started_at;not null"`
+	// SessionID and TurnID are nil for a call that belongs to no conversation —
+	// judging a review, running a reading extension — which is a state rather
+	// than a missing value (migration 00017). They were NOT NULL while every
+	// call was a turn's; storing a placeholder name for the others would make
+	// "calls made outside a conversation" a question about a spelling.
+	SessionID *string        `gorm:"column:session_id"`
+	TurnID    *string        `gorm:"column:turn_id"`
 	Source    string         `gorm:"column:source;not null"`
 	Usage     datatypes.JSON `gorm:"column:usage_json;type:json;not null"`
 	// OwnerID is the account whose quota this call counts against (migration
-	// 00014). It is on the row rather than derived through session_id because
-	// the calls that name a session have a session and the short ones need not.
+	// 00014). Every call the recorder makes has one: the recorder refuses to
+	// make a call nobody would be charged for, and NULL is left for the rows
+	// that were written before this version, belonging to nobody.
 	OwnerID *int64 `gorm:"column:owner_id"`
 	// Provider, Model and the four counts are the same numbers usage_json
 	// carries, promoted to columns so that a window can be summed over without

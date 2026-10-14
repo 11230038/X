@@ -12,6 +12,7 @@ import (
 	"backend/internal/authz"
 	"backend/internal/httpx"
 	"backend/internal/reading"
+	"backend/internal/usage"
 	"github.com/gin-gonic/gin"
 )
 
@@ -386,7 +387,16 @@ func (h *ReadingHandler) RunExtension(c *gin.Context) {
 		h.fail(c, "run_extension_failed", err)
 		return
 	}
-	outcome, err := h.extensions.Run(c.Request.Context(), c.Param("name"), reading.Context{
+	// An extension that asks a model something is a model call made for the
+	// account that asked for the extension, from a route that is not a
+	// conversation: no session, no turn, and the row says so (migration 00017).
+	// It is declared here rather than inside the extension because the account is
+	// the request's, and by the time the call is made it is out of reach.
+	ctx := usage.WithCall(c.Request.Context(), usage.Call{
+		OwnerID: account.UserID,
+		Source:  usage.SourceReadingExtension,
+	})
+	outcome, err := h.extensions.Run(ctx, c.Param("name"), reading.Context{
 		MaterialID: passage.MaterialID,
 		Locator:    passage.Locator,
 		Text:       passage.Text,

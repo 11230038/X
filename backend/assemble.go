@@ -22,6 +22,7 @@ import (
 	"backend/internal/session"
 	"backend/internal/tool"
 	"backend/internal/turn"
+	"backend/internal/usage"
 	"backend/internal/ws"
 	"gorm.io/gorm"
 )
@@ -193,7 +194,20 @@ func assemble(
 		return nil, fmt.Errorf("initialize the knowledge base service: %w", err)
 	}
 
-	provider := llm.NewClient(cfg.LLM.BaseURL, cfg.LLM.APIKey, cfg.LLM.Timeout)
+	// The client is built here and wrapped here, and nothing downstream ever
+	// sees it unwrapped (§2.7). That is the whole of the structural claim: every
+	// model call in this process goes through the recorder because there is one
+	// provider and it is inside it, rather than because each caller remembered
+	// to write a row — a caller that forgets does not fail, it just makes the
+	// usage numbers quietly small.
+	provider, err := usage.New(
+		llm.NewClient(cfg.LLM.BaseURL, cfg.LLM.APIKey, cfg.LLM.Timeout),
+		usage.NewGORMStore(db),
+		usage.Options{Provider: cfg.LLM.Provider, Logger: logger},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("initialize the usage record: %w", err)
+	}
 	// The question bank and the review path share this database with everything
 	// else, and each gets its own service over it: a question is written by the
 	// turns that generate it, read by the bank's endpoints, and advanced by a

@@ -11,6 +11,7 @@ import (
 	"backend/internal/notebook"
 	"backend/internal/practice"
 	"backend/internal/tool"
+	"backend/internal/usage"
 )
 
 // The bridge: what the nine mastery tools call through.
@@ -246,7 +247,12 @@ func (t *TurnPath) Grade(ctx context.Context, questionID, userAnswer string) (to
 	if err != nil {
 		return tool.Graded{}, t.refuse(err)
 	}
-	judgment, err := t.judge.Judge(ctx, entry.Question, userAnswer)
+	// Much of a path's grading is not a model call at all — the objective branch
+	// compares against the stored answer — so the source this call is recorded
+	// under is only reached by the short answers, which is exactly the split
+	// §17.1 wants to be able to see.
+	judgment, err := t.judge.Judge(
+		usage.WithSource(ctx, usage.SourceMasteryJudge), entry.Question, userAnswer)
 	if err != nil {
 		return tool.Graded{}, err
 	}

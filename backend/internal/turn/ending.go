@@ -17,6 +17,7 @@ import (
 
 	"backend/internal/event"
 	"backend/internal/session"
+	"backend/internal/usage"
 )
 
 // endTurn records how the turn ended and tells whoever is watching.
@@ -148,6 +149,11 @@ func (r *turnRun) announce(ctx context.Context, outcome Status, failure *Failure
 // give: it is what tells a subscriber the stream is over, and a subscriber left
 // waiting on a turn that has ended is worse than one given a stale title.
 func (r *turnRun) nameSession(ctx context.Context, completed bool) {
+	// The naming call is the turn's — same account, same conversation — but it
+	// is not part of what the capability did, and it is recorded under its own
+	// source so that what naming costs is a question the usage table can answer.
+	ctx = usage.WithSource(ctx, usage.SourceTurnTitle)
+
 	title := r.session.Title
 	if r.titleNeeded && completed {
 		generated, err := r.runner.titler.Title(ctx, r.question, r.published.answer)

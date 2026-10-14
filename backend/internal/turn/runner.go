@@ -13,6 +13,7 @@ import (
 	"backend/internal/llm"
 	"backend/internal/session"
 	"backend/internal/tool"
+	"backend/internal/usage"
 )
 
 // terminalWriteTimeout bounds the writes a turn makes after it has stopped.
@@ -112,9 +113,21 @@ func (r *Runner) newTurnRun(
 		titleNeeded: conversation.Title == "",
 		declared:    declared,
 		routing:     routed,
-		ctx:         ctx,
-		cancel:      cancel,
-		emitter:     emitter,
+		// Every model call this turn makes is recorded against the account the
+		// turn runs for, in this conversation, under the capability it ran
+		// (§2.7). It is put on the turn's own context rather than on the context
+		// of the capability run, because the turn makes calls outside that run as
+		// well — naming the session afterwards, and grading an answer a tool was
+		// asked to grade — and those are made for the same account, in the same
+		// conversation, from the same turn.
+		ctx: usage.WithCall(ctx, usage.Call{
+			OwnerID:   caller.UserID,
+			SessionID: conversation.ID,
+			TurnID:    turn.ID,
+			Source:    turn.Capability,
+		}),
+		cancel:  cancel,
+		emitter: emitter,
 	}
 	run.published = resultWatch{inner: emitter, run: run}
 	return run

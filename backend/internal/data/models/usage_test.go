@@ -38,6 +38,10 @@ func TestLLMCallModelMapping(t *testing.T) {
 // break silently: if FinishedAt were a value rather than a pointer, every call
 // that never came back would be stored as one that finished at the zero time,
 // and nothing downstream could tell the two apart.
+//
+// SessionID and TurnID are here for the other kind of absence: a call made
+// outside a conversation has none, and a column that could not hold that would
+// make the caller invent a name for a conversation that does not exist.
 func TestOpenCallsAreNilable(t *testing.T) {
 	model := LLMCall{}
 	if reflect.TypeOf(model.FinishedAt) != reflect.TypeOf((*time.Time)(nil)) {
@@ -45,6 +49,13 @@ func TestOpenCallsAreNilable(t *testing.T) {
 	}
 	if reflect.TypeOf(model.OwnerID) != reflect.TypeOf((*int64)(nil)) {
 		t.Errorf("OwnerID type = %T, want *int64", model.OwnerID)
+	}
+	if reflect.TypeOf(model.SessionID) != reflect.TypeOf((*string)(nil)) {
+		t.Errorf("SessionID type = %T, want *string so that a call outside a conversation is nil",
+			model.SessionID)
+	}
+	if reflect.TypeOf(model.TurnID) != reflect.TypeOf((*string)(nil)) {
+		t.Errorf("TurnID type = %T, want *string", model.TurnID)
 	}
 }
 

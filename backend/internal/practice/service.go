@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"backend/internal/authz"
+	"backend/internal/usage"
 )
 
 // The two ways a submission can lose, as things a transaction can report.
@@ -138,6 +139,14 @@ func (s *Service) record(ctx context.Context, repository Repository, review Revi
 		nextVersion = version + 1
 	}
 
+	// Judging a short answer is a model call, made for the account that
+	// submitted the review from a route that is not a conversation: there is no
+	// session and no turn above it, and the row says so rather than naming a
+	// conversation that does not exist (migration 00017).
+	ctx = usage.WithCall(ctx, usage.Call{
+		OwnerID: caller.UserID,
+		Source:  usage.SourcePracticeJudge,
+	})
 	judgement, err := s.judgeAnswer(ctx, entry, review)
 	if err != nil {
 		return ReviewResult{}, err
