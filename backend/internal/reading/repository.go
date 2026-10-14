@@ -208,6 +208,15 @@ func (r *GORMRepository) CreateMaterial(ctx context.Context, material Material) 
 		ContentID:  nullable(material.ContentID),
 		Filename:   nullable(material.Filename),
 		SourceType: nullable(material.SourceType),
+		CreatedAt:  material.CreatedAt,
+	}
+	// Written rather than left to the database, and it is the column the
+	// catalogue is ordered by: a material nobody has written to yet was touched
+	// when it was made, and leaving it NULL would file the newest material at the
+	// bottom of the list rather than the top.
+	if !material.UpdatedAt.IsZero() {
+		updated := material.UpdatedAt
+		record.UpdatedAt = &updated
 	}
 	err := r.db.WithContext(ctx).Create(&record).Error
 	if err != nil {
