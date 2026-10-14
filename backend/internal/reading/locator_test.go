@@ -19,8 +19,25 @@ func sampleDocuments() *fakeDocuments {
 	}, sampleText)
 }
 
+// newSampleService is newFakeService over that document.
+//
+// The tests that resolve a window of a document need the document to be there —
+// a material names one, and the text belongs to the knowledge base — so the
+// premise is set up in one line rather than repeated. The tests that are about a
+// request being refused before anything is read use newFakeService instead, and
+// start with nothing parsed on purpose.
+func newSampleService(t *testing.T, unitMaxChars int) (*Service, *fakeRepository, *fakeDocuments) {
+	t.Helper()
+	repository, documents := newFakeRepository(), sampleDocuments()
+	service, err := NewService(repository, documents, Options{UnitMaxChars: unitMaxChars})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	return service, repository, documents
+}
+
 func TestALocatorResolvesToTheTextItNames(t *testing.T) {
-	service, repository, documents := newFakeService(t, 100)
+	service, repository, documents := newSampleService(t, 100)
 	repository.withMaterial(sampleMaterial("rm_1", "doc_1"))
 
 	passage, err := service.Resolve(context.Background(), "rm_1", Locator{
@@ -50,7 +67,7 @@ func TestALocatorResolvesToTheTextItNames(t *testing.T) {
 }
 
 func TestTheOffsetsAreTheCoordinateAndTheOrdinalIsAHint(t *testing.T) {
-	service, repository, documents := newFakeService(t, 100)
+	service, repository, documents := newSampleService(t, 100)
 	repository.withMaterial(sampleMaterial("rm_1", "doc_1"))
 
 	// The ordinal says unit 9 and the offsets say characters 10 to 20. Only one of
@@ -76,7 +93,7 @@ func TestTheOffsetsAreTheCoordinateAndTheOrdinalIsAHint(t *testing.T) {
 }
 
 func TestALocatorPastTheEndOfTheTextIsRefusedRatherThanClamped(t *testing.T) {
-	service, repository, documents := newFakeService(t, 100)
+	service, repository, documents := newSampleService(t, 100)
 	repository.withMaterial(sampleMaterial("rm_1", "doc_1"))
 	length := int64(len([]rune(sampleText)))
 
@@ -99,7 +116,7 @@ func TestALocatorPastTheEndOfTheTextIsRefusedRatherThanClamped(t *testing.T) {
 }
 
 func TestACharacterSpanAtTheEndOfTheTextIsTheDocumentAndNotPastIt(t *testing.T) {
-	service, repository, _ := newFakeService(t, 100)
+	service, repository, _ := newSampleService(t, 100)
 	repository.withMaterial(sampleMaterial("rm_1", "doc_1"))
 	length := int64(len([]rune(sampleText)))
 
@@ -115,7 +132,7 @@ func TestACharacterSpanAtTheEndOfTheTextIsTheDocumentAndNotPastIt(t *testing.T) 
 }
 
 func TestAPlaceIsNotAPassage(t *testing.T) {
-	service, repository, documents := newFakeService(t, 100)
+	service, repository, documents := newSampleService(t, 100)
 	repository.withMaterial(sampleMaterial("rm_1", "doc_1"))
 
 	// A zero-width locator is legal and is what a saved position is: where the
@@ -219,7 +236,7 @@ func TestAMaterialWithNothingBehindItIsNotAPassage(t *testing.T) {
 }
 
 func TestAPassageWiderThanAUnitIsRefused(t *testing.T) {
-	service, repository, documents := newFakeService(t, 8)
+	service, repository, documents := newSampleService(t, 8)
 	repository.withMaterial(sampleMaterial("rm_1", "doc_1"))
 
 	// The bound is the same one the outline cuts the text by, on purpose: the

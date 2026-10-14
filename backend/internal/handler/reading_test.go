@@ -144,11 +144,12 @@ func newReadingRouter(readings Readings, extensions *reading.Registry) *gin.Engi
 }
 
 func TestReadingHandlerListAsksForTheWorkspaceItWasGiven(t *testing.T) {
-	pinned := true
+	pinned, opened := true, false
 	stub := &readingStub{materials: []reading.Material{
 		{
 			MaterialID: "rm_1", ContentID: "doc_1", Filename: "算法笔记.md",
-			SourceType: "library", CreatedAt: handlerReadingTime, Pinned: &pinned,
+			SourceType: "library", CreatedAt: handlerReadingTime,
+			Pinned: &pinned, Opened: &opened,
 		},
 		{MaterialID: "rm_2", ContentID: "doc_2", Filename: "另一本.md", CreatedAt: handlerReadingTime},
 	}}
@@ -178,11 +179,19 @@ func TestReadingHandlerListAsksForTheWorkspaceItWasGiven(t *testing.T) {
 	if envelope.Data.Materials[0].Pinned == nil || !*envelope.Data.Materials[0].Pinned {
 		t.Errorf("a pinned tab came back as %+v", envelope.Data.Materials[0])
 	}
+	// A flag that is false is a thing somebody said, so it has to survive the
+	// wire: an omitempty pointer drops a nil and keeps a false, which is the
+	// whole of how the client tells the two apart.
+	if opened := envelope.Data.Materials[0].Opened; opened == nil || *opened {
+		t.Errorf("an unopened tab came back as %+v", envelope.Data.Materials[0])
+	}
 	if envelope.Data.Materials[1].Pinned != nil || envelope.Data.Materials[1].Opened != nil {
 		t.Errorf("a tab nobody has said anything about came back as %+v", envelope.Data.Materials[1])
 	}
-	if !contains(body, `"opened"`) || countOf(body, `"pinned"`) != 1 {
-		t.Errorf("a material with no tab state put a flag on the wire: %s", body)
+	// One material has tab state and one does not, so each flag is on the wire
+	// exactly once — and it is the same material's that is missing from neither.
+	if countOf(body, `"pinned"`) != 1 || countOf(body, `"opened"`) != 1 {
+		t.Errorf("the flags on the wire do not match the tab state: %s", body)
 	}
 }
 

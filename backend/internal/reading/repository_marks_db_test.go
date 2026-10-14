@@ -20,6 +20,11 @@ import (
 	"backend/internal/data/testdb"
 )
 
+// Marks written through the repository carry Revision: 1, which is what the
+// service writes and what migration 00012's `revision >= 1` check requires: the
+// column says which revision of the text the reader was looking at, and a mark
+// made against no revision of it at all is not a thing that happens.
+
 // storeMarkRow writes one mark with the time the caller chooses, which is the
 // only way the order it comes back in can be asserted rather than observed. A nil
 // session is a mark whose conversation has been deleted.
@@ -83,7 +88,7 @@ func TestDBAMarkIsReadBackWhole(t *testing.T) {
 	ctx := context.Background()
 
 	err := repo.CreateMark(ctx, Mark{
-		MarkID: "rmk_1", MaterialID: "rm_1", SessionID: "s_1", Kind: MarkHighlight,
+		MarkID: "rmk_1", MaterialID: "rm_1", SessionID: "s_1", Kind: MarkHighlight, Revision: 1,
 		Locator: Locator{MaterialID: "rm_1", Ordinal: 3, CharStart: 10, CharEnd: 20, Page: page(7)},
 	})
 	if err != nil {
@@ -92,7 +97,7 @@ func TestDBAMarkIsReadBackWhole(t *testing.T) {
 	// A highlight is a place in the text and can stand without a word, so the
 	// body column stores nothing rather than an empty string.
 	err = repo.CreateMark(ctx, Mark{
-		MarkID: "rmk_2", MaterialID: "rm_1", SessionID: "s_1", Kind: MarkNote,
+		MarkID: "rmk_2", MaterialID: "rm_1", SessionID: "s_1", Kind: MarkNote, Revision: 1,
 		Locator: Locator{MaterialID: "rm_1", CharStart: 30, CharEnd: 40}, Body: "这里说的是捕获",
 	})
 	if err != nil {
@@ -136,7 +141,7 @@ func TestDBAMarkIsOneOfThreeKindsAndOutlivesWhatItIsNotOwnedBy(t *testing.T) {
 	ctx := context.Background()
 	for _, kind := range []MarkKind{MarkBookmark, MarkHighlight, MarkNote} {
 		err := repo.CreateMark(ctx, Mark{
-			MarkID: "rmk_" + string(kind), MaterialID: "rm_1", SessionID: "s_1", Kind: kind,
+			MarkID: "rmk_" + string(kind), MaterialID: "rm_1", SessionID: "s_1", Kind: kind, Revision: 1,
 			Locator: Locator{MaterialID: "rm_1", CharStart: 10, CharEnd: 20},
 		})
 		if err != nil {
@@ -151,7 +156,7 @@ func TestDBAMarkIsOneOfThreeKindsAndOutlivesWhatItIsNotOwnedBy(t *testing.T) {
 		t.Errorf("%d marks are left after the material went", got)
 	}
 	err := repo.CreateMark(ctx, Mark{
-		MarkID: "rmk_kept", MaterialID: "rm_2", SessionID: "s_1", Kind: MarkNote,
+		MarkID: "rmk_kept", MaterialID: "rm_2", SessionID: "s_1", Kind: MarkNote, Revision: 1,
 		Locator: Locator{MaterialID: "rm_2", CharStart: 10, CharEnd: 20}, Body: "另一本书上的",
 	})
 	if err != nil {
@@ -214,7 +219,7 @@ func TestDBAMarkCannotExistHalfWritten(t *testing.T) {
 	// rows it removed — so a second removal has an answer and does not have to
 	// read the table to find it.
 	if err := repo.CreateMark(context.Background(), Mark{
-		MarkID: "rmk_1", MaterialID: "rm_1", Kind: MarkBookmark,
+		MarkID: "rmk_1", MaterialID: "rm_1", Kind: MarkBookmark, Revision: 1,
 		Locator: Locator{MaterialID: "rm_1", CharStart: 10, CharEnd: 10},
 	}); err != nil {
 		t.Fatalf("create a bookmark: %v", err)

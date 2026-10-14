@@ -84,6 +84,10 @@ func TestAMarkRefusesWhatItCannotBe(t *testing.T) {
 			if test.mutate != nil {
 				test.mutate(&request)
 			}
+			// Counted before the call, not after: the table's first two rows are
+			// marks the service accepts, so by the time a refusal is reached the
+			// store is not empty and the question is whether this call added to it.
+			before := len(repository.marks)
 			_, err := service.AddMark(context.Background(), request)
 			if test.refused {
 				if !errors.Is(err, ErrInvalidRequest) {
@@ -92,8 +96,8 @@ func TestAMarkRefusesWhatItCannotBe(t *testing.T) {
 				if !strings.Contains(err.Error(), test.want) {
 					t.Errorf("AddMark() refused with %q, want it to mention %q", err, test.want)
 				}
-				if len(repository.marks) != 0 {
-					t.Errorf("AddMark() wrote a mark it refused: %+v", repository.marks)
+				if len(repository.marks) != before {
+					t.Errorf("AddMark() wrote a mark it refused: %+v", repository.marks[before:])
 				}
 				return
 			}

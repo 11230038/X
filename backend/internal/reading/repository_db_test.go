@@ -258,8 +258,13 @@ func TestDBAMaterialPointsAtWhateverItsSourceNames(t *testing.T) {
 		t.Errorf("the material reads content_id %q", material.ContentID)
 	}
 	// And a material with no source at all stores nothing rather than an empty
-	// string: the column allows both and they are different answers.
-	storeMaterialRow(t, resource, "rm_2", nil, atSecond(2), nil)
+	// string: the column allows both and they are different answers. The row is
+	// written here rather than through the helper above, because that one always
+	// names a source — and "no source" is a state the domain has a word for, so
+	// it has to be reachable from a test.
+	testdb.Exec(t, resource, "INSERT INTO reading_materials "+
+		"(material_id, content_id, filename, source_type, creat_time) VALUES (?, NULL, NULL, NULL, ?)",
+		"rm_2", atSecond(2))
 	material, err = repo.Material(context.Background(), "rm_2")
 	if err != nil {
 		t.Fatalf("read a material with no document: %v", err)
@@ -289,6 +294,7 @@ func TestDBCreateMaterialWritesTheEmptyColumnsAsNothing(t *testing.T) {
 	// adapter and through SQL have to land the same way.
 	err := repo.CreateMaterial(context.Background(), Material{
 		MaterialID: "rm_1", Filename: "算法笔记.md", SourceType: "library",
+		CreatedAt: atSecond(3), UpdatedAt: atSecond(3),
 	})
 	if err != nil {
 		t.Fatalf("create a material: %v", err)
@@ -304,13 +310,15 @@ func TestDBCreateMaterialWritesTheEmptyColumnsAsNothing(t *testing.T) {
 	if row.ContentID != nil {
 		t.Errorf("a material created with no document stored content_id %q, want NULL", *row.ContentID)
 	}
-	// creat_time is the database's to fill, and it is filled: a catalogue ordered
-	// by when a material was made needs one on every row.
+	// Both times are the caller's and both are stored. update_time is the one
+	// that matters: it is what the catalogue is ordered by, so an adapter that
+	// dropped it would file every material the moment it was made at the bottom
+	// of the list of everything the reader has touched.
 	material, err := repo.Material(context.Background(), "rm_1")
 	if err != nil {
 		t.Fatalf("read it back: %v", err)
 	}
-	if material.CreatedAt.IsZero() || material.UpdatedAt.IsZero() {
-		t.Errorf("the created material reads %+v, want both times set", material)
+	if !material.CreatedAt.Equal(atSecond(3)) || !material.UpdatedAt.Equal(atSecond(3)) {
+		t.Errorf("the created material reads %+v, want the two times it was written with", material)
 	}
 }

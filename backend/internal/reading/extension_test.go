@@ -32,8 +32,10 @@ func (e *stubExtension) Available() (bool, string)  { return e.ready, e.reason }
 
 func (e *stubExtension) Run(ctx context.Context, reading Context) (json.RawMessage, error) {
 	if e.seen != nil {
-		copied := reading
-		e.seen = &copied
+		// Written through the pointer the test is holding rather than by pointing
+		// seen somewhere else: the test reads its own variable afterwards, and a
+		// stub that reassigns the field would leave it holding the zero Context.
+		*e.seen = reading
 	}
 	if e.panics {
 		panic("this extension is broken")

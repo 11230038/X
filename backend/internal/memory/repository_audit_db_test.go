@@ -77,18 +77,38 @@ func TestAnAuditLineCannotBeWrittenTwice(t *testing.T) {
 		TargetKind: TargetFact, TargetID: "mf_1", Result: ResultDone, CreatedAt: atNoon,
 	}
 
-	err := repo.Within(context.Background(), func(tx Repository) error {
-		if err := tx.AppendAudit(context.Background(), line); err != nil {
-			return err
-		}
-		return tx.AppendAudit(context.Background(), line)
-	})
+	// Two calls and not one, because that is what writing a line twice looks like
+	// from outside: the first is the record of an action, the second is somebody
+	// asking for that same record again. The trail keeps the first one, and the
+	// second is refused by the primary key rather than merged into it.
+	if err := repo.AppendAudit(context.Background(), line); err != nil {
+		t.Fatalf("the first append = %v, want it written", err)
+	}
+	err := repo.AppendAudit(context.Background(), line)
 	if !errors.Is(err, ErrDuplicate) {
 		t.Errorf("writing one audit line twice = %v, want a duplicate", err)
 	}
-	// The second write took the transaction with it, which is the same statement
-	// read from the other end: the trail holds the line once.
 	if got := countRows(t, resource, "memory_audit"); got != 1 {
 		t.Errorf("%d audit lines are stored, want one", got)
+	}
+
+	// The same thing inside a caller's transaction, which is how a fact and the
+	// record of it are written together. Here the engine refuses the statement and
+	// the caller's error rolls the whole transaction back, so the trail holds
+	// nothing at all — and that is the right amount: MEM-02 asks for a record of
+	// what was done, and a call that failed did nothing.
+	second := line
+	second.ID = "ma_2"
+	err = repo.Within(context.Background(), func(tx Repository) error {
+		if err := tx.AppendAudit(context.Background(), second); err != nil {
+			return err
+		}
+		return tx.AppendAudit(context.Background(), second)
+	})
+	if !errors.Is(err, ErrDuplicate) {
+		t.Errorf("a duplicate inside a transaction = %v, want a duplicate", err)
+	}
+	if got := countRows(t, resource, "memory_audit"); got != 1 {
+		t.Errorf("%d audit lines are stored, want the one from the call that succeeded", got)
 	}
 }

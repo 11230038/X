@@ -54,7 +54,11 @@ func TestDBTheFirstPositionForAPairIsOneRowAndTheSecondIsACollision(t *testing.T
 	if !stored.UpdatedAt.Equal(atSecond(2)) {
 		t.Errorf("the stored position was written at %v, want the moment it was saved", stored.UpdatedAt)
 	}
-	// A different conversation is a different key and its own place.
+	// A different conversation is a different key and its own place — and the
+	// conversation has to exist, because migration 00012 made that column a
+	// foreign key: where somebody stopped is a fact about a conversation, so
+	// there is no such thing as a position in one that was never had.
+	storeSessionRow(t, resource, "s_2", atSecond(1))
 	if err := repo.CreatePosition(ctx, Position{
 		MaterialID: "rm_1", SessionID: "s_2", Revision: 1,
 		Locator: Locator{MaterialID: "rm_1", CharStart: 4, CharEnd: 4},

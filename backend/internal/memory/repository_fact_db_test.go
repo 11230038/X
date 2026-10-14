@@ -85,9 +85,12 @@ func TestTheListingPutsWhatChangedLastFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Facts() error = %v", err)
 	}
-	// mf_oldest and mf_newest were both changed in the same second, so the tie
-	// falls to the id, descending — the same rule the trace listing uses.
-	want := []string{"mf_newest", "mf_oldest", "mf_middle"}
+	// mf_oldest and mf_newest were both changed in the same second — the columns
+	// hold whole seconds — so the tie falls to the id, descending, the same rule
+	// the trace listing uses. Descending on these two puts mf_oldest first: that is
+	// the id order and not a claim about the facts, and it is exactly why the
+	// tie-break has to be written down, because the names say the opposite.
+	want := []string{"mf_oldest", "mf_newest", "mf_middle"}
 	if len(read) != len(want) {
 		t.Fatalf("Facts() = %+v, want three", read)
 	}
