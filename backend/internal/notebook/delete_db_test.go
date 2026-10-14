@@ -56,7 +56,7 @@ func TestDBDeletingAQuestionTakesItsFilingAndItsReviewWithIt(t *testing.T) {
 	}
 	// The category itself stays: it is a label the account made, and the last
 	// question filed under it going away is not the label going away.
-	if rows := countRows(t, resource, "notebook_categories", "", nil); rows == 0 {
+	if rows := countRows(t, resource, "notebook_categories", ""); rows == 0 {
 		t.Errorf("the labels went with the question, and they are the account's rather than its")
 	}
 }

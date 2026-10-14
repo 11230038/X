@@ -31,6 +31,7 @@ func newDBHarness(t *testing.T) *dbHarness {
 	t.Helper()
 	resource := testdb.Open(t, "kb")
 	testdb.Reset(t, resource, dbTables...)
+	seedAccounts(t, resource)
 	registry, err := parse.NewRegistry(parse.Options{
 		DefaultEngine: parse.EngineText, Timeout: time.Second,
 	})

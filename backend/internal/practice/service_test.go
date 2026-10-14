@@ -50,9 +50,22 @@ func otherCaller() authz.Caller {
 var reviewsHappenAt = time.Date(2026, 10, 14, 9, 30, 0, 0, time.UTC)
 
 // reviewedTables are cleared before each case, children first: the two practice
-// tables point at the question bank and go when it goes.
+// tables point at the question bank and go when it goes, and every owned row
+// points at an account, so users goes last.
 var reviewedTables = []string{
 	"practice_review_events", "practice_review_state", "notebook_entries", "turns", "sessions",
+	"users",
+}
+
+// seedAccounts writes the accounts the fixtures attribute questions to.
+//
+// Migration 00014 made owner_id a foreign key into users, so a case that stored
+// a question owned by testOwnerID and left the account unwritten would be
+// refused by the database before its subject was reached.
+func seedAccounts(t *testing.T, resource *data.Resource) {
+	t.Helper()
+	testdb.Account(t, resource, testOwnerID, "bank_owner")
+	testdb.Account(t, resource, testOwnerID+1, "bank_other")
 }
 
 // harness is the service under test with the pieces a case needs to look at what
@@ -68,6 +81,7 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	resource := testdb.Open(t, "practice")
 	testdb.Reset(t, resource, reviewedTables...)
+	seedAccounts(t, resource)
 	provider := &countingProvider{}
 	service, err := NewService(NewGORMRepository(resource.GORM()), judgeFor(t, provider))
 	if err != nil {

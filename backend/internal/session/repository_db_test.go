@@ -28,14 +28,28 @@ import (
 
 // dbTables are the tables these tests write, children first. turn_event_types is
 // not one of them: the migration seeds it, and it is not this package's to
-// empty.
-var dbTables = []string{"turn_events", "turns", "summaries", "messages", "sessions"}
+// empty. users comes last, because a conversation's owner column points at it.
+var dbTables = []string{"turn_events", "turns", "summaries", "messages", "sessions", "users"}
 
 func newDBRepository(t *testing.T) (*GORMRepository, *data.Resource) {
 	t.Helper()
 	resource := testdb.Open(t, "session")
 	testdb.Reset(t, resource, dbTables...)
+	seedAccounts(t, resource)
 	return NewGORMRepository(resource.GORM()), resource
+}
+
+// seedAccounts writes the accounts a stored conversation can belong to.
+//
+// Migration 00014 made owner_id a foreign key into users, so a fixture that
+// stored a conversation owned by testOwnerID and left the account unwritten
+// would be refused by the database rather than reach the query under test. The
+// ownerless state those tests also use is NULL, which is nobody's row and needs
+// no account here.
+func seedAccounts(t *testing.T, resource *data.Resource) {
+	t.Helper()
+	testdb.Account(t, resource, testOwnerID, "session_owner")
+	testdb.Account(t, resource, testOwnerID+1, "session_other")
 }
 
 // atSecond is a whole second on a fixed day. Timestamps are spelled out because

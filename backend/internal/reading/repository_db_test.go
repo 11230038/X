@@ -35,9 +35,10 @@ import (
 // down the file.
 var dbCaller = authz.Caller{UserID: 1, Role: authz.RoleAdmin}
 
-// dbTables are the tables these tests write, children first. sessions comes last
+// dbTables are the tables these tests write, children first. sessions comes late
 // because three of the reading tables are foreign keys into it, and emptying it
-// is what those cascades are watched removing.
+// is what those cascades are watched removing. users comes last: a material's
+// owner column points at it.
 var dbTables = []string{
 	"reading_quiz_pending",
 	"reading_marks",
@@ -48,13 +49,30 @@ var dbTables = []string{
 	"reading_workspaces",
 	"reading_materials",
 	"sessions",
+	"users",
 }
 
 func newDBRepository(t *testing.T) (*GORMRepository, *data.Resource) {
 	t.Helper()
 	resource := testdb.Open(t, "reading")
 	testdb.Reset(t, resource, dbTables...)
+	seedAccounts(t, resource)
 	return NewGORMRepository(resource.GORM()), resource
+}
+
+// seedAccounts writes the three accounts the ownership cases name.
+//
+// Migration 00014 made owner_id a foreign key into users. Most of this file's
+// fixtures write the NULL owner — a row from before V5 — but the filter cases
+// write an owner, and a row owned by an account that was never written is
+// refused by the database before the filter is reached. The administrator the
+// rest of the file reads as is account 1 and owns nothing, so it needs no row
+// here; the three below are owners.
+func seedAccounts(t *testing.T, resource *data.Resource) {
+	t.Helper()
+	testdb.Account(t, resource, 7, "reading_alice")
+	testdb.Account(t, resource, 8, "reading_bob")
+	testdb.Account(t, resource, 9, "reading_carol")
 }
 
 // atSecond is a whole second on a fixed day. Timestamps are spelled out because
@@ -387,10 +405,25 @@ func TestDBOneAccountsCatalogueIsNotAnothers(t *testing.T) {
 	if _, err := repo.Material(ctx, "rm_bob", alice); !errors.Is(err, ErrNotFound) {
 		t.Errorf("account 7 reading account 8's material = %v, want %v", err, ErrNotFound)
 	}
-	// The row is not gone; it is the caller's scope that removed it. The
-	// administrator, whose scope admits every row, reads it back.
-	if _, err := repo.Material(ctx, "rm_alice", dbCaller); err != nil {
-		t.Errorf("the administrator reading an owned material = %v, want it found", err)
+	// The row is not gone; it is the caller's scope that removed it. An
+	// administrator's scope is wider than a user's and is still not "every row":
+	// it is the rows the administrator owns and the rows that belong to nobody
+	// (data.OwnerScope), which is what the interface calls a row with no owner.
+	// So account 7's material is no more readable by the administrator than it
+	// was by account 8, and an ownerless one is readable by the administrator and
+	// by nobody else until somebody claims it.
+	testdb.Exec(t, resource, "INSERT INTO reading_materials "+
+		"(material_id, content_id, filename, source_type, creat_time, update_time, owner_id) "+
+		"VALUES (?, ?, ?, ?, ?, ?, NULL)",
+		"rm_nobody", "doc_c", "算法笔记.md", "library", atSecond(3), atSecond(3))
+	if _, err := repo.Material(ctx, "rm_alice", dbCaller); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the administrator reading account 7's material = %v, want %v", err, ErrNotFound)
+	}
+	if _, err := repo.Material(ctx, "rm_nobody", dbCaller); err != nil {
+		t.Errorf("the administrator reading a material with no owner = %v, want it found", err)
+	}
+	if _, err := repo.Material(ctx, "rm_nobody", alice); !errors.Is(err, ErrNotFound) {
+		t.Errorf("account 7 reading a material with no owner = %v, want %v", err, ErrNotFound)
 	}
 }
 

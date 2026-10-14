@@ -386,7 +386,11 @@ func TestDBTheCommitRefusesAPackageSwappedAfterThePreview(t *testing.T) {
 	// One byte of one object. The manifest member is untouched, so the package
 	// still claims the digest it was written with — which is exactly what a
 	// package that was swapped for a different one would look like.
-	edited[at] = 'w'
+	//
+	// The byte has to be one the text does not already hold: overwriting the 'w'
+	// of "why" with a 'w' leaves the digest it was written with still true, and
+	// the commit that follows would be the one the test expects to be refused.
+	edited[at] = 'x'
 	if err := os.WriteFile(staged, edited, 0o600); err != nil {
 		t.Fatalf("write the staged package back: %v", err)
 	}

@@ -599,11 +599,17 @@ func TestImportRefusesAJobThatHasAlreadyRun(t *testing.T) {
 	if _, err := app.service.Import(context.Background(), CommitRequest{Actor: importer(), JobID: preview.JobID}); err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
+	// What the first commit cost is the harness's own business — four objects at a
+	// batch size of two is two calls — and the question this case asks is whether
+	// the second commit cost anything at all. Counting from the first commit's
+	// total rather than from zero is what keeps the two questions apart.
+	afterFirst := app.writer.writes
 	if _, err := app.service.Import(context.Background(), CommitRequest{Actor: importer(), JobID: preview.JobID}); !errors.Is(err, ErrNotPreview) {
 		t.Fatalf("Import() error = %v, want ErrNotPreview", err)
 	}
-	if app.writer.writes != 1 {
-		t.Errorf("the writer was called %d times over two commits, want once", app.writer.writes)
+	if app.writer.writes != afterFirst {
+		t.Errorf("the refused commit called the writer %d times, want none past the %d the first one cost",
+			app.writer.writes-afterFirst, afterFirst)
 	}
 }
 

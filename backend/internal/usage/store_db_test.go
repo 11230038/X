@@ -159,8 +159,8 @@ func TestDBTheReportAddsUpTheWindow(t *testing.T) {
 		Calls: 3, Ok: 1, Error: 1, Cancelled: 1,
 		// 100+20+10, 40+0+5, 140+20+15.
 		PromptTokens: 130, CompletionTokens: 45, TotalTokens: 175,
-		// 20000+20000+5000, 300+300+100.
-		DurationMs: 45000, TTFTMs: 700,
+		// 20000+20000+5000, 300+120+100.
+		DurationMs: 45000, TTFTMs: 520,
 	}
 	if report.Finished != want {
 		t.Errorf("Finished = %+v, want %+v", report.Finished, want)

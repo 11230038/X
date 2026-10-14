@@ -36,6 +36,7 @@ func TestRetrieveFusesBothPathsAndNumbersTheSources(t *testing.T) {
 
 	retrieval, err := h.service.Retrieve(context.Background(), RetrieveInput{
 		KBIDs: []string{base.ID}, Query: "闭包",
+		Caller: testCaller(),
 	})
 	if err != nil {
 		t.Fatalf("Retrieve() error = %v", err)
@@ -104,6 +105,7 @@ func TestRetrieveWithoutVectorsFallsBackToTheTextPath(t *testing.T) {
 
 	retrieval, err := h.service.Retrieve(context.Background(), RetrieveInput{
 		KBIDs: []string{base.ID}, Query: "闭包",
+		Caller: testCaller(),
 	})
 	if err != nil {
 		t.Fatalf("Retrieve() error = %v", err)
@@ -132,6 +134,7 @@ func TestRetrieveDegradesWhenTheQueryCannotBeEmbedded(t *testing.T) {
 
 	retrieval, err := h.service.Retrieve(context.Background(), RetrieveInput{
 		KBIDs: []string{base.ID}, Query: "闭包",
+		Caller: testCaller(),
 	})
 
 	if err != nil {
@@ -156,6 +159,7 @@ func TestRetrieveReportsAMissingBaseAndSearchesOnlyTheRest(t *testing.T) {
 
 	retrieval, err := h.service.Retrieve(context.Background(), RetrieveInput{
 		KBIDs: []string{live.ID, "kb_deleted"}, Query: "闭包",
+		Caller: testCaller(),
 	})
 	if err != nil {
 		t.Fatalf("Retrieve() error = %v", err)
@@ -178,6 +182,7 @@ func TestRetrieveWithEveryBaseGoneSearchesNothing(t *testing.T) {
 
 	retrieval, err := h.service.Retrieve(context.Background(), RetrieveInput{
 		KBIDs: []string{"kb_deleted"}, Query: "闭包",
+		Caller: testCaller(),
 	})
 	if err != nil {
 		t.Fatalf("Retrieve() error = %v", err)
@@ -235,6 +240,7 @@ func TestRetrieveSkipsAChunkThatIsNoLongerActive(t *testing.T) {
 
 	retrieval, err := h.service.Retrieve(context.Background(), RetrieveInput{
 		KBIDs: []string{base.ID}, Query: "闭包",
+		Caller: testCaller(),
 	})
 	if err != nil {
 		t.Fatalf("Retrieve() error = %v", err)
@@ -254,6 +260,7 @@ func TestRetrieveCutsSnippetsOnACharacterBoundary(t *testing.T) {
 
 	retrieval, err := h.service.Retrieve(context.Background(), RetrieveInput{
 		KBIDs: []string{base.ID}, Query: "闭包", SnippetChars: 6,
+		Caller: testCaller(),
 	})
 	if err != nil {
 		t.Fatalf("Retrieve() error = %v", err)
@@ -278,6 +285,7 @@ func TestRetrievePassesAStorageFailureThrough(t *testing.T) {
 
 	_, err := h.service.Retrieve(context.Background(), RetrieveInput{
 		KBIDs: []string{base.ID}, Query: "闭包",
+		Caller: testCaller(),
 	})
 	if err == nil || !strings.Contains(err.Error(), "the database went away") {
 		t.Fatalf("error = %v, want the storage failure", err)
@@ -341,6 +349,7 @@ func TestASourcePageNeverComesFromTheAnswer(t *testing.T) {
 
 	retrieval, err := h.service.Retrieve(context.Background(), RetrieveInput{
 		KBIDs: []string{base.ID}, Query: "闭包",
+		Caller: testCaller(),
 	})
 	if err != nil {
 		t.Fatalf("Retrieve() error = %v", err)

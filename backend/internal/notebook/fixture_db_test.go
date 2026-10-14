@@ -41,17 +41,31 @@ func otherCaller() authz.Caller {
 	return authz.Caller{UserID: testOwnerID + 1, Role: authz.RoleUser}
 }
 
+// users comes last: every owned row above points at an account.
 var dbTables = []string{
 	"practice_review_events", "practice_review_state",
 	"notebook_entry_categories", "notebook_categories", "notebook_entries",
-	"turns", "sessions",
+	"turns", "sessions", "users",
 }
 
 func newDBRepository(t *testing.T) (*GORMRepository, *data.Resource) {
 	t.Helper()
 	resource := testdb.Open(t, "notebook")
 	testdb.Reset(t, resource, dbTables...)
+	seedAccounts(t, resource)
 	return NewGORMRepository(resource.GORM()), resource
+}
+
+// seedAccounts writes the accounts the fixtures attribute questions to.
+//
+// Migration 00014 made owner_id a foreign key into users, so a fixture that
+// stored a question owned by testOwnerID and left the account unwritten would be
+// refused by the database — and the refusal would name the question rather than
+// the missing account.
+func seedAccounts(t *testing.T, resource *data.Resource) {
+	t.Helper()
+	testdb.Account(t, resource, testOwnerID, "bank_owner")
+	testdb.Account(t, resource, testOwnerID+1, "bank_other")
 }
 
 func newDBService(t *testing.T) (*Service, *data.Resource) {
@@ -102,6 +116,12 @@ func saveAt(t *testing.T, repository *GORMRepository, question Question, at time
 
 // saveAtAs is saveAt for a caller of the test's own choosing: the two accounts a
 // scoping test needs mean the default caller cannot seed both halves of it.
+//
+// The categories are filed here as well, because the repository does not file
+// them: UpsertQuestion writes the question, and filing it under a name is the
+// separate call the service makes next. A fixture that stopped at the upsert
+// would leave a question carrying categories the bank never heard of, and the
+// cases about them would read an empty filling rather than a missing one.
 func saveAtAs(t *testing.T, repository *GORMRepository, question Question, at time.Time, caller authz.Caller) Upserted {
 	t.Helper()
 	entryID, err := newID(entryIDPrefix)
@@ -112,6 +132,9 @@ func saveAtAs(t *testing.T, repository *GORMRepository, question Question, at ti
 	result, err := repository.UpsertQuestion(context.Background(), entryID, question, at, caller)
 	if err != nil {
 		t.Fatalf("upsert %q: %v", question.Text, err)
+	}
+	if err := repository.AddCategories(context.Background(), result.ID, question.Categories, caller); err != nil {
+		t.Fatalf("file %q under %v: %v", question.Text, question.Categories, err)
 	}
 	return result
 }

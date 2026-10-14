@@ -208,6 +208,30 @@ func Reset(t *testing.T, resource *data.Resource, tables ...string) {
 	}
 }
 
+// Account writes one account row and answers with its id.
+//
+// It is here rather than in each package because V5 gave eight tables an owner
+// column pointing at this row (migration 00014), so a fixture that writes an
+// owner and does not write the account is refused by the database before the
+// test under it runs — which reads as a broken query rather than a fixture that
+// forgot a row. The id is the caller's to choose because the fixtures name it in
+// their caller constants, and the two have to agree.
+//
+// The credentials are placeholders: nothing here reads them, and a real
+// deployment's are hashes no test may hold. The profile columns are filled
+// because migration 00001 makes them NOT NULL.
+func Account(t *testing.T, resource *data.Resource, userID int64, username string) int64 {
+	t.Helper()
+	if userID <= 0 {
+		t.Fatalf("Account(%q): the id %d must be positive, because the fixtures that own rows "+
+			"name the account they own them for", username, userID)
+	}
+	Exec(t, resource,
+		"INSERT INTO users (user_id, username, password, learner_profile, extra) "+
+			"VALUES (?, ?, 'hash', '{}', '{}')", userID, username)
+	return userID
+}
+
 // Exec runs one statement and fails the test if it does not go through.
 func Exec(t *testing.T, resource *data.Resource, query string, args ...any) {
 	t.Helper()

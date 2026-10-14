@@ -29,8 +29,9 @@ import (
 )
 
 // dbTables are the tables these tests write, children first: a document holds a
-// foreign key into both a base and a library file, so it goes before either.
-var dbTables = []string{"document_chunks", "documents", "knowledge_bases", "library_files"}
+// foreign key into both a base and a library file, so it goes before either, and
+// every owned row points at an account, so users goes last.
+var dbTables = []string{"document_chunks", "documents", "knowledge_bases", "library_files", "users"}
 
 // newDBRepository returns the storage adapter under test, over this package's
 // own migrated database, with the tables above emptied.
@@ -38,7 +39,21 @@ func newDBRepository(t *testing.T) (*GORMRepository, *data.Resource) {
 	t.Helper()
 	resource := testdb.Open(t, "kb")
 	testdb.Reset(t, resource, dbTables...)
+	seedAccounts(t, resource)
 	return NewGORMRepository(resource.GORM()), resource
+}
+
+// seedAccounts writes the accounts the fixtures attribute rows to.
+//
+// Migration 00014 made owner_id a foreign key into users, so a fixture that
+// stored a base owned by testOwnerID and left the account unwritten would be
+// refused by the database — and the refusal would name the base rather than the
+// missing account.
+func seedAccounts(t *testing.T, resource *data.Resource) {
+	t.Helper()
+	testdb.Account(t, resource, testOwnerID, "kb_owner")
+	testdb.Account(t, resource, testOwnerID+1, "kb_other")
+	testdb.Account(t, resource, testOwnerID+2, "kb_admin")
 }
 
 // atSecond is a whole second on a fixed day.

@@ -201,7 +201,15 @@ func TestACallIsRecordedInTwoHalvesAroundIt(t *testing.T) {
 // half says what it cost. Neither carries the other's fields.
 func TestTheTwoHalvesCarryWhatTheyAreFor(t *testing.T) {
 	store := &scriptStore{}
-	recorder := newRecorder(t, &scriptProvider{response: aResponse()}, store, Options{})
+	// The provider streams the answer's own text as the one fragment it is: the
+	// time to first token is measured to the first fragment a provider hands over,
+	// so a fixture that answered with a whole response and no fragment would be
+	// asserting timings about a fragment that never arrived.
+	provider := &scriptProvider{
+		response: aResponse(),
+		deltas:   []llm.Delta{{Content: "a rate of change"}},
+	}
+	recorder := newRecorder(t, provider, store, Options{})
 
 	ctx := WithCall(context.Background(), aCall())
 	if _, err := recorder.Stream(ctx, aRequest(), collect(new([]string))); err != nil {

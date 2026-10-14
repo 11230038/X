@@ -216,11 +216,23 @@ func TestDBAnExportLeavesEverySourceRowWhereItWas(t *testing.T) {
 
 	// And the conversation is still the conversation. A read that took the rows
 	// away and wrote them back would pass the counts above and fail this.
+	//
+	// The two rows are paired by role rather than by position. Both were appended
+	// in the same second, and a conversation's order within one second is the id
+	// tiebreak the session package pins; asserting the order here would assert
+	// which of two random ids sorts first, and this file is about the export
+	// having left the rows alone.
 	messages, err := service.Messages(context.Background(), sessionID, caller)
 	if err != nil {
 		t.Fatalf("Messages() after the export: %v", err)
 	}
-	if len(messages) != 2 || messages[0].Content != "为什么天是蓝的" || messages[1].Content != "因为瑞利散射" {
+	byRole := map[session.Role]string{}
+	for _, message := range messages {
+		byRole[message.Role] = message.Content
+	}
+	if len(messages) != 2 ||
+		byRole[session.RoleUser] != "为什么天是蓝的" ||
+		byRole[session.RoleAssistant] != "因为瑞利散射" {
 		t.Fatalf("the conversation reads back as %+v", messages)
 	}
 }
