@@ -57,7 +57,11 @@ type key struct {
 // never heard of: the first is allowed unconditionally, the second is an error.
 func New(opts Options) (*Limiter, error) {
 	if opts.Burst < 1 {
-		return nil, fmt.Errorf("limit: the burst must be a positive number of actions")
+		// The key is named for the same reason the three rates below name theirs:
+		// the deployment reading this has four numbers in front of it, and a
+		// sentence about "the burst" alone leaves it to guess which line of the
+		// file the sentence is about.
+		return nil, fmt.Errorf("limit: RATE_LIMIT_BURST must be a positive number of actions")
 	}
 	// A slice in a fixed order rather than a map, so that a deployment with two
 	// bad numbers is told about the first one every time instead of either one

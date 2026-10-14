@@ -68,10 +68,11 @@ func NewWorkspaceHandler(packages Workspace, logger *slog.Logger) *WorkspaceHand
 const (
 	maxWorkspaceRequestBytes int64 = 1 << 20
 	// multipartOverheadBytes is what an upload of one file weighs beyond its
-	// bytes: the boundaries, the part's own headers and the form's trailer. The
-	// package's own bound is the service's, and is checked there; this is only
+	// bytes: the boundaries, the part's own headers and the form's trailer. It is
 	// here so that a package of exactly the bound is not refused for the
-	// punctuation around it.
+	// punctuation around it — and it is the reason the reader's bound is not the
+	// package's bound: a file part a few kilobytes over the limit still fits
+	// inside `max + this`, so the part's own size is checked separately below.
 	multipartOverheadBytes int64 = 8 << 10
 )
 
@@ -340,6 +341,15 @@ func readPackage(c *gin.Context, maxPackageBytes int64) (packageFile, int64, boo
 	}
 	if !held || count != 1 || len(fileHeaders) != 1 || len(c.Request.MultipartForm.Value) != 0 {
 		httpx.WriteError(c, http.StatusBadRequest, "file_required", "exactly one package is required, under the field named file")
+		return nil, 0, false
+	}
+	// The part's own size, which the reader above cannot stand in for: its bound
+	// allows for the form's punctuation, so a package over this deployment's limit
+	// by less than that allowance is read whole. Answering it here is what keeps the
+	// bytes from being read at all, which is the difference between a refusal and a
+	// file that was written and then thrown away.
+	if size := fileHeaders[0].Size; size > maxPackageBytes {
+		httpx.WriteError(c, http.StatusRequestEntityTooLarge, "package_too_large", "the package is over this deployment's limit")
 		return nil, 0, false
 	}
 	file, err := fileHeaders[0].Open()
