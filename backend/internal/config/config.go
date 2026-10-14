@@ -104,6 +104,9 @@ var requiredKeys = []string{
 	"RATE_LIMIT_RETRIEVAL_PER_MINUTE",
 	"RATE_LIMIT_UPLOAD_PER_MINUTE",
 	"RATE_LIMIT_BURST",
+	"WORKSPACE_ARCHIVE_ROOT",
+	"WORKSPACE_MAX_ARCHIVE_BYTES",
+	"WORKSPACE_JOB_TIMEOUT",
 }
 
 // Config contains all settings required to run the service.
@@ -129,6 +132,7 @@ type Config struct {
 	Audit           AuditConfig
 	Usage           UsageConfig
 	Limit           LimitConfig
+	Workspace       WorkspaceConfig
 }
 
 // Load reads configuration exclusively from the dotenv file at path. The path
@@ -219,6 +223,10 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	workspace, err := loadWorkspaceConfig(path, values)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
 		HTTPAddr:        strings.TrimSpace(values["HTTP_ADDR"]),
@@ -242,6 +250,7 @@ func Load(path string) (Config, error) {
 		Audit:           audit,
 		Usage:           usage,
 		Limit:           limit,
+		Workspace:       workspace,
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -313,5 +322,8 @@ func (c Config) Validate() error {
 	if err := c.Usage.Validate(); err != nil {
 		return err
 	}
-	return c.Limit.Validate()
+	if err := c.Limit.Validate(); err != nil {
+		return err
+	}
+	return c.Workspace.Validate()
 }

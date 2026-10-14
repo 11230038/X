@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -79,6 +80,35 @@ func parseNonNegativeDuration(values map[string]string, key string) (time.Durati
 		return 0, fmt.Errorf("%s must be a non-negative duration", key)
 	}
 	return value, nil
+}
+
+// resolveConfigPath turns a path written in the dotenv file into an absolute
+// one, reading a relative value against the file it was written in rather than
+// against the process's working directory.
+//
+// Those two are not the same directory: the server is run from `backend/`, tests
+// are run from wherever the developer is, and a deployment may start the binary
+// from anywhere at all. A storage root that meant three different directories
+// depending on who started the process is a storage root nobody can describe —
+// and for the archive root it would also be a second place packages land.
+//
+// It is one function because there are two such keys now (UPLOAD_ROOT and
+// WORKSPACE_ARCHIVE_ROOT) and the rule is subtle enough that two copies of it
+// would drift.
+func resolveConfigPath(configPath, value string) (string, error) {
+	resolved := strings.TrimSpace(value)
+	if !filepath.IsAbs(resolved) {
+		absoluteConfig, err := filepath.Abs(configPath)
+		if err != nil {
+			return "", fmt.Errorf("resolve configuration file path")
+		}
+		resolved = filepath.Join(filepath.Dir(absoluteConfig), resolved)
+	}
+	resolved, err := filepath.Abs(filepath.Clean(resolved))
+	if err != nil {
+		return "", fmt.Errorf("resolve %q", value)
+	}
+	return resolved, nil
 }
 
 // parseList reads a comma-separated list.

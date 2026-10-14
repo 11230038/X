@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 )
 
@@ -36,17 +35,9 @@ func (c UploadConfig) Validate() error {
 }
 
 func loadUploadConfig(path string, values map[string]string) (UploadConfig, error) {
-	root := strings.TrimSpace(values["UPLOAD_ROOT"])
-	if !filepath.IsAbs(root) {
-		absoluteEnv, err := filepath.Abs(path)
-		if err != nil {
-			return UploadConfig{}, fmt.Errorf("resolve configuration file path")
-		}
-		root = filepath.Join(filepath.Dir(absoluteEnv), root)
-	}
-	root, err := filepath.Abs(filepath.Clean(root))
+	root, err := resolveConfigPath(path, values["UPLOAD_ROOT"])
 	if err != nil {
-		return UploadConfig{}, fmt.Errorf("resolve UPLOAD_ROOT")
+		return UploadConfig{}, err
 	}
 	maxFile, err := parsePositiveInt64(values, "UPLOAD_MAX_FILE_BYTES")
 	if err != nil {

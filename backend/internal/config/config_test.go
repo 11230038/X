@@ -502,6 +502,9 @@ func validValues() map[string]string {
 		"RATE_LIMIT_RETRIEVAL_PER_MINUTE":  "120",
 		"RATE_LIMIT_UPLOAD_PER_MINUTE":     "30",
 		"RATE_LIMIT_BURST":                 "10",
+		"WORKSPACE_ARCHIVE_ROOT":           "../data/archive",
+		"WORKSPACE_MAX_ARCHIVE_BYTES":      "536870912",
+		"WORKSPACE_JOB_TIMEOUT":            "15m",
 	}
 }
 

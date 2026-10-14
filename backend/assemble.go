@@ -24,6 +24,7 @@ import (
 	"backend/internal/tool"
 	"backend/internal/turn"
 	"backend/internal/usage"
+	"backend/internal/workspace"
 	"backend/internal/ws"
 	"gorm.io/gorm"
 )
@@ -80,6 +81,11 @@ type ai struct {
 	// for the reason the audit is: the recorder and the report are one subject
 	// seen twice, and the window the report is retained by is a deployment's.
 	usage *usage.Service
+	// packages is the export and import of a selection of an account's work
+	// (§2.13). It is here for the reason materials is: it is a service over the
+	// domains above, reached by a person through the routes rather than by a
+	// turn.
+	packages *workspace.Service
 }
 
 // assemble builds the turn runtime from configuration.
@@ -372,13 +378,23 @@ func assemble(
 		return nil, err
 	}
 
+	// The package service reads four of the domains above and is read by
+	// nothing. It is the one thing here built from the reading layer rather than
+	// from the services under it, because a material is the reading layer's
+	// subject and asking the knowledge base for one would be a second answer to
+	// what a material is (§2.8).
+	packages, err := newWorkspace(cfg, db, sessions, materials, questions, immersive, auditLog)
+	if err != nil {
+		return nil, err
+	}
+
 	return &ai{
 		turns: runner, socket: socket, capabilities: capabilities,
 		materials: materials, indexing: worker,
 		questions: questions, reviews: reviews, mastery: paths.service,
 		dashboard: overview, immersive: immersive, memory: memories,
 		authorization: authorization, auditLog: auditLog,
-		usage: usageReport,
+		usage: usageReport, packages: packages,
 	}, nil
 }
 
