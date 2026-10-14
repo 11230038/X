@@ -87,10 +87,18 @@ docker start seekdb
 - 沉浸阅读（V4）：`READING_UNIT_MAX_CHARS`、`READING_TUTOR_MAX_TOKENS`、`READING_EXTENSION_TIMEOUT`
 - Memory（V4）：`MEMORY_CONFIDENCE_THRESHOLD`、`MEMORY_MIN_CORROBORATION`、`MEMORY_MIN_SURFACES`、`MEMORY_SENSITIVE_KINDS`、`MEMORY_SYNTHESIS_WINDOW_DAYS`、`MEMORY_MAX_FACTS_PER_SURFACE`
 - 继续学习（V4）：`DASHBOARD_RECENT_LIMIT`
+- 授权（V5）：`AUTHZ_DEFAULT_PRESET`、`AUTHZ_LEARNER_CAPABILITIES`、`AUTHZ_LEARNER_SURFACES`
+- LLM key 池（V5）：`LLM_KEY_FAILURE_THRESHOLD`、`LLM_KEY_COOLDOWN`（`LLM_API_KEYS` 是第二版那个键改的名，已列在上一行的对话模型里）
+- 审计（V5）：`AUDIT_RETENTION_DAYS`、`AUDIT_MAX_PAGE_SIZE`
+- 用量（V5）：`USAGE_RETENTION_DAYS`、`USAGE_DAILY_CALLS_PER_ACCOUNT`、`USAGE_MONTHLY_TOKENS_PER_ACCOUNT`
+- 限速（V5）：`RATE_LIMIT_MODEL_PER_MINUTE`、`RATE_LIMIT_RETRIEVAL_PER_MINUTE`、`RATE_LIMIT_UPLOAD_PER_MINUTE`、`RATE_LIMIT_BURST`
+- 导入导出（V5）：`WORKSPACE_ARCHIVE_ROOT`、`WORKSPACE_MAX_ARCHIVE_BYTES`、`WORKSPACE_JOB_TIMEOUT`
 
 `QUESTION_MAX_COUNT` 必须**不小于** `QUESTION_DEFAULT_COUNT`——默认值大于上限时，一句没说几道的出题请求会每次都拒绝自己。`QUESTION_DEFAULT_COUNT` / `QUESTION_MAX_COUNT` 是"一次出几道题"，`PRACTICE_QUEUE_SIZE` 是"练习队列一次取几道"，`PRACTICE_JUDGE_MAX_TOKENS` 是主观题判分那一次调用的输出预算。`LLM_CAPABILITY_CONFIG_JSON` 里 `deep_question` 的条目是**必需**的：它声明的阶段名（`ideation` / `generation`）与 `chat` 的（`exploring` / `responding`）不同，按阶段名取 `max_tokens` 的查找在继承来的配置里查不到，服务会带着"缺哪几个阶段、该写哪个键"的信息拒绝启动。
 
 V4 的两个新能力（`mastery_path` / `immersive_reading`）**都只走 `responding` 这一个阶段**，它们在 `LLM_CAPABILITY_CONFIG_JSON` 里各有一条自己的条目，而这两条只声明 `responding`——与 `chat` 同名，所以按阶段名取 `max_tokens` 的查找命中；`immersive_reading` 的 `context_budget_tokens` 比其他能力大一档（48000），因为一轮阅读动辄带进一整段材料。四个 `MASTERY_*` 与一个 `DASHBOARD_RECENT_LIMIT` 是产品参数（同时推进几条路径、连对几次升档、一次取多少条），另外九个是阅读与 Memory 的规模与阈值。`MEMORY_SENSITIVE_KINDS` 是**唯一一个逗号分隔的集合**：它点的是部署**不信任**的 kind（默认 `preference,health,relationship,credential`），列进去的观察永不自动成为事实，但用户自己写下的事实不受它影响。`MEMORY_MAX_FACTS_PER_SURFACE` 截的是整份综合而不是四个列表各自（见 `V4设计方案.md` §0.3 第 4 条）。
+
+V5 的十七个新键同样没有代码默认值——**缺键是启动失败，不是程序替部署编一个数**（`LLM_API_KEYS` 是第二版改名的那个旧键，不重复计）。它们分成六组：两个 `LLM_KEY_*` 是 key 池的两个阈值——连续失败几次把一把 key 打进冷却、冷却多久（冷却以 429 为准：500 是上游不舒服、401 是键配错了，都不该用一次 60 秒的冷却把配置错误伪装成暂时故障）；三个 `AUTHZ_*` 说的不是规则而是**基线**（规则在 `internal/authz` 里：`AUTHZ_DEFAULT_PRESET` 只决定新账号落在哪个 preset 上，两个 `AUTHZ_LEARNER_*` 只能在 Learner 的地板之上**往上加**，写错只会让它够得着更多、不会让它够不着）；两个 `AUDIT_*` 与三个 `USAGE_*` 各含一个保留期，而**保留期只被一条按窗口删的语句读到，不起定时作业**（清理由调用方触发，与"租约过期是一次比较"同一条）；四个 `RATE_LIMIT_*` 里三个是每账号每类动作的令牌桶速率、`BURST` 是三个桶共用的容量（速率写 `0` 表示这一类不限，而 `BURST` 不能是 `0`——那是三个桶一个令牌都装不下）；三个 `WORKSPACE_*` 里的 `WORKSPACE_ARCHIVE_ROOT` 与 `UPLOAD_ROOT` 是**两个目录而不是一个的两种叫法**，`MAX_ARCHIVE_BYTES` 同时管读和写，`JOB_TIMEOUT` 是作业的墙钟上限。每一个键的取值理由都写在 [backend/.env.example](backend/.env.example) 那一行上面。
 
 `LLM_API_KEYS`、`EMBEDDING_API_KEY` 与 `AUTH_JWT_SECRET` 同级：不写日志、不进错误信息、不进响应体，占位值不替换会让服务停在启动阶段。
 
@@ -128,7 +136,7 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `GET` | `/health` | 基础健康检查 |
 | `GET` | `/healthz` | liveness 检查 |
 | `GET` | `/readyz` | readiness 检查；seekdb 可连接时返回 200，否则返回 503 |
-| `POST` | `/api/v1/library/files` | 上传单个文件；`multipart/form-data` 字段固定为 `file`，成功返回 201。**唯一不需要认证的业务路由** |
+| `POST` | `/api/v1/library/files` | 上传单个文件；`multipart/form-data` 字段固定为 `file`，成功返回 201。**重复上传同一份字节返回同一个 id**（见下节） |
 | `POST` | `/api/v1/auth/register` | 注册并直接返回登录态，成功返回 201 |
 | `POST` | `/api/v1/auth/login` | 用户名密码登录，成功返回 200 |
 | `GET` | `/api/v1/auth/me` | 返回当前登录用户 |
@@ -139,11 +147,21 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `DELETE` | `/api/v1/sessions/{id}` | 软删除（进回收站），成功返回 204 |
 | `POST` | `/api/v1/sessions/{id}/restore` | 从回收站恢复 |
 | `DELETE` | `/api/v1/sessions/{id}/permanent` | 永久删除，成功返回 204 |
+| `POST` | `/api/v1/sessions/{id}/claim` | **认领**一条没有主人的会话（V5 的存量数据，见下节） |
 | `GET` | `/api/v1/sessions/{id}/messages` | 会话的消息，按时间由早到晚 |
 | `GET` | `/api/v1/capabilities` | 这个 build 注册的能力：名字、说明、阶段名、工具名 |
+| `GET` | `/api/v1/me/permissions` | 我这一份**生效权限**——四层合成的结果，界面不必自己拼 |
+| `GET` | `/api/v1/usage` | 用量聚合；`?since=&until=`（RFC3339）、`?model=&provider=&source=&session_id=` 逐条收窄、`?group_by=`（`model` / `provider` / `source` / `session` / `day`） |
+| `GET` | `/api/v1/system/version` | 版本、构建时间、Go 版本、migration 版本 |
+| `GET` | `/api/v1/system/status` | 运行模式、依赖的逐项 readiness、活跃回合数、索引 worker、**未收尾的调用数** |
 | `GET` | `/api/v1/ws` | WebSocket 入口，token 在升级前校验 |
+| `GET` | `/api/v1/library/files` | **文件库列举与搜索**；`?filename=&category=&since=&until=&deleted=&limit=&offset=`，`deleted=true` 看回收站 |
+| `GET` | `/api/v1/library/files/{id}/content` | **下载**；**唯一不走 JSON 信封的一条**，带 `Content-Disposition` 与 `nosniff` |
 | `GET` | `/api/v1/library/files/{id}` | 文件的 metadata 与解析状态（ATT-01） |
 | `GET` | `/api/v1/library/files/{id}/text` | 模型实际看到的抽取文本；`?offset=&limit=` 按字符取窗口，供引用深链（ATT-02、AC-06） |
+| `DELETE` | `/api/v1/library/files/{id}` | **软删除**（进回收站，字节还在），成功返回 204 |
+| `POST` | `/api/v1/library/files/{id}/restore` | 从回收站恢复 |
+| `DELETE` | `/api/v1/library/files/{id}/purge` | **彻底删除**；仍被引用时 409 `file_in_use` 并说出是谁挡着（AC-15） |
 | `POST` | `/api/v1/knowledge-bases` | 建知识库 |
 | `GET` | `/api/v1/knowledge-bases` | 列表，含每个库的文档数与向量就绪数 |
 | `GET` | `/api/v1/knowledge-bases/{id}` | 详情，含逐份文档的解析与向量状态（KB-03） |
@@ -193,8 +211,22 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `GET` | `/api/v1/memory/synthesis` | **L3**：每次读都算一遍，没有缓存，也没有表（§2.6） |
 | `GET` | `/api/v1/memory/audit` | 审计流水（MEM-02） |
 | `GET` | `/api/v1/memory/export` | 导出全部 Memory，含证据链（PRD §11.3） |
+| `GET` | `/api/v1/audit` | 审计流水，管理员专属；`?actor_id=&subject_id=&action=&target_kind=&target_id=&since=&until=&limit=` 逐条收窄，认不出的取值报 400 而不是忽略 |
+| `GET` | `/api/v1/admin/users` | 账号列表（`role` / `preset` / 是否禁用） |
+| `PATCH` | `/api/v1/admin/users/{userID}` | 改 `preset`；**会把权限清空的改动被拒**（400 `policy_would_be_empty`） |
+| `GET` / `POST` / `DELETE` | `/api/v1/admin/users/{userID}/grants` | 逐项授权的读 / 开 / 关；写成 body `{"kind","id","allowed"}`，关掉一项时 `DELETE` 也带 body |
+| `GET` / `POST` / `DELETE` | `/api/v1/admin/guardians` | Guardian 关系的列表 / 建立 / 撤销；建立带 `{"guardian_id","learner_id","permissions"?}`，撤销带 `{"link_id"}` |
+| `GET` / `POST` / `DELETE` | `/api/v1/admin/guardians/{linkID}/permissions` | 逐项 permission 的读 / 授 / 撤；带 `{"permission"}` |
+| `GET` | `/api/v1/guardian/learners` | Guardian 视角：我能看的那些人 |
+| `GET` | `/api/v1/guardian/learners/{userID}/reports` | 学习报告；**需要 `view_reports`，而且每一次读都写一行审计**（AC-11） |
+| `POST` | `/api/v1/workspace/exports` | 导出一个包，body `{"refs":[{"kind","id"}]}`；`kind` 是 `session` / `material` / `question` / `knowledge_base` |
+| `GET` | `/api/v1/workspace/exports` | 导出作业列表 |
+| `POST` | `/api/v1/workspace/imports/preview` | 预览一个包，`multipart/form-data` 字段固定为 `file`；**零写入** |
+| `POST` | `/api/v1/workspace/imports` | 提交一次导入，body `{"job_id"}`（预览给的那个） |
+| `GET` | `/api/v1/workspace/jobs/{jobID}` | 作业状态：state / 清单 / 计数 / 已经落了哪些 |
+| `POST` | `/api/v1/workspace/jobs/{jobID}/recover` | 恢复：把这次作业已经落的行按记录删掉 |
 
-除 `/`、`/health*` 与上传外，全部路由要求 `Authorization: Bearer <token>`；缺 token 返回 401 `authorization_required`。
+除 `/`、`/health*` 外，全部路由要求 `Authorization: Bearer <token>`；缺 token 返回 401 `authorization_required`。**这里只有一层的分离**：要求 token 与要求权限是两件事，见下节。
 
 ### 响应封装
 
@@ -212,15 +244,15 @@ handler 只提供自己的 payload，`request_id` 由 `httpx` 统一附加，成
 
 服务不做任何重定向：尾斜杠（如 `/health/`）不会被改写成 301，而是走统一 404，因此客户端拿到的每个响应都是 JSON 信封，不会出现 HTML 或空 body。
 
-文件库允许图片（JPG/JPEG/PNG/GIF/WebP）、PDF、PPT/PPTX、DOC/DOCX、Markdown 和 MP3，并按类型写入 `data/upload/` 的固定子目录。服务端流式限制大小、计算 SHA-256、验证扩展名与实际内容、先写 staging 再原子移动；数据库写入失败会补偿删除文件。SVG、宏 Office 文件以及未列出的格式会被拒绝。响应只返回逻辑 metadata，不暴露 `library_path` 或绝对路径，也没有静态目录或下载接口。
+文件库允许图片（JPG/JPEG/PNG/GIF/WebP）、PDF、PPT/PPTX、DOC/DOCX、Markdown 和 MP3，并按类型写入 `data/upload/` 的固定子目录。服务端流式限制大小、计算 SHA-256、验证扩展名与实际内容、先写 staging 再原子移动；数据库写入失败会补偿删除文件。SVG、宏 Office 文件以及未列出的格式会被拒绝。响应只返回逻辑 metadata，不暴露 `library_path` 或绝对路径，也没有静态目录；下载只有 `GET /api/v1/library/files/{id}/content` 这一条，它自己校验归属。
 
-当前上传接口没有认证、用户归属、限流、磁盘总配额或恶意文件扫描，只适用于本机或可信网络环境，不应直接暴露到互联网。文件系统与 seekdb 无法共享事务；普通失败会补偿清理，但进程在最终移动后立即崩溃仍可能留下 orphan 文件，当前版本尚无后台 reconciliation。
+上传接口从 V5 起**要登录、要有归属、要限速**（见下节）。它仍然没有磁盘总配额与恶意文件扫描，只适用于本机或可信网络环境。文件系统与 seekdb 无法共享事务；普通失败会补偿清理，但进程在最终移动后立即崩溃仍可能留下 orphan 文件，当前版本尚无后台 reconciliation。
 
 未知路径返回统一格式的 404 JSON，不支持的方法返回 405。每个请求都会返回 `X-Request-ID`；服务端不会向客户端泄露 panic 详情、堆栈或内部错误。
 
 ### 认证
 
-注册与登录使用 `users` 表已有的 `username` / `password` 列，本次没有新增 migration，schema 版本仍为 5。密码使用 bcrypt（`bcrypt.DefaultCost`）哈希后写入 `users.password`，该列永远只保存哈希，接口响应只返回 `user_id`、`username`、`role`。
+注册与登录使用 `users` 表已有的 `username` / `password` 列。密码使用 bcrypt（`bcrypt.DefaultCost`）哈希后写入 `users.password`，该列永远只保存哈希，接口响应只返回 `user_id`、`username`、`role`。
 
 **用户名严格区分大小写**：不做 trim、不做大小写折叠，`Test` 与 `test` 是两个不同账号。注册要求 `^[A-Za-z0-9_-]{3,32}$`，密码按字节长度要求 8–72（72 是 bcrypt 的输入上限）。登录不校验用户名格式，只做长度上界，这样历史数据仍可登录。
 
@@ -259,7 +291,7 @@ token 是 HS256 JWT，`iss` 为 `AUTH_JWT_ISSUER`，`sub` 是 `user_id`，有效
 | token 签名错误 / 过期 / 格式错误 / 用户已删除 | 401 | `invalid_token` |
 | 其他注册、登录、鉴权失败 | 500 | `registration_failed` / `login_failed` / `authentication_failed` |
 
-已知缺口：没有刷新 token、token 吊销、登出接口、改密与找回密码、邮箱验证、限流与账号锁定、2FA/CAPTCHA；没有基于 `role` 的授权判定（`role` 只作为信息返回）；`/api/v1/library/files` 因为 `library_files` 还没有 owner 列，仍然不需要认证。
+已知缺口：没有刷新 token、token 吊销、登出接口、改密与找回密码、邮箱验证、账号锁定、2FA/CAPTCHA。**"有没有登录"之外的判定从 V5 起有了**：`role` / `preset` / grants / Guardian 四层由 `internal/authz` 合成，中间件与 handler 只问它，见下节。限流按账号、按动作，不按设备（本仓库没有设备这个概念）。
 
 当前后端已接入 seekdb 数据基础设施。版本化 SQL 除 `users` 外，conversation migration v2 还创建 `turn_event_types`、`sessions`、`messages`、`summaries`、`turns`、`turn_events`，对应 GORM 映射位于 `internal/data/models`。`turn_event_types` 是 ID 1–15 的稳定整数查找表；summary 按 revision 保留历史，`summary_up_to_msg_id` 是由字符串 message ID 组成的 JSON 数组，不是外键；`turns.assistant_message_id` 是指向 `messages.message_id` 的字符串外键。删除 session 会级联删除其 messages、summaries、turns，删除 turn 会级联删除其 events。
 
@@ -279,7 +311,15 @@ migration v12（V4）加阅读层的四张新表 `reading_positions` / `reading_
 
 migration v13（V4）建 Memory 的四张表 `memory_traces`（L1 观察）/ `memory_facts`（L2 事实）/ `memory_fact_sources`（证据链）/ `memory_audit`（审计）。**L3 没有表**：它是一次计算（`internal/memory/synthesis.go` 的纯函数），落一张快照表就要在每条事实被改、被撤销时记得刷它，而"忘了刷"的症状正是"用户撤销了一条，综合视图里还在"。`memory_facts` 的敏感列叫 `is_sensitive` 而不是 `sensitive`——`sensitive` 是 seekdb 的关键字，DDL 会被直接拒绝（`V4设计方案.md` §0.3 第 1 条）。`owner_id` 是本仓库第一处**账号级的业务列**：Memory 按 MEM-04 是账号级的，而 V1–V3 的表都只到会话这一层，所以它由认证边界传入，没有 owner 的一轮不写 Memory。审计表**没有 UPDATE 与 DELETE 路径**，仓储层只暴露追加。
 
-当前后端已交付的垂直切片：用户认证、文件上传与读取、会话与消息，经 WebSocket 驱动的对话回合（含工具调用、能力切换与多步进度），知识库的解析与检索，题库与练习，掌握路径，沉浸阅读，以及账号级的 Memory。尚未接上的是 `llm_calls` 的写入链路——用量表建好了，还没有调用方。现阶段没有 CORS、限流、指标、Tracing、Swagger 或消息队列。`users.password` 只允许保存密码哈希，GORM 模型不得直接作为 API 响应。
+migration v14（V5）是这一版最宽的一条：给八张表加 `owner_id`（`sessions` / `notebook_entries` / `notebook_categories` / `mastery_paths` / `library_files` / `knowledge_bases` / `reading_materials` / `llm_calls`），重建 `notebook_categories` 的唯一键为 `(owner_id, name)`，把 `turns.own_id` 改名成 `worker_id`，并给 `users.preset` 加一条 `CHECK`。**判据不是"这张表看起来是不是用户的东西"，是"这一行的生命周期挂不挂在会话上"**：挂在（`messages`、`turns`、`turn_events`、`documents`……）就顺着外键走，不挂才自己带一列。`owner_id` 全是 NULL 起步，**迁移一条都不指派**——NULL 在这里读作"V5 之前的历史，不属于任何账号"（见下节）。`notebook_categories` 的唯一键重建是这一版唯一可能失败的语句，它的 Down 也会失败：库里已有两个同名分类时那条语句**必须报错**，静默删行会删掉别人的分类。`turns.own_id` 存的是 worker 的标识，而 `turn.StartRequest.OwnerID` 指的是账号，两个东西同名不同义，所以改掉而不是留着。
+
+migration v15（V5）把 `llm_calls.usage_json` 里的数值提到列上：`provider`、`model`、`prompt_tokens`、`completion_tokens`、`total_tokens`、`duration_ms`、`ttft_ms`、`finished_at`、`outcome`。理由与 v11 一模一样（JSON 里的字段走不了索引），纪律也一样（写的时候同源，读的时候只读列）。**不加 `base_url`**：用量记录不能回答"这次请求发去了哪里"，那是 endpoint 信息。`outcome` 的闭集（`''` / `ok` / `error` / `cancelled`）写在 CHECK 里，`finished_at IS NULL` 就是"这次调用没有回来"——一个可查的状态，不是一个缺失的行。
+
+migration v16（V5）建治理的五张表 `user_grants` / `guardian_links` / `guardian_permissions` / `audit_events` / `workspace_jobs`，它们是一条决定从五个面看过去。**这几张表都没有触发器，也没有为它们写 UPDATE 路径**：撤销一条 grant 就是删行，不持有的 permission 就是不存在的那一行，审计只追加。`guardian_permissions` 一行一条 permission，四个名字写在 CHECK 里（加第五个是一次 `ALTER`，那是刻意的代价）。`audit_events.actor_id` **故意不加外键**：CASCADE 会让删账号删掉他的审计，RESTRICT 会让留下过审计的账号永远删不掉——记录要活得比它记录的事更久。`user_grants.item_id` 是空串而不是 NULL，因为 NULL 在唯一索引里可以重复。这三张表第一次用了 `ON DELETE SET NULL`（`granted_by` / `created_by` / `workspace_jobs.owner_id`）。
+
+migration v17（V5）把 `llm_calls.session_id` / `turn_id` 放开成可空。00005 假设每一次调用都属于某一轮，而 v9 的装饰器记的是进程发出的**每一次**调用——判卷与阅读扩展都是从 HTTP 路由发起的，身后没有会话。**NULL 而不是空串或 `-`**：编出来的值与 NULL 读起来一样、数起来不一样。仍需非空的是"谁付钱、从哪来"（`owner_id` 与 `source`），一次没有账号的调用是"调用点忘了说"，recorder 拒绝制造它。
+
+当前后端已交付的垂直切片：用户认证、文件上传与读取、会话与消息，经 WebSocket 驱动的对话回合（含工具调用、能力切换与多步进度），知识库的解析与检索，题库与练习，掌握路径，沉浸阅读，账号级的 Memory，以及 V5 的归属、四层授权、Guardian、审计、用量与配额、限速、key 池、文件库回收站、导入导出与两条只读的运行状态。现阶段没有 CORS、指标、Tracing、Swagger 或消息队列。`users.password` 只允许保存密码哈希，GORM 模型不得直接作为 API 响应。
 
 ### 对话回合与 WebSocket
 
@@ -345,7 +385,7 @@ migration v13（V4）建 Memory 的四张表 `memory_traces`（L1 观察）/ `me
 
 **启动期的三处一致性校验**（不一致就拒绝启动，不回退）：`EMBEDDING_DIMENSION` 必须等于 schema 里 `VECTOR(N)` 的 N；`PARSER_DEFAULT_ENGINE` 必须在解析器注册表里；库里已有知识库的 `embedding_model` 必须等于 `EMBEDDING_MODEL`（换模型要重建，重建之后才启动得起来）。
 
-**已知缺口**：`docling` 需要自己跑起来（默认 `http://127.0.0.1:5001`），本仓库不含它；嵌入用独立供应商，DeepSeek 没有 embedding 接口，所以 `EMBEDDING_*` 与 `LLM_*` 是两套配置；检索参数是全局的，不按库配置；模型目前只读文本，`VISION_*` 配了也没有消费方；上传与知识库都还没有属主列，权限只到"有没有登录"这一层。
+**已知缺口**：`docling` 需要自己跑起来（默认 `http://127.0.0.1:5001`），本仓库不含它；嵌入用独立供应商，DeepSeek 没有 embedding 接口，所以 `EMBEDDING_*` 与 `LLM_*` 是两套配置；检索参数是全局的，不按库配置；模型目前只读文本，`VISION_*` 配了也没有消费方；~~上传与知识库都还没有属主列，权限只到"有没有登录"这一层~~（V5 的 00014 给它们补了属主列，四层授权见「治理与运维（V5）」）。
 
 ### 出题、题库与练习（V3）
 
@@ -404,7 +444,82 @@ V4 加两个能力（`mastery_path`、`immersive_reading`）、一个只读的"�
 
 **QN-05 批量导入**：`POST /questions/import` 的 body 是一个 JSON 行文件（每行一道题，与 `save_question` 参数同形），`?dry_run=true` 只报告不写。两次请求共用同一份解析与判定，所以 preview 不会说谎；冲突分"同一道题"（同 `question_id`）与"同一题干不同 id"（重复）两种，都进报告。两次都是 **200**——一份"写了 3 条、拒了 2 条"的报告不是失败的请求。
 
-**已知缺口（V4）**：`MASTERY_MAX_ACTIVE_PATHS` 与它背后的 `ErrTooManyPaths` 当前到达不了（同一条判断读两次同一张表，见上）；掌握路径与阅读材料都还没有 owner 列，权限仍只到"有没有登录"；阅读的推荐要读目录里每份材料的开头一窗（材料没有语言列，语言是从正文推断的）；`mastery_interactions` 的"同一路径最多一个活跃交互"是服务层的事务内读，不是数据库唯一键；租约接管会让一个过期的长 turn 退化成只追加证据；`LLM_CAPABILITY_CONFIG_JSON` 里两个新能力各有一条条目，`immersive_reading` 的上下文预算单独大一档。
+**已知缺口（V4）**：`MASTERY_MAX_ACTIVE_PATHS` 与它背后的 `ErrTooManyPaths` 当前到达不了（同一条判断读两次同一张表，见上）；~~掌握路径与阅读材料都还没有 owner 列，权限仍只到"有没有登录"~~（V5 补上了）；阅读的推荐要读目录里每份材料的开头一窗（材料没有语言列，语言是从正文推断的）；`mastery_interactions` 的"同一路径最多一个活跃交互"是服务层的事务内读，不是数据库唯一键；租约接管会让一个过期的长 turn 退化成只追加证据；`LLM_CAPABILITY_CONFIG_JSON` 里两个新能力各有一条条目，`immersive_reading` 的上下文预算单独大一档。
+
+### 治理与运维（V5）
+
+V5 加的不是"能做什么"，是**"不能做什么"**和**"做过的每一件被记下来"**：归属、四层授权、Guardian、审计、用量与配额、限速、key 池、出站边界、文件库回收站、导入导出，以及两条只读的运行状态。它没有新 capability、没有新事件类型（15 种已被 V1–V4 用满），零新依赖。
+
+**四条 migration**（00014 归属列 / 00015 用量列 / 00016 五张治理表 / 00017 会话之外的调用）见上节。
+
+#### 权限是四层叠在一个人身上，不是一条"权限等级"
+
+四套东西看起来都像"权限"，它们回答的是**四个不同的问题**：
+
+| 层 | 存在哪 | 回答的问题 | 谁改 |
+| --- | --- | --- | --- |
+| `role` | `users.role` | 你是不是**这个实例的管理员** | 注册时定，今天只有 `user` 一个值 |
+| `preset` | `users.preset` | 你这一类账号**开局**是什么样（`standard` / `learner` / `custom`） | 管理员 |
+| grants | `user_grants` | 管理员**单独给这个人**开了/关了什么 | 管理员 |
+| Guardian | `guardian_links` + `guardian_permissions` | 这个人能不能**看另一个人的**东西 | 管理员建，Guardian 自己也能撤 |
+
+**这四层不能合成一条等级线**，合成之后就回答不了其中任何一个问题：一个 Learner 可以被 grants 单独开一个工具（第二层说不要、第三层说要），而"他能不能看孩子的学习报告"与他是 learner 还是 standard **完全无关**——第四层是横向的，不是纵向的。把这两件事合成"升职"，要么让"给 Learner 开一个工具"变成不可能，要么让"给一个 standard 用户 Guardian 权限"变成把他升级成管理员。
+
+合成只有一处实现：`authz.Decide(actor, action, target)`。中间件与 handler **只问它**，`internal/middleware` 与各 handler 里不出现 `user.Role == "admin"` 这样的比较（有一条用例遍历 `.go` 文件钉住这件事）。界面只需要读 `GET /api/v1/me/permissions` 一处，不必自己拼。
+
+**生效权限 = 基线(preset) ⊕ grants 的逐项加减**，而基线里有一层**地板**：
+
+- 地板是**代码里的具名常量**（`internal/authz/policy.go`：只有 `chat`），不是一行数据——所以它不能被一条手滑的 SQL 删掉，也不能被一次导入覆盖。部署配置只能往上加，不能往下减。
+- **"清空"这个动作没有对象**：删掉全部 grants 只能回到基线，而基线不在库里。所以 AUTH-03 的"管理员不得清空"落到这里是一个**类型问题**而不是一条产品规则；真去做一件会把权限清空的事，回答是 400 `policy_would_be_empty`。
+- `preset = ''` 是 V5 之前注册的账号，**按 `standard` 读**——它们今天能做的事就是 standard 的所有事，读成"受限"是一次凭空收紧。
+- 一个 grant 既能**开**也能**关**（`allowed` 布尔），先有"关"才有"基线之上加减"这句话。
+
+**Guardian** 是唯一一条"读别人的"的合法路径。一行 = 一条关系，**撤销就是删行**（历史在审计里，表里没有第二个状态），所以"表里有一行"直接等于"关系还在"。逐项 permission 一行一条，四个名字是闭集：`view_reports`、`assign_materials`、`manage_restrictions`、`reset_credentials`。两条跨表判断（被监护的必须**真的是** learner、监护人不能是 learner）落在服务层的事务里，因为 seekdb 的 CHECK 不能跨表。`GET /api/v1/guardian/learners/{userID}/reports` **每一次读都写一行审计**（AC-11）。
+
+**401 与 403 是两件事**，不许折叠：没登录是 401 `authorization_required`（→ 去登录），登录了但不许是 403 `permission_denied`（→ 去找管理员）。界面要能分别画这两件事。**拒绝也留痕**：中间件是拒绝产生的地方，所以"拒绝写审计"接在中间件上（`surface.denied`），接在每个 handler 上就变成"每个 handler 漏记一次"，而漏记不会失败——它会让审计说没事发生。
+
+#### 无主数据是一个要画的状态
+
+`owner_id IS NULL` 不是"忘了填"，是**定义好的**：**V5 之前的历史，不属于任何账号**。00014 一行都不指派——猜错一次的代价是 A 的会话出现在 B 的列表里，而这没有任何东西会提醒任何人。
+
+- **只有管理员看得见**无主的行。这不是特权，是把一批无主的行交给唯一有权力处置它们的人。
+- **出口是认领**：`POST /api/v1/sessions/{id}/claim` 把一条会话收归自己，连带它的 messages / turns / events；认领是一次显式动作，所以它总会留下一条审计（`session.claimed`）。
+- **`go run ./cmd/seed` 写出来的行也没有主人**：seed 不指派 `owner_id`，所以全新部署里 `test_user` **看不到**那条种子会话，只有管理员看得到（一次 `claim` 就归自己）。这是"新库里一条无主行都没有"这条设计意图与当前实现的一处出入，收尾时按代码记。
+- 界面上**只画成空列表会让用户以为数据丢了**（§7.3 第 10 条）。
+
+#### 审计是一根指针，不是一个载荷
+
+`audit_events` 回答"谁、何时、做了什么、对象是谁"：`actor_id`（**故意不加外键**——CASCADE 会让删账号删掉他的审计，RESTRICT 会让留下过审计的账号永远删不掉）、`actor_name`（写入时的用户名**快照**：改名之后回看三个月的记录应该看到当时的名字）、`action`（闭集）、`target_kind` / `target_id`（**一个指向**）、`subject_id`（这一行说的那个账号）、`result`（`ok` / `denied` / `failed`）、`detail_json`（**只放 id、计数与原因码**，不放自由文本、不放用户输入）、`request_id`。
+
+**没有列能装下 prompt、token 或密码**——所以"审计里没有这些"不靠过滤，靠没有地方放。表**只有追加**，仓储层没有 UPDATE、没有 delete-by-id，`Prune` 按年龄且只按年龄。保留期 `AUDIT_RETENTION_DAYS` 只被这一条语句读到，**不起定时作业**（清理由调用方触发）。页大小 `AUDIT_MAX_PAGE_SIZE` 是**上限不是默认值**：要得比它多的请求被拒绝，而不是被悄悄截短。
+
+#### 用量是"装饰"出来的，配额从它算出来，限速在内存里
+
+**用量不是各处上报，是装饰**：装配处把真的 `llm.Provider` 包一层，写行发生在装饰器里。忘了一个调用方就永远不会出现在用量里——不报错、不告警，只是数字偏小，而数字偏小看起来像"这个月用得少"。**一次调用写两段**：开始前写一行（身份与归属），结束后补数值列。所以**一次没有回来的调用是一行 `finished_at IS NULL` 的行，不是一个缺失的行**——那正是最需要看见的一种失败。`GET /api/v1/usage` 分 `model` / `provider` / `source` / `session` / `day` 五种 breakdown，**只读列**（同一个值存了两处，纪律是写的时候同源、读的时候只读列），响应里**没有 base URL**（AC-13）。`internal/embed` 的嵌入调用不记用量：它是另一个客户端（走 `EMBEDDING_*`），没有为它准备配置节。
+
+**配额 = 一次聚合查询**（`llm_calls` 上 `owner_id` + 时间窗），不另建表——累计量已经在库里，抄一份就会漂，而且被拒的那个数与用量屏上读到的那个数必须是同一次读。`0` 表示不限，**也是默认**（阈值未定，"默认把所有人限死"比"默认不限"坏得多）。超限是**结构化的拒绝**：429 `quota_exceeded` + `details{item, limit, used, resets_at}`，**不给 `Retry-After`**——那是要向用户解释的事，不是要睡过去的事。窗口是 **UTC 自然日 / 自然月**，不是"最近 24 小时"：滚动窗口没有清零的那一刻。日额度数"发起"、月额度数"花掉"：没回来的调用照样是一次被发出去的调用，否则一个挂起 20 次调用的账号还能再被放行 20 次。**被拒的调用不花一个 id、不写一行、不发一次请求**。
+
+**限速与配额是两个问题**：限速问"你多快"（秒/分钟，**进程内存**，重启从头开始是正确行为），配额问"你多少"（天/月，**在库里**，必须活过重启）。限速是按账号 + 动作的令牌桶，**只挂三类路由**：模型调用（`/ws`、`POST /practice/reviews`、`POST /reading/materials/{id}/extensions/{name}`）、外部检索（`POST /knowledge-bases/{id}/search`）、文件上传（`POST /library/files`）。429 `rate_limited` + `details{action, retry_after}` + 标准 `Retry-After` 头；这个数字**向上取整且最小是 1 秒**（一个被告知"0 秒后重试"的客户端会立刻重试然后再次被拒）。挂哪几条路由**由一条遍历路由表的用例钉住**，以后有人加一条昂贵路由而没读设计，报的是"未被限流的路由"而不是让它悄悄溜过。**多实例会静默变成每实例限速**（实际额度是 N 倍），本仓库单实例部署。
+
+**key 池**：`LLM_API_KEYS` 是逗号分隔的列表（一把也行，行为与从前一样），轮换 + 每把的连续失败计数 + 冷却。**只有 429 算在一把 key 头上**（500 是上游不舒服、401 是键配错了，都不该用一次 60 秒的冷却把配置错误伪装成暂时故障）；一次成功清零计数；全部在冷却时仍然发**冷得最久**的那把（"没有 key"会把上游的背压变成我们这边的一次故障）。冷却是每把 key 一个"到什么时候为止"，判断它就是一次时间比较——**没有后台协程去解除冷却**。错误信息里只有序号，没有 key 的值。`LLM_API_KEY` → `LLM_API_KEYS` 是唯一一次改已有的键名，**不做兼容**：升级前先改 `.env`。
+
+**出站边界**（`internal/outbound`）判的是"**谁给的地址**"，不是"地址私不私"：同一个 `192.168.1.10`，在 `ExternalMediaPolicy`（外部内容里的媒体 URL）下必须拒，在 `LANServicePolicy`（局域网里由使用者配置的服务）下必须放——两套策略是两个类型，不是同一个函数的两个参数。用 `net/netip` 而不是 `net`，因为 `net.IPNet.Contains` 会把 `::ffff:127.0.0.1` 当成普通 IPv6 地址放过去，那正好是 SSRF 最常用的一种绕法。**它当前零调用方**（Partners 与 MCP 都在 backlog）：交付的是两层策略本身，证据只有用例，没有运行。
+
+#### 文件库的删除有两级，导入导出是两次请求
+
+- **软删（进回收站、字节还在）与 purge（字节没了、不可恢复）**是两回事。`is_deleted` / `deleted_at` 从 00005 起就是死列而 CHECK 一直在守它们，V5 把它们接上（一次写两列，CHECK 才满足）。**purge 之前会问一句"还有人在用吗"**：`documents` 或 `reading_materials` 里还有指向它（或指向它的文档）的行，就 409 `file_in_use` 并说出是谁挡着。
+- **重复上传返回同一个 id**：上传前按 `sha256` 在自己名下的行里查一次，**活行优先、其次最早的**；命中一条软删的行就把它**恢复**而不是新建一行（`library_files_path_unique` 盖的是全部行，seekdb 没有 partial index，所以软删的行仍然占着它的路径）。于是"恢复"与"去重"是同一个动作。**去重的范围是每个账号自己**：跨账号命中会把 B 拿不到的一个 id 递给 B。
+- **回收站是 `?deleted=true`，不是单独一条路由**——少一个要记得加归属过滤的地方。下载是唯一不走信封的一条（`Content-Disposition` 走 `mime.FormatMediaType`，加 `X-Content-Type-Options: nosniff`），`library_path` 与绝对路径不出现在任何响应里。
+- **导入导出继承的是 §12.4 的三条纪律，不是它的三条接口**：本仓库一个 seekdb、一个上传根，"把数据从一个 Workspace 搬到另一个"没有对象。做的是把**选定的会话、材料、题库与知识库**打成一个 ZIP 再读回来。包里**没有账号设置、Memory、凭据、`llm_calls`**——不是过滤器，是封闭集：`Kind` 里没有这些名字，写入器会拒绝**整个包**而不是跳过一条。**素材不带正文、知识库不带分块与向量**（正文在文件库里，向量是文件加某个 embedding 模型的函数），所以跨实例导入一个包时它们是目录，正文要另外想办法。
+- **预览零写入**，冲突不是错误而是预览里的一个条目；`sha256` 对不上就整体不落；**有活跃 turn 就拒绝**（粒度是整个实例，不是这次迁移涉及的那几个会话）。**恢复靠"记下来写过什么"**（`written_json` 在**每一批之后**写），不靠回滚——一个 ZIP 不可能是一个事务。**没有"续着上次接着导"**。
+- 六条路由**挂 token 不挂 surface**：一个包是账号自己的东西离开又回来，加一层 surface 就是让某个 preset 能拒绝一个账号取自己那份副本。
+- **导出给出的是一个在服务器上的包名（`archive_path`），不是一个可以下载的字节流**：本版没有下载包的路由，界面上的"导出"落点因此要说清楚。
+
+#### 两条只读的运行状态
+
+`GET /api/v1/system/version` 报版本、构建时间、Go 版本、migration 版本（`go run` 下如实说 `(devel)`，不报空串）。`GET /api/v1/system/status` 报运行模式（`APP_ENV`）、依赖的逐项 readiness、活跃回合数、索引 worker 是否在跑、以及 `llm_calls` 里**未收尾**的行数。**物理路径不报**（`UPLOAD_ROOT` / `WORKSPACE_ARCHIVE_ROOT` 只存在 runtime），**内存不报**，**可写设置与更新检查不做**。
+
+**已知缺口（V5）**：`internal/outbound` 零调用方；`cmd/seed` 不指派 `owner_id`（种子数据是无主的）；导出的包没有下载路由；限流按账号不按设备，且多实例下会静默放大；`MASTERY_MAX_ACTIVE_PATHS` 那一条仍在等产品裁决（现在它有可能被回答成一条 grants，见 `V5实施进度.md` 横切表第 2 条）；审计与用量的保留期只被一条按窗口删的语句读到，没有到点就删的作业；导入的恢复是"回到这次导入之前"，不是"接着导"。
 
 ## 前端
 
@@ -428,7 +543,7 @@ npm run build
 - 前端代码修改后运行 `npm run type-check` 和 `npm run build`。
 - 每个代码文件不超过 500 行，接近限制时按职责拆分。
 - 不提交 `.env`、密钥、token、`node_modules/`、构建产物或本地缓存。
-- `.product/` 与项目代码无关，除非用户明确要求，否则不查阅、不修改。
+- `.product/` 与项目代码无关，不查阅、不修改；唯一例外是每个版本收尾时核对 `.product/设计说明书.md`（文档与代码矛盾时改文档、不改代码，并先报告差异）。
 - 项目级 Agent skills 位于 `.claude/skills/`，仅允许用户显式手动调用；详见 `.claude/skills/UPSTREAM.md`。
 
 ## 验证命令
