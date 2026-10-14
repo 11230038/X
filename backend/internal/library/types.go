@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"time"
+
+	"backend/internal/authz"
 )
 
 var (
@@ -25,6 +27,11 @@ type UploadInput struct {
 	Filename     string
 	DeclaredMIME string
 	Content      io.Reader
+	// OwnerID is the account the file will belong to. It is required rather than
+	// optional: a file stored with no owner is a file nobody can find again,
+	// because every read of one is narrowed to an account. The upload route used
+	// to be public and this field is why it no longer is.
+	OwnerID int64
 }
 
 // UploadResult is safe to return to an HTTP caller.
@@ -46,17 +53,25 @@ type FileRecord struct {
 	MIMEType    string
 	SizeBytes   int64
 	LibraryPath string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// OwnerID is the account that uploaded the file. A file belongs to no
+	// conversation, so there is no chain to derive this from — it is on the row.
+	OwnerID   int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // MetadataRepository persists file metadata after content reaches final storage.
 type MetadataRepository interface {
 	Create(context.Context, FileRecord) error
-	// Find reads one record back by file id. The two together are the whole
-	// interface: a file is written once and read afterwards, and nothing in this
-	// module ever changes one.
-	Find(ctx context.Context, id string) (FileRecord, error)
+	// Find reads one record back by file id, narrowed to the caller's files. The
+	// two together are the whole interface: a file is written once and read
+	// afterwards, and nothing in this module ever changes one.
+	//
+	// Another account's file is not refused here, it is not found — the same
+	// answer as an id that was never issued, which is what keeps a client from
+	// telling "this file exists and is not yours" from "there is no such file"
+	// (AUTH-06).
+	Find(ctx context.Context, id string, caller authz.Caller) (FileRecord, error)
 }
 
 // StoredFile is one stored file: its metadata, and its bytes.

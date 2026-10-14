@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/data"
 	"backend/internal/data/testdb"
 	"backend/internal/mastery"
@@ -33,7 +34,9 @@ import (
 // dbTables are the tables these tests write, children first. They are every
 // table a path touches plus the bank's own, because the two halves of the claim
 // live in different tables and either one left behind would be read as the
-// other's evidence.
+// other's evidence. users is last: both mastery_paths and notebook_entries name
+// an owner (migration 00014), and this fixture writes a path and a question for
+// the one account it makes.
 var dbTables = []string{
 	"mastery_learning_evidences",
 	"mastery_events",
@@ -47,6 +50,7 @@ var dbTables = []string{
 	"notebook_entries",
 	"turns",
 	"sessions",
+	"users",
 }
 
 func atSecond(second int) time.Time {
@@ -57,6 +61,7 @@ func atSecond(second int) time.Time {
 // file cares about: it keeps what it was handed, and it stores it for real.
 type recordingBank struct {
 	bank   *notebook.Service
+	caller authz.Caller
 	handed []notebook.Question
 }
 
@@ -66,7 +71,7 @@ func (b *recordingBank) Carried(context.Context) []tool.Carried { return nil }
 
 func (b *recordingBank) Save(ctx context.Context, question notebook.Question) (tool.Saved, error) {
 	b.handed = append(b.handed, question)
-	result, err := b.bank.Save(ctx, question)
+	result, err := b.bank.Save(ctx, question, b.caller)
 	if err != nil {
 		return tool.Saved{}, err
 	}
@@ -74,19 +79,22 @@ func (b *recordingBank) Save(ctx context.Context, question notebook.Question) (t
 }
 
 // fixture is one conversation, one turn of it, one path, and the two services
-// over one database.
+// over one database. The caller is the account the whole fixture is run for: it
+// owns the path and the question, and it is what every read through the bridge
+// is scoped to.
 type fixture struct {
 	service  *mastery.Service
 	notes    *notebook.Service
 	bank     *recordingBank
 	resource *data.Resource
+	caller   authz.Caller
 	pathID   string
 	actor    mastery.Actor
 	version  int64
 }
 
 func (f *fixture) turnPath(held bool) *TurnPath {
-	return NewTurnPath(f.service, f.bank, f.notes, nil, f.pathID, f.actor, f.version, held, mastery.Lease{})
+	return NewTurnPath(f.service, f.bank, f.notes, nil, f.pathID, f.actor, f.caller, f.version, held, mastery.Lease{})
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -94,7 +102,19 @@ func newFixture(t *testing.T) *fixture {
 	resource := testdb.Open(t, "masterypath")
 	testdb.Reset(t, resource, dbTables...)
 	// The rows the foreign keys need: a path belongs to the conversation it was
-	// started in, and every event it writes names the turn that wrote it.
+	// started in, every event it writes names the turn that wrote it, and the
+	// account that owns the path and the question is a real row because both
+	// owner_id columns are foreign keys into users (migration 00014).
+	testdb.Exec(t, resource, "INSERT INTO users (username, password, learner_profile, extra) "+
+		"VALUES ('owner', 'hash', '{}', '{}')")
+	var account struct {
+		UserID int64 `gorm:"column:user_id"`
+	}
+	if err := resource.GORM().Raw("SELECT user_id FROM users WHERE username = 'owner'").
+		Scan(&account).Error; err != nil {
+		t.Fatalf("read the account: %v", err)
+	}
+	caller := authz.Caller{UserID: account.UserID, Role: authz.RoleUser}
 	testdb.Exec(t, resource, "INSERT INTO sessions (session_id) VALUES (?)", "ses_1")
 	testdb.Exec(t, resource, "INSERT INTO turns "+
 		"(turn_id, session_id, status, state_version, creat_time) VALUES (?, ?, 'running', 1, ?)",
@@ -115,15 +135,16 @@ func newFixture(t *testing.T) *fixture {
 	actor := mastery.Actor{SessionID: "ses_1", TurnID: "trn_1"}
 	path, err := service.Create(context.Background(), mastery.Create{
 		PathID: "mp_1", Goal: "学会闭包", Actor: actor, Tree: sampleTree(),
-	})
+	}, caller)
 	if err != nil {
 		t.Fatalf("create a path: %v", err)
 	}
 	return &fixture{
 		service:  service,
 		notes:    notes,
-		bank:     &recordingBank{bank: notes},
+		bank:     &recordingBank{bank: notes, caller: caller},
 		resource: resource,
+		caller:   caller,
 		pathID:   path.ID,
 		actor:    actor,
 		version:  path.Version,
@@ -173,7 +194,7 @@ func TestAQuestionAskedOnAPathIsFiledOnIt(t *testing.T) {
 		t.Errorf("the question went to the bank filed as %q/%q, want mp_1/kp_001",
 			handed.MasteryPathID, handed.KnowledgePointID)
 	}
-	entry, err := fixture.notes.Get(ctx, saved.QuestionID)
+	entry, err := fixture.notes.Get(ctx, saved.QuestionID, fixture.caller)
 	if err != nil {
 		t.Fatalf("read the question back: %v", err)
 	}

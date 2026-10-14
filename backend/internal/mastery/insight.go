@@ -4,6 +4,8 @@ import (
 	"context"
 	"sort"
 	"time"
+
+	"backend/internal/authz"
 )
 
 // The insight: a path as "where am I and what next" (MP-05).
@@ -81,12 +83,12 @@ type Insight struct {
 // carries the coordinate it was asked against (§2.2); until then there is no way
 // to aggregate it to a knowledge point, and reporting a question's due time as a
 // knowledge point's would be a different number under the same name.
-func (s *Service) Insight(ctx context.Context, pathID string) (Insight, error) {
-	view, err := s.Load(ctx, pathID)
+func (s *Service) Insight(ctx context.Context, pathID string, caller authz.Caller) (Insight, error) {
+	view, err := s.Load(ctx, pathID, caller)
 	if err != nil {
 		return Insight{}, err
 	}
-	evidences, err := s.repository.Evidences(ctx, pathID)
+	evidences, err := s.repository.Evidences(ctx, pathID, caller)
 	if err != nil {
 		return Insight{}, err
 	}

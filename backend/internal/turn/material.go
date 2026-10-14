@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"backend/internal/authz"
 	"backend/internal/event"
 	"backend/internal/kb"
 	"backend/internal/parse"
@@ -79,17 +80,23 @@ type Attachment struct {
 // capability, which is what makes the turn, and not the capability, the place a
 // scope lives. A capability that could reach the library would be a capability
 // that could search outside what the user chose.
+//
+// Every method carries the turn's caller for the same reason Sessions does: the
+// scope a turn was given is a list of ids, and a list of ids is not what makes
+// reading them legitimate — the account does. The ids come from the client, so
+// an unattended scope would let a turn name a file or a collection that is not
+// its own and read it as though it were.
 type Materials interface {
 	// AddDocument parses a stored file into a document and chunks it. An empty
 	// kbID is what makes it an attachment: the same parse, belonging to no
 	// collection and retrievable by nobody.
-	AddDocument(ctx context.Context, fileID, kbID string) (kb.Document, error)
+	AddDocument(ctx context.Context, fileID, kbID string, caller authz.Caller) (kb.Document, error)
 	// ReadWindow reads a window of a document's text, clamped to what it has.
-	ReadWindow(ctx context.Context, documentID string, offset, limit int64) (kb.Window, error)
+	ReadWindow(ctx context.Context, documentID string, offset, limit int64, caller authz.Caller) (kb.Window, error)
 	// Locate finds the passages of one document that answer a query. It stays
 	// inside that document, which is why an attachment can be searched for
 	// nothing but itself.
-	Locate(ctx context.Context, documentID, query string, limit int) ([]event.Source, error)
+	Locate(ctx context.Context, documentID, query string, limit int, caller authz.Caller) ([]event.Source, error)
 	// Retrieve runs the hybrid search over a turn's collections.
 	Retrieve(ctx context.Context, input kb.RetrieveInput) (kb.Retrieval, error)
 }
@@ -149,7 +156,7 @@ func (r *turnRun) resolveMaterial(ctx context.Context) {
 	r.resolveSelection(ctx, &material)
 	for index, fileID := range r.declared.Attachments {
 		attachment := Attachment{Label: strconv.Itoa(index + 1), FileID: fileID}
-		document, err := r.runner.materials.AddDocument(ctx, fileID, "")
+		document, err := r.runner.materials.AddDocument(ctx, fileID, "", r.caller)
 		if err != nil {
 			attachment.Unavailable = reasonFor(err)
 			r.runner.logger.WarnContext(ctx, "could not read an attachment this turn carried",
@@ -179,7 +186,7 @@ func (r *turnRun) resolveSelection(ctx context.Context, material *Material) {
 	if r.declared.Selection == nil || r.runner.readings == nil {
 		return
 	}
-	source, err := r.runner.readings.Passage(ctx, *r.declared.Selection)
+	source, err := r.runner.readings.Passage(ctx, *r.declared.Selection, r.caller)
 	if err != nil {
 		material.SelectionNote = "你没有读到读者划出的那段原文：" + reasonFor(err)
 		r.runner.logger.WarnContext(ctx, "could not resolve the selection this turn carried",
@@ -253,13 +260,13 @@ func (r *turnRun) readSource(ctx context.Context, request tool.ReadRequest) (too
 		return tool.Reading{Unavailable: []string{unreadable(attachment)}}, nil
 	}
 	if request.Query != "" {
-		sources, err := r.runner.materials.Locate(ctx, attachment.DocumentID, request.Query, 0)
+		sources, err := r.runner.materials.Locate(ctx, attachment.DocumentID, request.Query, 0, r.caller)
 		if err != nil {
 			return tool.Reading{}, explainRefusal(err, "附件「"+attachment.Label+"」")
 		}
 		return tool.Reading{Sources: r.number(sources)}, nil
 	}
-	window, err := r.runner.materials.ReadWindow(ctx, attachment.DocumentID, request.Offset, request.Limit)
+	window, err := r.runner.materials.ReadWindow(ctx, attachment.DocumentID, request.Offset, request.Limit, r.caller)
 	if err != nil {
 		return tool.Reading{}, err
 	}
@@ -283,7 +290,7 @@ func (r *turnRun) retrieve(ctx context.Context, query string) (tool.Reading, err
 		return tool.Reading{Unavailable: []string{"本轮没有携带知识库，没有可检索的来源"}}, nil
 	}
 	retrieval, err := r.runner.materials.Retrieve(ctx, kb.RetrieveInput{
-		KBIDs: r.material.KnowledgeBases,
+		KBIDs: r.material.KnowledgeBases, Caller: r.caller,
 		Query: query,
 	})
 	if err != nil {

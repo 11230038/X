@@ -2,27 +2,13 @@ package mastery
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
-)
 
-// The prefixes of the row ids this package makes. They are readable on purpose:
-// a path id turns up in `notebook_entries.mastery_path_id` and in a URL, and a
-// knowledge point id turns up inside a state document that somebody will
-// eventually read by eye.
-const (
-	pathIDPrefix           = "mp_"
-	moduleIDPrefix         = "m_"
-	knowledgePointIDPrefix = "kp_"
-	eventIDPrefix          = "mev_"
-	evidenceIDPrefix       = "mle_"
-	interactionIDPrefix    = "min_"
-	idRandomBytes          = 16
+	"backend/internal/authz"
 )
 
 // Options are the few things the domain takes from the deployment. Everything
@@ -125,12 +111,12 @@ type Create struct {
 // a path that predates this version — the tables have been there since migration
 // 00004 — has the tree and nothing else. Reporting what is there is more useful
 // than refusing to report the tree because a display field is missing.
-func (s *Service) Load(ctx context.Context, pathID string) (View, error) {
-	path, err := s.repository.Path(ctx, pathID)
+func (s *Service) Load(ctx context.Context, pathID string, caller authz.Caller) (View, error) {
+	path, err := s.repository.Path(ctx, pathID, caller)
 	if err != nil {
 		return View{}, err
 	}
-	meta, err := s.repository.Meta(ctx, pathID)
+	meta, err := s.repository.Meta(ctx, pathID, caller)
 	if err != nil {
 		if !isNotFound(err) {
 			return View{}, err
@@ -147,7 +133,11 @@ func (s *Service) Load(ctx context.Context, pathID string) (View, error) {
 // the only place that answer lives. What is *not* here is any notion of "the
 // user's current path" — the design has no such thing, and a path is reached by
 // its id.
-func (s *Service) Create(ctx context.Context, create Create) (Path, error) {
+// Create starts a path, its topic metadata and its history in one transaction.
+// The caller becomes the path's owner: a path is not the conversation's, it is
+// the account's, and it outlives the session it was started in — so the account
+// that created it is what every later read narrows to (Path.OwnerID).
+func (s *Service) Create(ctx context.Context, create Create, caller authz.Caller) (Path, error) {
 	if err := create.Actor.Validate(); err != nil {
 		return Path{}, err
 	}
@@ -161,6 +151,7 @@ func (s *Service) Create(ctx context.Context, create Create) (Path, error) {
 	path := Path{
 		ID:             create.PathID,
 		OwnerSessionID: create.Actor.SessionID,
+		OwnerID:        caller.UserID,
 		Tree:           create.Tree,
 		Version:        1,
 		CreatedAt:      now,
@@ -202,13 +193,13 @@ func (s *Service) Create(ctx context.Context, create Create) (Path, error) {
 			Actor:     create.Actor,
 			CreatedAt: now,
 		}
-		if err := repository.AppendEvent(ctx, event); err != nil {
+		if err := repository.AppendEvent(ctx, event, caller); err != nil {
 			return err
 		}
-		if err := repository.SaveMeta(ctx, meta, now); err != nil {
+		if err := repository.SaveMeta(ctx, meta, now, caller); err != nil {
 			return err
 		}
-		return repository.TouchSession(ctx, path.ID, create.Actor, now)
+		return repository.TouchSession(ctx, path.ID, create.Actor, now, caller)
 	})
 	if err != nil {
 		return Path{}, err
@@ -255,7 +246,7 @@ type AddKnowledgePointRequest struct {
 
 // AddKnowledgePoint puts a new knowledge point into a module and returns the
 // path as it now stands.
-func (s *Service) AddKnowledgePoint(ctx context.Context, add AddKnowledgePointRequest) (Path, error) {
+func (s *Service) AddKnowledgePoint(ctx context.Context, add AddKnowledgePointRequest, caller authz.Caller) (Path, error) {
 	id := strings.TrimSpace(add.ID)
 	if id == "" {
 		generated, err := newID(knowledgePointIDPrefix)
@@ -285,7 +276,7 @@ func (s *Service) AddKnowledgePoint(ctx context.Context, add AddKnowledgePointRe
 			return Tree{}, nil, fmt.Errorf("encode the addition of %s: %w", id, err)
 		}
 		return next, payload, nil
-	})
+	}, caller)
 }
 
 // EditKnowledgePointRequest is a request to reword a knowledge point, to move
@@ -306,7 +297,7 @@ type EditKnowledgePointRequest struct {
 }
 
 // EditKnowledgePoint applies a wording change and, optionally, a move.
-func (s *Service) EditKnowledgePoint(ctx context.Context, edit EditKnowledgePointRequest) (Path, error) {
+func (s *Service) EditKnowledgePoint(ctx context.Context, edit EditKnowledgePointRequest, caller authz.Caller) (Path, error) {
 	if edit.Edit.Empty() && edit.ToModule == nil {
 		return Path{}, fmt.Errorf("%w: nothing was named to change", ErrInvalidRequest)
 	}
@@ -335,7 +326,7 @@ func (s *Service) EditKnowledgePoint(ctx context.Context, edit EditKnowledgePoin
 			return Tree{}, nil, fmt.Errorf("encode the edit of %s: %w", edit.ID, err)
 		}
 		return next, payload, nil
-	})
+	}, caller)
 }
 
 // RemoveKnowledgePoint drops a knowledge point from the tree.
@@ -346,7 +337,7 @@ func (s *Service) EditKnowledgePoint(ctx context.Context, edit EditKnowledgePoin
 // that no longer resolves — which the insight endpoint is required to drop
 // rather than report (§2.2, §8 第 12 条). Deleting the questions would be the
 // other choice, and it would throw away work the learner did.
-func (s *Service) RemoveKnowledgePoint(ctx context.Context, request RemoveKnowledgePointRequest) (Path, error) {
+func (s *Service) RemoveKnowledgePoint(ctx context.Context, request RemoveKnowledgePointRequest, caller authz.Caller) (Path, error) {
 	return s.change(ctx, request.Change, EventPathMapped, func(tree Tree) (Tree, []byte, error) {
 		next, err := tree.RemoveKnowledgePoint(request.ID)
 		if err != nil {
@@ -360,7 +351,7 @@ func (s *Service) RemoveKnowledgePoint(ctx context.Context, request RemoveKnowle
 			return Tree{}, nil, fmt.Errorf("encode the removal of %s: %w", request.ID, err)
 		}
 		return next, payload, nil
-	})
+	}, caller)
 }
 
 // RemoveKnowledgePointRequest is a request to drop one knowledge point.
@@ -377,12 +368,12 @@ type RemoveKnowledgePointRequest struct {
 // still in a transaction, because a failed link between a path and a session
 // would make the next turn in that session unable to find the path it was
 // working on.
-func (s *Service) Touch(ctx context.Context, pathID string, actor Actor) error {
+func (s *Service) Touch(ctx context.Context, pathID string, actor Actor, caller authz.Caller) error {
 	if err := actor.Validate(); err != nil {
 		return err
 	}
 	return s.repository.Within(ctx, func(repository Repository) error {
-		return repository.TouchSession(ctx, pathID, actor, s.clock())
+		return repository.TouchSession(ctx, pathID, actor, s.clock(), caller)
 	})
 }
 
@@ -399,6 +390,7 @@ func (s *Service) change(
 	request Change,
 	eventType EventType,
 	mutate func(Tree) (Tree, []byte, error),
+	caller authz.Caller,
 ) (Path, error) {
 	if err := request.Actor.Validate(); err != nil {
 		return Path{}, err
@@ -407,7 +399,11 @@ func (s *Service) change(
 
 	var updated Path
 	err := s.repository.Within(ctx, func(repository Repository) error {
-		path, err := repository.Path(ctx, request.PathID)
+		// The read is scoped, and it is what makes the whole change scoped: a path
+		// belonging to another account is ErrNotFound here, before a mutation is
+		// computed, so the event and the state that follow are never built from
+		// somebody else's tree.
+		path, err := repository.Path(ctx, request.PathID, caller)
 		if err != nil {
 			return err
 		}
@@ -430,7 +426,7 @@ func (s *Service) change(
 		// has just added may already have evidence waiting for it, and before the
 		// version is taken because the levels are part of the state the version
 		// names.
-		evidences, err := repository.Evidences(ctx, path.ID)
+		evidences, err := repository.Evidences(ctx, path.ID, caller)
 		if err != nil {
 			return err
 		}
@@ -452,15 +448,15 @@ func (s *Service) change(
 			Actor:     request.Actor,
 			CreatedAt: now,
 		}
-		if err := repository.AppendEvent(ctx, event); err != nil {
+		if err := repository.AppendEvent(ctx, event, caller); err != nil {
 			return err
 		}
 
-		version, err := repository.SaveTree(ctx, path.ID, expected, tree, now)
+		version, err := repository.SaveTree(ctx, path.ID, expected, tree, now, caller)
 		if err != nil {
 			return err
 		}
-		if err := repository.TouchSession(ctx, path.ID, request.Actor, now); err != nil {
+		if err := repository.TouchSession(ctx, path.ID, request.Actor, now, caller); err != nil {
 			return err
 		}
 
@@ -474,23 +470,6 @@ func (s *Service) change(
 		return Path{}, err
 	}
 	return updated, nil
-}
-
-// NewPathID returns an id for a path that does not exist yet.
-//
-// It is exported because the capability makes the id before it can call Create:
-// the turn that creates a path announces the id in its first event, and an id
-// invented twice would be two paths.
-func NewPathID() (string, error) {
-	return newID(pathIDPrefix)
-}
-
-func newID(prefix string) (string, error) {
-	value := make([]byte, idRandomBytes)
-	if _, err := rand.Read(value); err != nil {
-		return "", fmt.Errorf("generate %s id: %w", prefix, err)
-	}
-	return prefix + hex.EncodeToString(value), nil
 }
 
 // isNotFound reports whether an error is this package's absence sentinel.

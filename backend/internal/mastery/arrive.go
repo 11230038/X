@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"backend/internal/authz"
 )
 
 // Arriving on a path: which one this turn is on, and whether it may write it.
@@ -54,8 +56,8 @@ type Arrival struct {
 // anything, so failing it would turn "somebody else is writing this path" into a
 // turn that never starts. What the turn gets instead is an arrival that says who
 // the holder is, and tools that refuse writes with that name in the refusal.
-func (s *Service) Arrive(ctx context.Context, request ArriveRequest) (Arrival, error) {
-	path, err := s.Open(ctx, OpenRequest{Actor: request.Actor, Goal: request.Goal})
+func (s *Service) Arrive(ctx context.Context, request ArriveRequest, caller authz.Caller) (Arrival, error) {
+	path, err := s.Open(ctx, OpenRequest{Actor: request.Actor, Goal: request.Goal}, caller)
 	if err != nil {
 		return Arrival{}, err
 	}
@@ -64,7 +66,7 @@ func (s *Service) Arrive(ctx context.Context, request ArriveRequest) (Arrival, e
 	// question only the state *before* the acquisition can answer, and Acquire
 	// reports the lease it holds rather than the one it replaced.
 	now := s.clock()
-	before, err := s.Holder(ctx, path.ID)
+	before, err := s.Holder(ctx, path.ID, caller)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		before = Lease{}
@@ -73,7 +75,7 @@ func (s *Service) Arrive(ctx context.Context, request ArriveRequest) (Arrival, e
 	}
 	tookOver := before.TurnID != "" && before.TurnID != request.Actor.TurnID && before.Expired(now, s.leaseTTL)
 
-	lease, err := s.Acquire(ctx, path.ID, request.Actor)
+	lease, err := s.Acquire(ctx, path.ID, request.Actor, caller)
 	if err != nil {
 		var held *HeldError
 		if errors.As(err, &held) {

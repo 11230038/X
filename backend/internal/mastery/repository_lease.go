@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"backend/internal/authz"
 	"backend/internal/data/models"
 	"gorm.io/gorm"
 )
@@ -24,12 +25,18 @@ import (
 // against a clock, and this layer does not have one — a repository that decided
 // a lease was expired would make every case about leases a case about the day it
 // ran on.
-func (r *GORMRepository) Lease(ctx context.Context, pathID string) (Lease, error) {
+func (r *GORMRepository) Lease(ctx context.Context, pathID string, caller authz.Caller) (Lease, error) {
 	if err := r.ready(); err != nil {
 		return Lease{}, err
 	}
 	var record models.MasteryPathLease
-	err := r.db.WithContext(ctx).First(&record, "path_id = ?", pathID).Error
+	// The lease hangs off a path and has no owner of its own, so the subquery over
+	// owned paths is the whole of the narrowing: a lease on another account's path
+	// is not returned, and "no such lease" is the answer the caller gets.
+	err := r.db.WithContext(ctx).
+		Where("path_id = ?", pathID).
+		Where("path_id IN (?)", pathScope(r.db.WithContext(ctx), caller)).
+		First(&record).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return Lease{}, fmt.Errorf("%w: no turn holds path %s", ErrNotFound, pathID)
 	}
@@ -47,8 +54,14 @@ func (r *GORMRepository) Lease(ctx context.Context, pathID string) (Lease, error
 // ClaimLease takes a path nobody holds. ErrDuplicate when the insert lost a race
 // to another turn that claimed it in the same instant — which is the answer to
 // "did I get it", given by the only thing that can give it without a race.
-func (r *GORMRepository) ClaimLease(ctx context.Context, lease Lease) error {
+func (r *GORMRepository) ClaimLease(ctx context.Context, lease Lease, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
+		return err
+	}
+	// Taking a lease is writing to a path, so it is scoped before the row is
+	// written: a lease taken on another account's path would be this account
+	// claiming the right to rewrite somebody else's tree.
+	if err := r.ownPath(ctx, lease.PathID, caller); err != nil {
 		return err
 	}
 	record := models.MasteryPathLease{
@@ -74,8 +87,14 @@ func (r *GORMRepository) ClaimLease(ctx context.Context, lease Lease) error {
 // caller read, so of two turns that both decided an expired lease was theirs
 // for the taking, exactly one gets a row; the other's WHERE matches nothing and
 // it learns that from the count rather than from a lock.
-func (r *GORMRepository) TakeoverLease(ctx context.Context, pathID, fromTurnID string, lease Lease) (bool, error) {
+func (r *GORMRepository) TakeoverLease(ctx context.Context, pathID, fromTurnID string, lease Lease, caller authz.Caller) (bool, error) {
 	if err := r.ready(); err != nil {
+		return false, err
+	}
+	// The path is read first — the lease row is derived from it and carries no
+	// owner of its own — so a takeover aimed at somebody else's path never reaches
+	// the update.
+	if err := r.ownPath(ctx, pathID, caller); err != nil {
 		return false, err
 	}
 	result := r.db.WithContext(ctx).Table("mastery_path_leases").
@@ -93,8 +112,14 @@ func (r *GORMRepository) TakeoverLease(ctx context.Context, pathID, fromTurnID s
 
 // ReleaseLease drops a lease if this turn still holds it, and reports whether
 // this call is the one that removed it.
-func (r *GORMRepository) ReleaseLease(ctx context.Context, pathID, turnID string) (bool, error) {
+func (r *GORMRepository) ReleaseLease(ctx context.Context, pathID, turnID string, caller authz.Caller) (bool, error) {
 	if err := r.ready(); err != nil {
+		return false, err
+	}
+	// The path is read first, for the reason the other lease writes read it:
+	// releasing a lease on somebody else's path is a write this account may not
+	// make, and the lease row itself has no owner to test.
+	if err := r.ownPath(ctx, pathID, caller); err != nil {
 		return false, err
 	}
 	result := r.db.WithContext(ctx).Table("mastery_path_leases").

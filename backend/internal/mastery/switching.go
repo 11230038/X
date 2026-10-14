@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"backend/internal/authz"
 )
 
 // Moving to another path.
@@ -45,7 +47,7 @@ type SwitchRequest struct {
 // there is nothing to record. What it costs is a window — a lease taken and the
 // process gone before the event — and the cost is bounded by the lease's own
 // expiry, which is the same bound every other lease operation has.
-func (s *Service) Switch(ctx context.Context, request SwitchRequest) (View, error) {
+func (s *Service) Switch(ctx context.Context, request SwitchRequest, caller authz.Caller) (View, error) {
 	if err := request.Actor.Validate(); err != nil {
 		return View{}, err
 	}
@@ -57,19 +59,19 @@ func (s *Service) Switch(ctx context.Context, request SwitchRequest) (View, erro
 		// refused because the model has no way to know it is a no-op — the state
 		// it read is the state it would get back — and a refusal would cost a
 		// round trip to say nothing.
-		return s.Load(ctx, request.To)
+		return s.Load(ctx, request.To, caller)
 	}
 
-	released, err := s.Release(ctx, request.From, request.Actor)
+	released, err := s.Release(ctx, request.From, request.Actor, caller)
 	if err != nil {
 		return View{}, err
 	}
-	lease, err := s.Acquire(ctx, request.To, request.Actor)
+	lease, err := s.Acquire(ctx, request.To, request.Actor, caller)
 	if err != nil {
 		return View{}, err
 	}
 
-	view, err := s.Load(ctx, request.To)
+	view, err := s.Load(ctx, request.To, caller)
 	if err != nil {
 		return View{}, err
 	}
@@ -97,10 +99,10 @@ func (s *Service) Switch(ctx context.Context, request SwitchRequest) (View, erro
 			Actor:     request.Actor,
 			CreatedAt: now,
 		}
-		if err := repository.AppendEvent(ctx, event); err != nil {
+		if err := repository.AppendEvent(ctx, event, caller); err != nil {
 			return err
 		}
-		return repository.TouchSession(ctx, request.To, request.Actor, now)
+		return repository.TouchSession(ctx, request.To, request.Actor, now, caller)
 	})
 	if err != nil {
 		return View{}, err

@@ -1,6 +1,7 @@
 package turn
 
 import (
+	"backend/internal/authz"
 	"context"
 	"errors"
 	"fmt"
@@ -199,7 +200,7 @@ func newStubSessions() *stubSessions {
 	}
 }
 
-func (s *stubSessions) Create(context.Context) (session.Session, error) {
+func (s *stubSessions) Create(context.Context, authz.Caller) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.created++
@@ -209,7 +210,7 @@ func (s *stubSessions) Create(context.Context) (session.Session, error) {
 	return record, nil
 }
 
-func (s *stubSessions) Get(_ context.Context, sessionID string) (session.Session, error) {
+func (s *stubSessions) Get(_ context.Context, sessionID string, _ authz.Caller) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.sessions[sessionID]
@@ -219,7 +220,7 @@ func (s *stubSessions) Get(_ context.Context, sessionID string) (session.Session
 	return record, nil
 }
 
-func (s *stubSessions) Rename(_ context.Context, sessionID, title string) (session.Session, error) {
+func (s *stubSessions) Rename(_ context.Context, sessionID, title string, _ authz.Caller) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	record, ok := s.sessions[sessionID]
@@ -231,7 +232,7 @@ func (s *stubSessions) Rename(_ context.Context, sessionID, title string) (sessi
 	return record, nil
 }
 
-func (s *stubSessions) AppendMessage(_ context.Context, input session.NewMessage) (session.Message, error) {
+func (s *stubSessions) AppendMessage(_ context.Context, input session.NewMessage, _ authz.Caller) (session.Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.sessions[input.SessionID]; !ok {
@@ -248,7 +249,7 @@ func (s *stubSessions) AppendMessage(_ context.Context, input session.NewMessage
 	return record, nil
 }
 
-func (s *stubSessions) Messages(_ context.Context, sessionID string) ([]session.Message, error) {
+func (s *stubSessions) Messages(_ context.Context, sessionID string, _ authz.Caller) ([]session.Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]session.Message(nil), s.messages[sessionID]...), nil

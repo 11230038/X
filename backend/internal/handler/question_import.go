@@ -84,6 +84,10 @@ func (h *QuestionHandler) Import(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	dryRun, err := optionalBoolParam(c, "dry_run")
 	if err != nil {
 		httpx.WriteError(c, http.StatusBadRequest, "invalid_query", err.Error())
@@ -93,7 +97,7 @@ func (h *QuestionHandler) Import(c *gin.Context) {
 	if !ok {
 		return
 	}
-	report, err := h.questions.Import(c.Request.Context(), file, dryRun != nil && *dryRun)
+	report, err := h.questions.Import(c.Request.Context(), file, dryRun != nil && *dryRun, account)
 	if err != nil {
 		h.fail(c, "import_questions_failed", err)
 		return

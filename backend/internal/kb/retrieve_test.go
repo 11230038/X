@@ -229,7 +229,7 @@ func TestRetrieveSkipsAChunkThatIsNoLongerActive(t *testing.T) {
 	stale := h.chunkIDs(document.ID)[0]
 	h.repo.textHits = []string{stale}
 
-	if _, err := h.service.RebuildDocument(context.Background(), document.ID); err != nil {
+	if _, err := h.service.RebuildDocument(context.Background(), document.ID, testCaller()); err != nil {
 		t.Fatalf("RebuildDocument() error = %v", err)
 	}
 
@@ -290,7 +290,7 @@ func TestReadWindowReadsOnlyWhatItWasAskedFor(t *testing.T) {
 	document := h.addDocument(t, base.ID, "lib_one", sampleText)
 	runes := []rune(sampleText)
 
-	window, err := h.service.ReadWindow(context.Background(), document.ID, 4, 6)
+	window, err := h.service.ReadWindow(context.Background(), document.ID, 4, 6, testCaller())
 	if err != nil {
 		t.Fatalf("ReadWindow() error = %v", err)
 	}
@@ -308,7 +308,7 @@ func TestReadWindowReadsOnlyWhatItWasAskedFor(t *testing.T) {
 	}
 
 	// The last window of a document is short rather than out of range.
-	last, err := h.service.ReadWindow(context.Background(), document.ID, int64(len(runes))-3, 50)
+	last, err := h.service.ReadWindow(context.Background(), document.ID, int64(len(runes))-3, 50, testCaller())
 	if err != nil {
 		t.Fatalf("ReadWindow(at the end) error = %v", err)
 	}
@@ -317,7 +317,7 @@ func TestReadWindowReadsOnlyWhatItWasAskedFor(t *testing.T) {
 	}
 
 	// Past the end is an empty window at the end, not a failure.
-	past, err := h.service.ReadWindow(context.Background(), document.ID, int64(len(runes))+100, 50)
+	past, err := h.service.ReadWindow(context.Background(), document.ID, int64(len(runes))+100, 50, testCaller())
 	if err != nil {
 		t.Fatalf("ReadWindow(past the end) error = %v", err)
 	}
@@ -325,7 +325,7 @@ func TestReadWindowReadsOnlyWhatItWasAskedFor(t *testing.T) {
 		t.Errorf("a window past the end is %q at %d", past.Text, past.CharStart)
 	}
 
-	if _, err := h.service.ReadWindow(context.Background(), document.ID, -1, 10); !errors.Is(err, ErrInvalidInput) {
+	if _, err := h.service.ReadWindow(context.Background(), document.ID, -1, 10, testCaller()); !errors.Is(err, ErrInvalidInput) {
 		t.Errorf("a negative offset gave %v, want ErrInvalidInput", err)
 	}
 }
@@ -363,7 +363,7 @@ func TestWindowSourceCarriesTheWindowsOwnSpan(t *testing.T) {
 	base := h.base(t, "kb")
 	document := h.addDocument(t, base.ID, "lib_one", sampleText)
 
-	window, err := h.service.ReadWindow(context.Background(), document.ID, 2, 8)
+	window, err := h.service.ReadWindow(context.Background(), document.ID, 2, 8, testCaller())
 	if err != nil {
 		t.Fatalf("ReadWindow() error = %v", err)
 	}

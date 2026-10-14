@@ -5,18 +5,26 @@ import (
 	"errors"
 	"fmt"
 
+	"backend/internal/authz"
+	"backend/internal/data"
 	"backend/internal/data/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 // Entry reads one question by its content address.
-func (r *GORMRepository) Entry(ctx context.Context, questionID string) (Entry, error) {
+//
+// The read is scoped, so a question belonging to another account is not this
+// caller's to see: it answers ErrNotFound, and that is the whole of what the
+// caller learns (§2.3). The categories read after it is keyed by the row key
+// this scoped read produced, so it cannot reach past the question either.
+func (r *GORMRepository) Entry(ctx context.Context, questionID string, caller authz.Caller) (Entry, error) {
 	if err := r.ready(); err != nil {
 		return Entry{}, err
 	}
 	var record models.NotebookEntry
-	err := r.db.WithContext(ctx).First(&record, "question_id = ?", questionID).Error
+	query := data.OwnerScope(r.db.WithContext(ctx), caller.UserID, caller.IsAdmin(), "owner_id")
+	err := query.First(&record, "question_id = ?", questionID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return Entry{}, fmt.Errorf("%w: %s", ErrNotFound, questionID)
 	}
@@ -36,7 +44,7 @@ func (r *GORMRepository) Entry(ctx context.Context, questionID string) (Entry, e
 }
 
 // Mark applies a property change to one question.
-func (r *GORMRepository) Mark(ctx context.Context, questionID string, change Change) error {
+func (r *GORMRepository) Mark(ctx context.Context, questionID string, change Change, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
 		return err
 	}
@@ -51,10 +59,16 @@ func (r *GORMRepository) Mark(ctx context.Context, questionID string, change Cha
 		return fmt.Errorf("%w: no marks were named", ErrEmptyChange)
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if _, err := lockedEntryID(tx, questionID); err != nil {
+		if _, err := lockedEntryID(tx, questionID, caller); err != nil {
 			return err
 		}
-		if err := tx.Table("notebook_entries").
+		// Scoped as well as guarded: the locking read above already established
+		// that this question is the caller's, and this keeps the write itself from
+		// being a second, unscoped door onto the same row — the failure mode where
+		// the check and the write disagree about what they are protecting.
+		scoped := data.OwnerScope(tx.Table("notebook_entries"),
+			caller.UserID, caller.IsAdmin(), "owner_id")
+		if err := scoped.
 			Where("question_id = ?", questionID).
 			Updates(updates).Error; err != nil {
 			return fmt.Errorf("mark question %s: %w", questionID, err)
@@ -73,9 +87,15 @@ func (r *GORMRepository) Mark(ctx context.Context, questionID string, change Cha
 // would turn a repeated click into an error about a question that is right
 // there. The read takes the row's lock, so what it reports still holds when the
 // write that follows lands.
-func lockedEntryID(tx *gorm.DB, questionID string) (string, error) {
+//
+// It is scoped like every other read, and for the same reason: a question
+// belonging to another account is not found here, so the row key it would hand
+// back — the key the writes beside this table are filed under — is never handed
+// out across accounts.
+func lockedEntryID(tx *gorm.DB, questionID string, caller authz.Caller) (string, error) {
 	var stored models.NotebookEntry
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+	query := data.OwnerScope(tx, caller.UserID, caller.IsAdmin(), "owner_id")
+	err := query.Clauses(clause.Locking{Strength: "UPDATE"}).
 		First(&stored, "question_id = ?", questionID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", fmt.Errorf("%w: %s", ErrNotFound, questionID)
@@ -84,6 +104,25 @@ func lockedEntryID(tx *gorm.DB, questionID string) (string, error) {
 		return "", fmt.Errorf("look for question %s: %w", questionID, err)
 	}
 	return stored.NotebookEntriesID, nil
+}
+
+// requireEntryRow reports whether a row key names a question the caller may see.
+//
+// It is lockedEntryID's twin for the one caller that starts from a row key
+// rather than a content address: a join row is written against a
+// notebook_entries_id and carries nothing else to check, so the key is resolved
+// through the caller before anything is filed under it.
+func requireEntryRow(tx *gorm.DB, entryID string, caller authz.Caller) error {
+	var stored models.NotebookEntry
+	query := data.OwnerScope(tx, caller.UserID, caller.IsAdmin(), "owner_id")
+	err := query.First(&stored, "notebook_entries_id = ?", entryID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("%w: %s", ErrNotFound, entryID)
+	}
+	if err != nil {
+		return fmt.Errorf("look for question row %s: %w", entryID, err)
+	}
+	return nil
 }
 
 // categoriesOf returns the category names of each given question, in one query.

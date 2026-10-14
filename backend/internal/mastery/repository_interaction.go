@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/data/models"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -44,7 +45,7 @@ type interactionExtra struct {
 // rather than assuming there is one row: the oldest open interaction is the one
 // that is waiting, and a case that found two would get the same answer every
 // time rather than whichever row the engine happened to reach first.
-func (r *GORMRepository) ActiveInteraction(ctx context.Context, pathID string) (Interaction, error) {
+func (r *GORMRepository) ActiveInteraction(ctx context.Context, pathID string, caller authz.Caller) (Interaction, error) {
 	if err := r.ready(); err != nil {
 		return Interaction{}, err
 	}
@@ -59,6 +60,7 @@ func (r *GORMRepository) ActiveInteraction(ctx context.Context, pathID string) (
 	err := r.db.WithContext(ctx).Table("mastery_interactions").
 		Select("interaction_id, path_id, turn_id, session_id, question_json, creat_time").
 		Where("path_id = ? AND result_json IS NULL", pathID).
+		Where("path_id IN (?)", pathScope(r.db.WithContext(ctx), caller)).
 		Order("creat_time ASC, interaction_id ASC").
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -82,8 +84,13 @@ func (r *GORMRepository) ActiveInteraction(ctx context.Context, pathID string) (
 }
 
 // CreateInteraction records one question that has been put.
-func (r *GORMRepository) CreateInteraction(ctx context.Context, interaction Interaction) error {
+func (r *GORMRepository) CreateInteraction(ctx context.Context, interaction Interaction, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
+		return err
+	}
+	// The row is derived from the path and has no owner of its own: the path is
+	// read first, so a question cannot be opened on somebody else's path.
+	if err := r.ownPath(ctx, interaction.PathID, caller); err != nil {
 		return err
 	}
 	extra, err := json.Marshal(interactionExtra{
@@ -118,6 +125,7 @@ func (r *GORMRepository) CloseInteraction(
 	interactionID, answer string,
 	outcome []byte,
 	now time.Time,
+	caller authz.Caller,
 ) (bool, error) {
 	if err := r.ready(); err != nil {
 		return false, err
@@ -125,8 +133,15 @@ func (r *GORMRepository) CloseInteraction(
 	if len(outcome) == 0 {
 		outcome = []byte("{}")
 	}
+	// The row is derived from a path, so the scope is a subquery over the owned
+	// paths rather than a check on a column this table does not have: an
+	// interaction on somebody else's path matches nothing, and a false — the same
+	// answer a lost race gets — is what the caller sees. The service read the
+	// interaction under the caller's scope before it got here, so this is the
+	// second line rather than the first.
 	written := r.db.WithContext(ctx).Table("mastery_interactions").
 		Where("interaction_id = ? AND result_json IS NULL", interactionID).
+		Where("path_id IN (?)", pathScope(r.db.WithContext(ctx), caller)).
 		Updates(map[string]any{
 			"user_answer": nullable(answer),
 			"result_json": datatypes.JSON(outcome),

@@ -8,6 +8,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"backend/internal/authz"
 	"backend/internal/event"
 )
 
@@ -32,7 +33,7 @@ import (
 // holds: a chunk with the question's characters scattered through it does not
 // outrank the one that holds the phrase, and the number means something a
 // reader can check — "two thirds of what you asked is in this passage".
-func (s *Service) Locate(ctx context.Context, documentID, query string, limit int) ([]event.Source, error) {
+func (s *Service) Locate(ctx context.Context, documentID, query string, limit int, caller authz.Caller) ([]event.Source, error) {
 	documentID = strings.TrimSpace(documentID)
 	query = strings.TrimSpace(query)
 	if utf8.RuneCountInString(query) < minQueryChars {
@@ -41,7 +42,10 @@ func (s *Service) Locate(ctx context.Context, documentID, query string, limit in
 	if limit <= 0 {
 		limit = s.options.RetrievalTopK
 	}
-	document, err := s.repository.Document(ctx, documentID)
+	// The document is read as the caller's own before a character of it is
+	// ranked. An attachment is read here by the turn that carried it, so the
+	// account is the turn's, not the document's — a document has none.
+	document, err := s.repository.Document(ctx, documentID, caller)
 	if err != nil {
 		return nil, err
 	}

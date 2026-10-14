@@ -46,6 +46,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"backend/internal/authz"
 )
 
 // ImportOutcome is what the import decided about one line of the file.
@@ -161,6 +163,11 @@ type importWorld struct {
 	service  *Service
 	ctx      context.Context
 	accepted map[string]importSeen
+	// caller is the account this request imports for. Every question written and
+	// every question looked up is scoped to it, which is what makes the whole
+	// file one account's: two accounts importing the same question get two rows,
+	// and the second one's lookup does not find the first one's.
+	caller authz.Caller
 }
 
 // importSeen is a question this request has already accepted, and the line of the
@@ -184,9 +191,9 @@ type importSeen struct {
 // pretending the sequence were atomic would be a bigger lie than a partial write
 // — a caller who wants to know where it stopped asks for a preview again, which
 // will report the lines that got in as the questions the bank holds.
-func (s *Service) Import(ctx context.Context, file string, dryRun bool) (ImportReport, error) {
+func (s *Service) Import(ctx context.Context, file string, dryRun bool, caller authz.Caller) (ImportReport, error) {
 	report := ImportReport{DryRun: dryRun, Entries: []ImportEntry{}}
-	world := &importWorld{service: s, ctx: ctx, accepted: map[string]importSeen{}}
+	world := &importWorld{service: s, ctx: ctx, accepted: map[string]importSeen{}, caller: caller}
 	for index, raw := range strings.Split(file, "\n") {
 		if strings.TrimSpace(raw) == "" {
 			// A blank line is not a question and not a mistake: a file ends in a
@@ -202,7 +209,7 @@ func (s *Service) Import(ctx context.Context, file string, dryRun bool) (ImportR
 			}
 			if entry.Outcome == ImportWritable {
 				if !dryRun {
-					if _, err := s.Save(ctx, question); err != nil {
+					if _, err := s.Save(ctx, question, caller); err != nil {
 						return ImportReport{}, err
 					}
 				}
@@ -296,7 +303,7 @@ func (w *importWorld) questionAt(questionID string) (Question, int, error) {
 	if seen, ok := w.accepted[questionID]; ok {
 		return seen.question, seen.line, nil
 	}
-	entry, err := w.service.repository.Entry(w.ctx, questionID)
+	entry, err := w.service.repository.Entry(w.ctx, questionID, w.caller)
 	if err != nil {
 		return Question{}, 0, err
 	}

@@ -3,6 +3,7 @@ package notebook
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strconv"
 	"strings"
 )
 
@@ -88,16 +89,36 @@ func QuestionID(question string, questionType QuestionType) string {
 	return questionIDPrefix + hex.EncodeToString(digest.Sum(nil))[:questionIDHexBytes*2]
 }
 
-// categoryID is a category's identity. It is derived from the name rather than
-// generated, so two writers creating the same category at the same moment
-// compute the same key: the second insert collides on the primary key and is
-// read as "already there" instead of becoming a duplicate row.
+// categoryID is a category's identity. It is derived from the owner and the name
+// rather than generated, so two writers of the same account creating the same
+// category at the same moment compute the same key: the second insert collides
+// on the primary key and is read as "already there" instead of becoming a
+// duplicate row.
+//
+// The owner is part of the hash because the name alone is no longer a category's
+// identity. Migration 00014 made a name unique per owner rather than globally —
+// two accounts may each keep a "数学" — and a key derived from the name alone
+// would defeat that: the second account's insert would collide on the primary
+// key with the first account's row, and the collision-tolerant write would read
+// that as "the category is already there", filing the second account's question
+// under the first account's category and exposing the first account's label to
+// the second. With the owner in the key the two are two rows, and the composite
+// unique key the migration declared holds.
+//
+// A caller with no account — ownerID zero — keeps the name-only key, which is
+// the key the pre-V5 rows were written under: "no owner" is a value, and it
+// degenerates to the old rule exactly where the old data is.
 //
 // Categories are matched by name under a binary collation, so "Math" and "math"
 // are two categories: the hash is taken over the name as written, which is the
-// same rule.
-func categoryID(name string) string {
+// same rule. The owner and the name are separated by a NUL so that owner 1 with
+// name "23" and owner 12 with name "3" do not meet at the same key.
+func categoryID(ownerID int64, name string) string {
 	digest := sha256.New()
+	if ownerID > 0 {
+		digest.Write([]byte(strconv.FormatInt(ownerID, 10)))
+		digest.Write([]byte{0})
+	}
 	digest.Write([]byte(name))
 	return categoryIDPrefix + hex.EncodeToString(digest.Sum(nil))[:questionIDHexBytes*2]
 }

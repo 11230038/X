@@ -38,7 +38,7 @@ func TestCreateKnowledgeBaseBindsTheProviderAndTheModel(t *testing.T) {
 func TestCreateKnowledgeBaseRefusesANamelessOne(t *testing.T) {
 	h := newHarness(t)
 	for _, name := range []string{"", "   ", "\t\n"} {
-		if _, err := h.service.CreateKnowledgeBase(context.Background(), name, ""); !errors.Is(err, ErrInvalidInput) {
+		if _, err := h.service.CreateKnowledgeBase(context.Background(), name, "", testCaller()); !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("CreateKnowledgeBase(%q) error = %v, want ErrInvalidInput", name, err)
 		}
 	}

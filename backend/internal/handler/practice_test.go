@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/notebook"
 	"backend/internal/practice"
 	"github.com/gin-gonic/gin"
@@ -43,17 +44,17 @@ type practiceStub struct {
 	statsAsked []practice.StatsQuery
 }
 
-func (s *practiceStub) Queue(_ context.Context, size int) ([]practice.QueueItem, error) {
+func (s *practiceStub) Queue(_ context.Context, size int, _ authz.Caller) ([]practice.QueueItem, error) {
 	s.sizes = append(s.sizes, size)
 	return s.items, s.err
 }
 
-func (s *practiceStub) Review(_ context.Context, review practice.Review) (practice.ReviewResult, error) {
+func (s *practiceStub) Review(_ context.Context, review practice.Review, _ authz.Caller) (practice.ReviewResult, error) {
 	s.submitted = append(s.submitted, review)
 	return s.result, s.err
 }
 
-func (s *practiceStub) Recorded(_ context.Context, requestID string) (practice.ReviewResult, error) {
+func (s *practiceStub) Recorded(_ context.Context, requestID string, _ authz.Caller) (practice.ReviewResult, error) {
 	s.readIDs = append(s.readIDs, requestID)
 	return s.result, s.err
 }
@@ -103,16 +104,17 @@ func sampleQueueItem(reason practice.QueueReason, state *practice.ReviewState) p
 	}
 }
 
-// newPracticeRouter mounts the reviewing routes the way the server does, with a
-// queue size the tests can recognise in the call the stub records.
+// newPracticeRouter mounts the reviewing routes the way the server does, behind
+// the bearer middleware and with a queue size the tests can recognise in the call
+// the stub records.
 func newPracticeRouter(reviews Practice, queueSize int) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	handler := NewPracticeHandler(reviews, queueSize, testHandlerLogger())
 	router := gin.New()
-	router.GET("/api/v1/practice/queue", handler.Queue)
-	router.POST("/api/v1/practice/reviews", handler.Submit)
-	router.GET("/api/v1/practice/reviews/:requestID", handler.Read)
-	router.GET("/api/v1/practice/stats", handler.Stats)
+	router.GET("/api/v1/practice/queue", guard(), handler.Queue)
+	router.POST("/api/v1/practice/reviews", guard(), handler.Submit)
+	router.GET("/api/v1/practice/reviews/:requestID", guard(), handler.Read)
+	router.GET("/api/v1/practice/stats", guard(), handler.Stats)
 	return router
 }
 
@@ -121,7 +123,7 @@ func newPracticeRouter(reviews Practice, queueSize int) *gin.Engine {
 // and a size in the URL is not read at all.
 func TestPracticeHandlerQueueAsksForTheDeploymentsSize(t *testing.T) {
 	stub := &practiceStub{}
-	recorder := call(t, newPracticeRouter(stub, 7), http.MethodGet,
+	recorder := callAs(t, newPracticeRouter(stub, 7), http.MethodGet,
 		"/api/v1/practice/queue?size=99&limit=99", "")
 
 	if recorder.Code != http.StatusOK {
@@ -138,7 +140,7 @@ func TestPracticeHandlerQueueShowsEachQuestionWithItsReason(t *testing.T) {
 		sampleQueueItem(practice.ReasonDue, &due),
 		sampleQueueItem(practice.ReasonNew, nil),
 	}}
-	recorder := call(t, newPracticeRouter(stub, 20), http.MethodGet, "/api/v1/practice/queue", "")
+	recorder := callAs(t, newPracticeRouter(stub, 20), http.MethodGet, "/api/v1/practice/queue", "")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -173,14 +175,14 @@ func TestPracticeHandlerQueueShowsEachQuestionWithItsReason(t *testing.T) {
 // nothing ever gave it.
 func TestPracticeHandlerQueueLeavesANewQuestionsStateAbsent(t *testing.T) {
 	stub := &practiceStub{items: []practice.QueueItem{sampleQueueItem(practice.ReasonNew, nil)}}
-	recorder := call(t, newPracticeRouter(stub, 20), http.MethodGet, "/api/v1/practice/queue", "")
+	recorder := callAs(t, newPracticeRouter(stub, 20), http.MethodGet, "/api/v1/practice/queue", "")
 	if !containsJSON(recorder.Body.String(), `"state":null`) {
 		t.Errorf("a question nobody has reviewed reads %s", recorder.Body.String())
 	}
 }
 
 func TestPracticeHandlerQueueShowsAnEmptyQueueAsAnEmptyList(t *testing.T) {
-	recorder := call(t, newPracticeRouter(&practiceStub{}, 20),
+	recorder := callAs(t, newPracticeRouter(&practiceStub{}, 20),
 		http.MethodGet, "/api/v1/practice/queue", "")
 	if !containsJSON(recorder.Body.String(), `"queue":[]`) {
 		t.Errorf("nothing to practise reads %s", recorder.Body.String())
@@ -193,7 +195,7 @@ func TestPracticeHandlerQueueShowsAnEmptyQueueAsAnEmptyList(t *testing.T) {
 // nil would silently turn the version guard into a read-then-write.
 func TestPracticeHandlerSubmitHandsTheSubmissionOver(t *testing.T) {
 	stub := &practiceStub{result: sampleReviewResult(false)}
-	recorder := call(t, newPracticeRouter(stub, 20), http.MethodPost, "/api/v1/practice/reviews",
+	recorder := callAs(t, newPracticeRouter(stub, 20), http.MethodPost, "/api/v1/practice/reviews",
 		`{"request_id":"req_1","question_id":"qn_1","user_answer":"它捕获了自由变量",
 		  "marker":"", "rating":4, "version":3}`)
 
@@ -225,7 +227,7 @@ func TestPracticeHandlerSubmitAnswersTheSameForARetry(t *testing.T) {
 	}
 	for replayed, body := range bodies {
 		stub := &practiceStub{result: sampleReviewResult(replayed)}
-		recorder := call(t, newPracticeRouter(stub, 20), http.MethodPost, "/api/v1/practice/reviews", body)
+		recorder := callAs(t, newPracticeRouter(stub, 20), http.MethodPost, "/api/v1/practice/reviews", body)
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("replayed=%v gave status %d, want 200; body=%s",
 				replayed, recorder.Code, recorder.Body.String())
@@ -243,7 +245,7 @@ func TestPracticeHandlerSubmitAnswersTheSameForARetry(t *testing.T) {
 }
 
 func TestPracticeHandlerSubmitAnswersTheStoredResultWhole(t *testing.T) {
-	recorder := call(t, newPracticeRouter(&practiceStub{result: sampleReviewResult(false)}, 20),
+	recorder := callAs(t, newPracticeRouter(&practiceStub{result: sampleReviewResult(false)}, 20),
 		http.MethodPost, "/api/v1/practice/reviews",
 		`{"request_id":"req_1","question_id":"qn_1","user_answer":"答"}`)
 	var envelope struct {
@@ -259,7 +261,7 @@ func TestPracticeHandlerSubmitAnswersTheStoredResultWhole(t *testing.T) {
 func TestPracticeHandlerSubmitRefusesABodyThatIsNotASubmission(t *testing.T) {
 	stub := &practiceStub{}
 	for _, body := range []string{"", " ", "{", "[]"} {
-		recorder := call(t, newPracticeRouter(stub, 20), http.MethodPost,
+		recorder := callAs(t, newPracticeRouter(stub, 20), http.MethodPost,
 			"/api/v1/practice/reviews", body)
 		if recorder.Code != http.StatusBadRequest {
 			t.Fatalf("body %q gave status %d, want 400; body=%s",
@@ -280,7 +282,7 @@ func TestPracticeHandlerSubmitRefusesABodyThatIsNotASubmission(t *testing.T) {
 // without having to send it twice.
 func TestPracticeHandlerReadReturnsTheStoredBody(t *testing.T) {
 	stub := &practiceStub{result: sampleReviewResult(false)}
-	recorder := call(t, newPracticeRouter(stub, 20), http.MethodGet, "/api/v1/practice/reviews/req_1", "")
+	recorder := callAs(t, newPracticeRouter(stub, 20), http.MethodGet, "/api/v1/practice/reviews/req_1", "")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -298,7 +300,7 @@ func TestPracticeHandlerReadReturnsTheStoredBody(t *testing.T) {
 
 func TestPracticeHandlerReadReportsAReviewThatIsNotThere(t *testing.T) {
 	stub := &practiceStub{err: practice.ErrNotFound}
-	recorder := call(t, newPracticeRouter(stub, 20), http.MethodGet, "/api/v1/practice/reviews/req_none", "")
+	recorder := callAs(t, newPracticeRouter(stub, 20), http.MethodGet, "/api/v1/practice/reviews/req_none", "")
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404; body=%s", recorder.Code, recorder.Body.String())
 	}

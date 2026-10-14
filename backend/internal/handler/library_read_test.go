@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/kb"
 	"backend/internal/library"
 	"backend/internal/middleware"
@@ -23,7 +24,7 @@ type fileStub struct {
 	askedFor string
 }
 
-func (s *fileStub) Find(_ context.Context, id string) (library.UploadResult, error) {
+func (s *fileStub) Find(_ context.Context, id string, caller authz.Caller) (library.UploadResult, error) {
 	s.askedFor = id
 	return s.file, s.err
 }
@@ -45,17 +46,17 @@ type materialStub struct {
 	}
 }
 
-func (s *materialStub) DocumentOfFile(_ context.Context, fileID string) (kb.Document, error) {
+func (s *materialStub) DocumentOfFile(_ context.Context, fileID string, caller authz.Caller) (kb.Document, error) {
 	s.asked.fileID = fileID
 	return s.document, s.err
 }
 
-func (s *materialStub) ReadWindow(_ context.Context, documentID string, offset, limit int64) (kb.Window, error) {
+func (s *materialStub) ReadWindow(_ context.Context, documentID string, offset, limit int64, caller authz.Caller) (kb.Window, error) {
 	s.asked.docID, s.asked.offset, s.asked.limit = documentID, offset, limit
 	return s.window, s.err
 }
 
-func (s *materialStub) ChunkSpans(_ context.Context, documentID string) ([]kb.ChunkSpan, error) {
+func (s *materialStub) ChunkSpans(_ context.Context, documentID string, caller authz.Caller) ([]kb.ChunkSpan, error) {
 	s.asked.spansFor = documentID
 	return s.spans, s.err
 }
@@ -73,8 +74,9 @@ func newLibraryReadRouter(files *fileStub, materials *materialStub) *gin.Engine 
 	handler := NewLibraryReadHandler(files, materials, testHandlerLogger())
 	router := gin.New()
 	router.Use(middleware.RequestID())
-	router.GET("/api/v1/library/files/:fileID", handler.Get)
-	router.GET("/api/v1/library/files/:fileID/text", handler.Text)
+	guarded := guard()
+	router.GET("/api/v1/library/files/:fileID", guarded, handler.Get)
+	router.GET("/api/v1/library/files/:fileID/text", guarded, handler.Text)
 	return router
 }
 
@@ -83,7 +85,7 @@ func TestGetFileReturnsItWithItsParseState(t *testing.T) {
 	materials := &materialStub{document: testDocument()}
 	router := newLibraryReadRouter(files, materials)
 
-	recorder := call(t, router, http.MethodGet, "/api/v1/library/files/lib_1", "")
+	recorder := callAs(t, router, http.MethodGet, "/api/v1/library/files/lib_1", "")
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -112,7 +114,7 @@ func TestGetFileWithNothingParsedOutOfItIsNotAFailure(t *testing.T) {
 	materials := &materialStub{err: fmt.Errorf("%w: no document", kb.ErrNotFound)}
 	router := newLibraryReadRouter(files, materials)
 
-	recorder := call(t, router, http.MethodGet, "/api/v1/library/files/lib_1", "")
+	recorder := callAs(t, router, http.MethodGet, "/api/v1/library/files/lib_1", "")
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -128,7 +130,7 @@ func TestGetMissingFileIsNotFound(t *testing.T) {
 	files := &fileStub{err: fmt.Errorf("%w: lib_9", library.ErrNotFound)}
 	router := newLibraryReadRouter(files, &materialStub{})
 
-	recorder := call(t, router, http.MethodGet, "/api/v1/library/files/lib_9", "")
+	recorder := callAs(t, router, http.MethodGet, "/api/v1/library/files/lib_9", "")
 
 	if recorder.Code != http.StatusNotFound || !strings.Contains(recorder.Body.String(), `"code":"not_found"`) {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
@@ -154,7 +156,7 @@ func TestTextReturnsTheWindowAndTheChunkBoundaries(t *testing.T) {
 	}
 	router := newLibraryReadRouter(files, materials)
 
-	recorder := call(t, router, http.MethodGet, "/api/v1/library/files/lib_1/text?offset=100&limit=7", "")
+	recorder := callAs(t, router, http.MethodGet, "/api/v1/library/files/lib_1/text?offset=100&limit=7", "")
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -186,7 +188,7 @@ func TestTextWithoutOffsetsAsksForTheStartOfTheDocument(t *testing.T) {
 	materials := &materialStub{document: document, window: kb.Window{Document: document, TotalChars: 4200}}
 	router := newLibraryReadRouter(&fileStub{file: testLibraryFile()}, materials)
 
-	recorder := call(t, router, http.MethodGet, "/api/v1/library/files/lib_1/text", "")
+	recorder := callAs(t, router, http.MethodGet, "/api/v1/library/files/lib_1/text", "")
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -205,7 +207,7 @@ func TestTextRefusesAnOffsetThatIsNotACount(t *testing.T) {
 
 	for _, query := range []string{"offset=-1", "offset=abc", "limit=x"} {
 		t.Run(query, func(t *testing.T) {
-			recorder := call(t, router, http.MethodGet, "/api/v1/library/files/lib_1/text?"+query, "")
+			recorder := callAs(t, router, http.MethodGet, "/api/v1/library/files/lib_1/text?"+query, "")
 			if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), `"code":"invalid_query"`) {
 				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 			}
@@ -223,7 +225,7 @@ func TestTextOfAFileThatWasNeverReadSaysSo(t *testing.T) {
 	materials := &materialStub{err: fmt.Errorf("%w: no document", kb.ErrNotFound)}
 	router := newLibraryReadRouter(&fileStub{file: testLibraryFile()}, materials)
 
-	recorder := call(t, router, http.MethodGet, "/api/v1/library/files/lib_1/text", "")
+	recorder := callAs(t, router, http.MethodGet, "/api/v1/library/files/lib_1/text", "")
 
 	if recorder.Code != http.StatusNotFound || !strings.Contains(recorder.Body.String(), `"code":"not_parsed"`) {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
@@ -239,7 +241,7 @@ func TestTheReadEndpointsAnswerRatherThanPanicWhenUnconfigured(t *testing.T) {
 
 	for _, path := range []string{"/api/v1/library/files/lib_1", "/api/v1/library/files/lib_1/text"} {
 		t.Run(path, func(t *testing.T) {
-			recorder := call(t, router, http.MethodGet, path, "")
+			recorder := callAs(t, router, http.MethodGet, path, "")
 			if recorder.Code != http.StatusInternalServerError {
 				t.Fatalf("status = %d, want 500; body=%s", recorder.Code, recorder.Body.String())
 			}

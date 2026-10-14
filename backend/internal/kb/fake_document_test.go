@@ -8,11 +8,13 @@ package kb
 
 import (
 	"context"
+
+	"backend/internal/authz"
 	"fmt"
 	"sort"
 )
 
-func (f *fakeRepository) Document(_ context.Context, documentID string) (Document, error) {
+func (f *fakeRepository) Document(_ context.Context, documentID string, caller authz.Caller) (Document, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.fail("Document"); err != nil {
@@ -25,7 +27,7 @@ func (f *fakeRepository) Document(_ context.Context, documentID string) (Documen
 	return document, nil
 }
 
-func (f *fakeRepository) DocumentForFile(_ context.Context, fileID, kbID string) (Document, error) {
+func (f *fakeRepository) DocumentForFile(_ context.Context, fileID, kbID string, caller authz.Caller) (Document, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.fail("DocumentForFile"); err != nil {
@@ -39,7 +41,7 @@ func (f *fakeRepository) DocumentForFile(_ context.Context, fileID, kbID string)
 	return Document{}, fmt.Errorf("%w: file %s", ErrNotFound, fileID)
 }
 
-func (f *fakeRepository) DocumentOfFile(_ context.Context, fileID string) (Document, error) {
+func (f *fakeRepository) DocumentOfFile(_ context.Context, fileID string, caller authz.Caller) (Document, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.fail("DocumentOfFile"); err != nil {
@@ -73,7 +75,7 @@ func aheadOf(candidate, current Document) bool {
 	return candidate.ID < current.ID
 }
 
-func (f *fakeRepository) Documents(_ context.Context, kbID string) ([]Document, error) {
+func (f *fakeRepository) Documents(_ context.Context, kbID string, caller authz.Caller) ([]Document, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.fail("Documents"); err != nil {
@@ -109,7 +111,7 @@ func (f *fakeRepository) CreateDocument(_ context.Context, write DocumentWrite) 
 	return nil
 }
 
-func (f *fakeRepository) ReplaceRevision(_ context.Context, write DocumentWrite, fromRevision int) error {
+func (f *fakeRepository) ReplaceRevision(_ context.Context, write DocumentWrite, fromRevision int, caller authz.Caller) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.fail("ReplaceRevision"); err != nil {
@@ -148,7 +150,7 @@ func (f *fakeRepository) writeChunksLocked(write DocumentWrite) {
 	f.chunks[write.Document.ID] = stored
 }
 
-func (f *fakeRepository) DeleteDocument(_ context.Context, documentID string) error {
+func (f *fakeRepository) DeleteDocument(_ context.Context, documentID string, caller authz.Caller) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.fail("DeleteDocument"); err != nil {

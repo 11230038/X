@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/mastery"
 	"backend/internal/practice"
 	"backend/internal/session"
@@ -30,15 +31,21 @@ type Sessions interface {
 // because the list and the next move answer different questions, and a listing
 // that had to assemble every path's insight to draw itself would do the work of
 // ten insights to show ten rows.
+//
+// The two carry the caller differently, and that is the domains' decision rather
+// than this package's: the listing already has a request struct that carries what
+// it is narrowed by, and the insight is one id and one account, which is a
+// parameter. Both are the caller's own — the dashboard is one person's page, and
+// there is no version of it that reads somebody else's (§2.12).
 type Paths interface {
 	List(context.Context, mastery.ListRequest) ([]mastery.Summary, error)
-	Insight(context.Context, string) (mastery.Insight, error)
+	Insight(context.Context, string, authz.Caller) (mastery.Insight, error)
 }
 
 // Reviews is the practice queue as a reader of it: the questions a sitting
 // would ask, in the order it would ask them.
 type Reviews interface {
-	Queue(context.Context, int) ([]practice.QueueItem, error)
+	Queue(context.Context, int, authz.Caller) ([]practice.QueueItem, error)
 }
 
 // Options is what the dashboard is built from.
@@ -94,16 +101,16 @@ func NewService(options Options) (*Service, error) {
 // it could read and quietly dropped the one that failed would be reporting a
 // person's history as shorter than it is, which is the one thing a "where was I"
 // view must not do.
-func (s *Service) Read(ctx context.Context) (View, error) {
-	sessions, err := s.sessions.List(ctx, session.ListOptions{Limit: s.limit})
+func (s *Service) Read(ctx context.Context, caller authz.Caller) (View, error) {
+	sessions, err := s.sessions.List(ctx, session.ListOptions{Limit: s.limit, Caller: caller})
 	if err != nil {
 		return View{}, fmt.Errorf("read recent sessions: %w", err)
 	}
-	paths, err := s.paths.List(ctx, mastery.ListRequest{})
+	paths, err := s.paths.List(ctx, mastery.ListRequest{Caller: caller})
 	if err != nil {
 		return View{}, fmt.Errorf("read mastery paths: %w", err)
 	}
-	reviews, err := s.reviews.Queue(ctx, s.limit)
+	reviews, err := s.reviews.Queue(ctx, s.limit, caller)
 	if err != nil {
 		return View{}, fmt.Errorf("read the review queue: %w", err)
 	}
@@ -113,7 +120,7 @@ func (s *Service) Read(ctx context.Context) (View, error) {
 		Paths:    pathEntries(paths, s.limit),
 		Reviews:  reviewEntries(reviews),
 	}
-	next, err := s.recommendations(ctx, paths)
+	next, err := s.recommendations(ctx, paths, caller)
 	if err != nil {
 		return View{}, err
 	}
@@ -136,13 +143,13 @@ func (s *Service) Read(ctx context.Context) (View, error) {
 //   - a path the list did not show is not recommended on. The categories and the
 //     recommendations are cut to the same window, so the page is about the same
 //     few things top to bottom.
-func (s *Service) recommendations(ctx context.Context, paths []mastery.Summary) ([]Recommendation, error) {
+func (s *Service) recommendations(ctx context.Context, paths []mastery.Summary, caller authz.Caller) ([]Recommendation, error) {
 	next := make([]Recommendation, 0, s.limit)
 	for _, summary := range paths {
 		if len(next) == s.limit {
 			break
 		}
-		insight, err := s.paths.Insight(ctx, summary.PathID)
+		insight, err := s.paths.Insight(ctx, summary.PathID, caller)
 		if err != nil {
 			return nil, fmt.Errorf("read the insight of path %s: %w", summary.PathID, err)
 		}

@@ -108,7 +108,7 @@ func pairedCatalogue(t *testing.T) (*Service, *fakeRepository, *fakeDocuments) {
 func TestARecommendationStoresNothing(t *testing.T) {
 	service, repository, _ := pairedCatalogue(t)
 
-	answer, err := service.Pairings(context.Background(), "rm_zh")
+	answer, err := service.Pairings(context.Background(), "rm_zh", testCaller)
 	if err != nil {
 		t.Fatalf("Pairings() error = %v", err)
 	}
@@ -139,7 +139,7 @@ func TestARecommendationLeavesOutItselfAndItsOwnLanguage(t *testing.T) {
 	service, repository, documents := pairedCatalogue(t)
 	withText(repository, documents, "rm_zh2", "doc_zh2", "算法导论.md", chineseText)
 
-	answer, err := service.Pairings(context.Background(), "rm_zh")
+	answer, err := service.Pairings(context.Background(), "rm_zh", testCaller)
 	if err != nil {
 		t.Fatalf("Pairings() error = %v", err)
 	}
@@ -162,7 +162,7 @@ func TestTheRecommendationIsOrderedByWhatTheTwoFilesHaveInCommon(t *testing.T) {
 	service, repository, documents := pairedCatalogue(t)
 	withText(repository, documents, "rm_other", "doc_other", "unrelated-notes.md", englishText)
 
-	answer, err := service.Pairings(context.Background(), "rm_zh")
+	answer, err := service.Pairings(context.Background(), "rm_zh", testCaller)
 	if err != nil {
 		t.Fatalf("Pairings() error = %v", err)
 	}
@@ -187,7 +187,7 @@ func TestAnUnpairedMaterialIsAnsweredWithAReason(t *testing.T) {
 	service, repository, documents := pairedCatalogue(t)
 	withText(repository, documents, "rm_empty", "doc_empty", "笔记.md", "")
 
-	state, err := service.Bilingual(context.Background(), "rm_zh")
+	state, err := service.Bilingual(context.Background(), "rm_zh", testCaller)
 	if err != nil {
 		t.Fatalf("Bilingual() error = %v", err)
 	}
@@ -200,7 +200,7 @@ func TestAnUnpairedMaterialIsAnsweredWithAReason(t *testing.T) {
 	}
 	// A material with no text to read says something different, because the
 	// reader's next step is different: there is nothing here to compare.
-	state, err = service.Bilingual(context.Background(), "rm_empty")
+	state, err = service.Bilingual(context.Background(), "rm_empty", testCaller)
 	if err != nil {
 		t.Fatalf("Bilingual() error = %v", err)
 	}
@@ -218,7 +218,7 @@ func TestConfirmingAndCancellingAreTheTwoStatesOfOneRow(t *testing.T) {
 
 	confirmed, err := service.ConfirmPairing(ctx, PairingRequest{
 		MaterialID: "rm_zh", CounterpartMaterialID: "rm_en",
-	})
+	}, testCaller)
 	if err != nil {
 		t.Fatalf("ConfirmPairing() error = %v", err)
 	}
@@ -236,7 +236,7 @@ func TestConfirmingAndCancellingAreTheTwoStatesOfOneRow(t *testing.T) {
 	// The state is answered from the far end too, and oriented from whoever asked:
 	// the English material is the primary side of a question about the English
 	// material.
-	state, err := service.Bilingual(ctx, "rm_en")
+	state, err := service.Bilingual(ctx, "rm_en", testCaller)
 	if err != nil {
 		t.Fatalf("Bilingual() error = %v", err)
 	}
@@ -252,14 +252,14 @@ func TestConfirmingAndCancellingAreTheTwoStatesOfOneRow(t *testing.T) {
 			state.Pairing.CounterpartLanguage)
 	}
 
-	cancelled, err := service.CancelPairing(ctx, confirmed.PairingID)
+	cancelled, err := service.CancelPairing(ctx, confirmed.PairingID, testCaller)
 	if err != nil {
 		t.Fatalf("CancelPairing() error = %v", err)
 	}
 	if !cancelled || len(repository.pairings) != 0 {
 		t.Fatalf("cancelling left %+v behind", repository.pairings)
 	}
-	state, err = service.Bilingual(ctx, "rm_zh")
+	state, err = service.Bilingual(ctx, "rm_zh", testCaller)
 	if err != nil {
 		t.Fatalf("Bilingual() error = %v", err)
 	}
@@ -273,7 +273,7 @@ func TestConfirmingAndCancellingAreTheTwoStatesOfOneRow(t *testing.T) {
 func TestCancellingNothingIsNotAFailure(t *testing.T) {
 	service, _, _ := pairedCatalogue(t)
 
-	cancelled, err := service.CancelPairing(context.Background(), "rp_没有这一行")
+	cancelled, err := service.CancelPairing(context.Background(), "rp_没有这一行", testCaller)
 	if err != nil {
 		t.Fatalf("CancelPairing() error = %v, want the state it is already in", err)
 	}
@@ -289,11 +289,11 @@ func TestConfirmingTheSamePairTwiceWritesOneRow(t *testing.T) {
 	ctx := context.Background()
 	request := PairingRequest{MaterialID: "rm_zh", CounterpartMaterialID: "rm_en"}
 
-	first, err := service.ConfirmPairing(ctx, request)
+	first, err := service.ConfirmPairing(ctx, request, testCaller)
 	if err != nil {
 		t.Fatalf("ConfirmPairing() error = %v", err)
 	}
-	second, err := service.ConfirmPairing(ctx, request)
+	second, err := service.ConfirmPairing(ctx, request, testCaller)
 	if err != nil {
 		t.Fatalf("confirming it again = %v, want the row that is there", err)
 	}
@@ -320,7 +320,7 @@ func TestAPairingIsRefusedWhenItIsNotOne(t *testing.T) {
 	for _, scenario := range cases {
 		t.Run(scenario.name, func(t *testing.T) {
 			service, repository, _ := pairedCatalogue(t)
-			_, err := service.ConfirmPairing(context.Background(), scenario.request)
+			_, err := service.ConfirmPairing(context.Background(), scenario.request, testCaller)
 			if !errors.Is(err, ErrInvalidRequest) {
 				t.Fatalf("ConfirmPairing(%+v) = %v, want ErrInvalidRequest", scenario.request, err)
 			}
@@ -340,7 +340,7 @@ func TestTwoMaterialsInOneLanguageAreNotAPair(t *testing.T) {
 
 	_, err := service.ConfirmPairing(context.Background(), PairingRequest{
 		MaterialID: "rm_zh", CounterpartMaterialID: "rm_zh2",
-	})
+	}, testCaller)
 	if !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("pairing two Chinese materials = %v, want ErrInvalidRequest", err)
 	}
@@ -364,7 +364,7 @@ func TestAMaterialInOnePairingIsNotInASecond(t *testing.T) {
 
 	_, err := service.ConfirmPairing(context.Background(), PairingRequest{
 		MaterialID: "rm_en", CounterpartMaterialID: "rm_zh",
-	})
+	}, testCaller)
 	if !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("pairing a material that is already paired = %v, want ErrInvalidRequest", err)
 	}
@@ -384,7 +384,7 @@ func TestAnAlreadyPairedMaterialIsNotOfferedAnother(t *testing.T) {
 		PrimaryLanguage: languageChinese, CounterpartLanguage: "fr", CreatedAt: sampleTime,
 	})
 
-	answer, err := service.Pairings(context.Background(), "rm_zh")
+	answer, err := service.Pairings(context.Background(), "rm_zh", testCaller)
 	if err != nil {
 		t.Fatalf("Pairings() error = %v", err)
 	}
@@ -408,7 +408,7 @@ func TestAPairedMaterialIsAnsweredWithoutReadingItsText(t *testing.T) {
 	})
 
 	documents.reads = nil
-	if _, err := service.Bilingual(context.Background(), "rm_zh"); err != nil {
+	if _, err := service.Bilingual(context.Background(), "rm_zh", testCaller); err != nil {
 		t.Fatalf("Bilingual() error = %v", err)
 	}
 	if len(documents.reads) != 0 {
@@ -426,18 +426,18 @@ func TestThePairingRulesReportWhatStorageSaid(t *testing.T) {
 	repository.deletePairingErr = failure
 	ctx := context.Background()
 
-	if _, err := service.Bilingual(ctx, "rm_zh"); !errors.Is(err, failure) {
+	if _, err := service.Bilingual(ctx, "rm_zh", testCaller); !errors.Is(err, failure) {
 		t.Errorf("Bilingual() error = %v, want the failure storage reported", err)
 	}
-	if _, err := service.Pairings(ctx, "rm_zh"); !errors.Is(err, failure) {
+	if _, err := service.Pairings(ctx, "rm_zh", testCaller); !errors.Is(err, failure) {
 		t.Errorf("Pairings() error = %v, want the failure storage reported", err)
 	}
 	if _, err := service.ConfirmPairing(ctx, PairingRequest{
 		MaterialID: "rm_zh", CounterpartMaterialID: "rm_en",
-	}); !errors.Is(err, failure) {
+	}, testCaller); !errors.Is(err, failure) {
 		t.Errorf("ConfirmPairing() error = %v, want the failure storage reported", err)
 	}
-	if _, err := service.CancelPairing(ctx, "rp_1"); !errors.Is(err, failure) {
+	if _, err := service.CancelPairing(ctx, "rp_1", testCaller); !errors.Is(err, failure) {
 		t.Errorf("CancelPairing() error = %v, want the failure storage reported", err)
 	}
 }

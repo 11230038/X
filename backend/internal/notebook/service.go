@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"time"
+
+	"backend/internal/authz"
 )
 
 const (
@@ -40,7 +42,11 @@ func NewService(repository Repository) (*Service, error) {
 // asked in, and the categories it is filed under are not this call's to change.
 // The tool uses Created to tell the model which happened, which is why it is
 // reported rather than worked out from the row afterwards.
-func (s *Service) Save(ctx context.Context, question Question) (Upserted, error) {
+//
+// The caller is the account the question is written for, and it is the turn's
+// rather than the session's: a question outlives the conversation it came from,
+// and the session may have no owner at all (see turn.Notebook.Save).
+func (s *Service) Save(ctx context.Context, question Question, caller authz.Caller) (Upserted, error) {
 	if err := question.Validate(); err != nil {
 		return Upserted{}, err
 	}
@@ -53,7 +59,7 @@ func (s *Service) Save(ctx context.Context, question Question) (Upserted, error)
 	// computed it differently would be saving to a different question.
 	question.QuestionID = QuestionID(question.Text, question.Type)
 
-	result, err := s.repository.UpsertQuestion(ctx, entryID, question, time.Now().UTC())
+	result, err := s.repository.UpsertQuestion(ctx, entryID, question, time.Now().UTC(), caller)
 	if err != nil {
 		return Upserted{}, err
 	}
@@ -62,19 +68,19 @@ func (s *Service) Save(ctx context.Context, question Question) (Upserted, error)
 	// The two are not one transaction because a category is not part of a
 	// question's identity: failing to file it is worth an error, but it is not
 	// worth throwing the question away over.
-	if err := s.repository.AddCategories(ctx, result.ID, question.Categories); err != nil {
+	if err := s.repository.AddCategories(ctx, result.ID, question.Categories, caller); err != nil {
 		return Upserted{}, err
 	}
 	return result, nil
 }
 
 // Get returns one question by its content address.
-func (s *Service) Get(ctx context.Context, questionID string) (Entry, error) {
-	entry, err := s.repository.Entry(ctx, questionID)
+func (s *Service) Get(ctx context.Context, questionID string, caller authz.Caller) (Entry, error) {
+	entry, err := s.repository.Entry(ctx, questionID, caller)
 	if err != nil {
 		return Entry{}, err
 	}
-	return s.withOneDue(ctx, entry)
+	return s.withOneDue(ctx, entry, caller)
 }
 
 // List returns one page of the bank.
@@ -86,28 +92,28 @@ func (s *Service) List(ctx context.Context, filter Filter) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.withDue(ctx, entries)
+	return s.withDue(ctx, entries, filter.Caller)
 }
 
 // Mark applies the marks that are set on a question directly. It is idempotent,
 // so asking twice for the state that is already stored succeeds.
-func (s *Service) Mark(ctx context.Context, questionID string, change Change) error {
+func (s *Service) Mark(ctx context.Context, questionID string, change Change, caller authz.Caller) error {
 	if change.Empty() {
 		return fmt.Errorf("%w: no marks were named", ErrEmptyChange)
 	}
-	return s.repository.Mark(ctx, questionID, change)
+	return s.repository.Mark(ctx, questionID, change, caller)
 }
 
 // SetCategories replaces the labels one question is filed under. An empty list
 // is a request to unfile it, and it is answered rather than refused: the labels
 // a question carries are the user's to set, including to none.
-func (s *Service) SetCategories(ctx context.Context, questionID string, names []string) error {
-	return s.repository.SetCategories(ctx, questionID, names)
+func (s *Service) SetCategories(ctx context.Context, questionID string, names []string, caller authz.Caller) error {
+	return s.repository.SetCategories(ctx, questionID, names, caller)
 }
 
 // Categories lists the labels the bank is filed under, most used first.
-func (s *Service) Categories(ctx context.Context) ([]Category, error) {
-	return s.repository.Categories(ctx)
+func (s *Service) Categories(ctx context.Context, caller authz.Caller) ([]Category, error) {
+	return s.repository.Categories(ctx, caller)
 }
 
 // newID returns a readable row id with the given prefix.

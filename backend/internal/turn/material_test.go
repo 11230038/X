@@ -1,6 +1,7 @@
 package turn
 
 import (
+	"backend/internal/authz"
 	"context"
 	"errors"
 	"fmt"
@@ -61,7 +62,7 @@ func (m *stubMaterials) add(fileID, documentID, filename string) {
 	}
 }
 
-func (m *stubMaterials) AddDocument(_ context.Context, fileID, kbID string) (kb.Document, error) {
+func (m *stubMaterials) AddDocument(_ context.Context, fileID, kbID string, _ authz.Caller) (kb.Document, error) {
 	m.asked = append(m.asked, "add "+fileID)
 	if err, ok := m.fileErrs[fileID]; ok {
 		return kb.Document{}, err
@@ -73,7 +74,7 @@ func (m *stubMaterials) AddDocument(_ context.Context, fileID, kbID string) (kb.
 	return document, nil
 }
 
-func (m *stubMaterials) ReadWindow(_ context.Context, documentID string, _, _ int64) (kb.Window, error) {
+func (m *stubMaterials) ReadWindow(_ context.Context, documentID string, _, _ int64, _ authz.Caller) (kb.Window, error) {
 	m.asked = append(m.asked, "window "+documentID)
 	window, ok := m.windows[documentID]
 	if !ok {
@@ -82,7 +83,7 @@ func (m *stubMaterials) ReadWindow(_ context.Context, documentID string, _, _ in
 	return window, nil
 }
 
-func (m *stubMaterials) Locate(_ context.Context, documentID, query string, _ int) ([]event.Source, error) {
+func (m *stubMaterials) Locate(_ context.Context, documentID, query string, _ int, _ authz.Caller) ([]event.Source, error) {
 	m.asked = append(m.asked, "locate "+documentID+" "+query)
 	return m.located, m.locateErr
 }

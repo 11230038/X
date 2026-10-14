@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"backend/internal/authz"
 )
 
 // The two ways a submission can lose, as things a transaction can report.
@@ -68,7 +70,11 @@ func NewService(repository Repository, judge *Judge) (*Service, error) {
 // table's primary key answers "is this the same submission", and the state
 // table's version answers "is this a new one". One without the other would give
 // away either the retry or the double tap.
-func (s *Service) Review(ctx context.Context, review Review) (ReviewResult, error) {
+//
+// The caller is the account the review is being recorded for, and every read
+// and write this makes is scoped to it: a question belonging to another account
+// is not there to review, and the submission is answered ErrNotFound.
+func (s *Service) Review(ctx context.Context, review Review, caller authz.Caller) (ReviewResult, error) {
 	if err := review.Validate(); err != nil {
 		return ReviewResult{}, err
 	}
@@ -76,7 +82,7 @@ func (s *Service) Review(ctx context.Context, review Review) (ReviewResult, erro
 
 	var result ReviewResult
 	err := s.repository.Within(ctx, func(repository Repository) error {
-		produced, err := s.record(ctx, repository, review, now)
+		produced, err := s.record(ctx, repository, review, now, caller)
 		if err != nil {
 			return err
 		}
@@ -86,9 +92,9 @@ func (s *Service) Review(ctx context.Context, review Review) (ReviewResult, erro
 
 	switch {
 	case errors.Is(err, errRecorded):
-		return s.replay(ctx, review)
+		return s.replay(ctx, review, caller)
 	case errors.Is(err, errStaleState):
-		return ReviewResult{}, s.stale(ctx, review)
+		return ReviewResult{}, s.stale(ctx, review, caller)
 	case err != nil:
 		return ReviewResult{}, err
 	}
@@ -105,10 +111,10 @@ func (s *Service) Review(ctx context.Context, review Review) (ReviewResult, erro
 // told its version was stale — an answer about a race between two different
 // submissions, given to a client that made one submission twice, and one that no
 // retry could act on.
-func (s *Service) record(ctx context.Context, repository Repository, review Review, now time.Time) (ReviewResult, error) {
+func (s *Service) record(ctx context.Context, repository Repository, review Review, now time.Time, caller authz.Caller) (ReviewResult, error) {
 	// A submission already recorded is answered from the record and nothing
 	// else: not judged again, not scheduled again, not counted again.
-	recorded, err := repository.RecordedReview(ctx, review.RequestID)
+	recorded, err := repository.RecordedReview(ctx, review.RequestID, caller)
 	if err == nil {
 		return replay(review, recorded)
 	}
@@ -116,7 +122,7 @@ func (s *Service) record(ctx context.Context, repository Repository, review Revi
 		return ReviewResult{}, err
 	}
 
-	entry, err := repository.Entry(ctx, review.QuestionID)
+	entry, err := repository.Entry(ctx, review.QuestionID, caller)
 	if err != nil {
 		return ReviewResult{}, err
 	}
@@ -182,7 +188,7 @@ func (s *Service) record(ctx context.Context, repository Repository, review Revi
 		IsCorrect:         correctnessOf(judgement),
 		Outcome:           outcomeJSON,
 		ReviewTime:        now,
-	})
+	}, caller)
 	if errors.Is(err, ErrDuplicate) {
 		return ReviewResult{}, errRecorded
 	}
@@ -192,7 +198,7 @@ func (s *Service) record(ctx context.Context, repository Repository, review Revi
 
 	switch {
 	case entry.State != nil:
-		moved, err := repository.AdvanceState(ctx, entry.ID, expected, next)
+		moved, err := repository.AdvanceState(ctx, entry.ID, expected, next, caller)
 		if err != nil {
 			return ReviewResult{}, err
 		}
@@ -205,7 +211,7 @@ func (s *Service) record(ctx context.Context, repository Repository, review Revi
 		// version this client never read.
 		return ReviewResult{}, errStaleState
 	default:
-		if err := repository.StartState(ctx, entry.ID, next); errors.Is(err, ErrDuplicate) {
+		if err := repository.StartState(ctx, entry.ID, next, caller); errors.Is(err, ErrDuplicate) {
 			// The row was created between the read and this write: the client
 			// did not see it, so what it read is behind, not wrong.
 			return ReviewResult{}, errStaleState
@@ -218,7 +224,7 @@ func (s *Service) record(ctx context.Context, repository Repository, review Revi
 	// submission that is being recorded for the first time and has a state row
 	// to show for it.
 	if review.Marker != MarkerSkipped {
-		if err := repository.RecordAnswer(ctx, entry.ID, face, now); err != nil {
+		if err := repository.RecordAnswer(ctx, entry.ID, face, now, caller); err != nil {
 			return ReviewResult{}, err
 		}
 	}
@@ -238,8 +244,8 @@ func (s *Service) record(ctx context.Context, repository Repository, review Revi
 // replay: nothing is being asked for a second time, and saying it was would be
 // the wrong word for it. A review that is not there is ErrNotFound, which the
 // surface answers as a review that does not exist rather than as a failure.
-func (s *Service) Recorded(ctx context.Context, requestID string) (ReviewResult, error) {
-	recorded, err := s.repository.RecordedReview(ctx, requestID)
+func (s *Service) Recorded(ctx context.Context, requestID string, caller authz.Caller) (ReviewResult, error) {
+	recorded, err := s.repository.RecordedReview(ctx, requestID, caller)
 	if err != nil {
 		return ReviewResult{}, err
 	}
@@ -319,8 +325,8 @@ func difference(review Review, result ReviewResult, recorded StoredReview) (stri
 // back, so it sees what the writer that got there first committed — a read
 // inside it could be answered from before that commit, and would then find no
 // row at all and report a collision it cannot describe.
-func (s *Service) replay(ctx context.Context, review Review) (ReviewResult, error) {
-	recorded, err := s.repository.RecordedReview(ctx, review.RequestID)
+func (s *Service) replay(ctx context.Context, review Review, caller authz.Caller) (ReviewResult, error) {
+	recorded, err := s.repository.RecordedReview(ctx, review.RequestID, caller)
 	if err != nil {
 		return ReviewResult{}, fmt.Errorf("read the review that took request id %s: %w",
 			review.RequestID, err)
@@ -337,8 +343,8 @@ func (s *Service) replay(ctx context.Context, review Review) (ReviewResult, erro
 // round trips to be told the same thing. When the state cannot be read, the
 // conflict is still true and is reported without it: a version invented to fill
 // the hole would be worse than a bare conflict.
-func (s *Service) stale(ctx context.Context, review Review) error {
-	entry, err := s.repository.Entry(ctx, review.QuestionID)
+func (s *Service) stale(ctx context.Context, review Review, caller authz.Caller) error {
+	entry, err := s.repository.Entry(ctx, review.QuestionID, caller)
 	if err != nil || entry.State == nil {
 		return ErrStaleReview
 	}

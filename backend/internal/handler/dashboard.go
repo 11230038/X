@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/dashboard"
 	"backend/internal/httpx"
 	"github.com/gin-gonic/gin"
@@ -13,7 +14,7 @@ import (
 
 // Dashboard is the "continue studying" view consumed by the HTTP handler.
 type Dashboard interface {
-	Read(context.Context) (dashboard.View, error)
+	Read(context.Context, authz.Caller) (dashboard.View, error)
 }
 
 // DashboardHandler handles the one dashboard endpoint.
@@ -69,7 +70,11 @@ func (h *DashboardHandler) Get(c *gin.Context) {
 		httpx.WriteError(c, http.StatusInternalServerError, "dashboard_unavailable", "the dashboard is not configured")
 		return
 	}
-	view, err := h.view.Read(c.Request.Context())
+	actor, ok := caller(c)
+	if !ok {
+		return
+	}
+	view, err := h.view.Read(c.Request.Context(), actor)
 	if err != nil {
 		if h.logger != nil {
 			h.logger.Error("dashboard request failed", "error", err, "request_id", httpx.RequestID(c))

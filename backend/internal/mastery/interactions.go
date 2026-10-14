@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"backend/internal/authz"
 )
 
 // A question is put, an answer comes back, and what came of it is written down.
@@ -125,7 +127,7 @@ type AskRequest struct {
 // the same empty answer is refused by nothing here — see the note at the top of
 // this file — and the design would rather have that hole and a case that finds
 // it than a schema this version cannot build.
-func (s *Service) Ask(ctx context.Context, ask AskRequest) (Interaction, error) {
+func (s *Service) Ask(ctx context.Context, ask AskRequest, caller authz.Caller) (Interaction, error) {
 	if err := ask.Actor.Validate(); err != nil {
 		return Interaction{}, err
 	}
@@ -139,7 +141,9 @@ func (s *Service) Ask(ctx context.Context, ask AskRequest) (Interaction, error) 
 
 	var asked Interaction
 	err := s.repository.Within(ctx, func(repository Repository) error {
-		path, err := repository.Path(ctx, ask.PathID)
+		// Scoped first: a question put on another account's path is ErrNotFound
+		// before any interaction or event is written.
+		path, err := repository.Path(ctx, ask.PathID, caller)
 		if err != nil {
 			return err
 		}
@@ -147,7 +151,7 @@ func (s *Service) Ask(ctx context.Context, ask AskRequest) (Interaction, error) 
 			return fmt.Errorf("%w: knowledge point %s is not in path %s",
 				ErrNotFound, ask.KnowledgePointID, path.ID)
 		}
-		open, err := repository.ActiveInteraction(ctx, path.ID)
+		open, err := repository.ActiveInteraction(ctx, path.ID, caller)
 		switch {
 		case err == nil:
 			return &OpenInteractionError{Interaction: open}
@@ -170,7 +174,7 @@ func (s *Service) Ask(ctx context.Context, ask AskRequest) (Interaction, error) 
 		if err := interaction.Validate(); err != nil {
 			return err
 		}
-		if err := repository.CreateInteraction(ctx, interaction); err != nil {
+		if err := repository.CreateInteraction(ctx, interaction, caller); err != nil {
 			return err
 		}
 		payload, err := json.Marshal(map[string]any{
@@ -194,10 +198,10 @@ func (s *Service) Ask(ctx context.Context, ask AskRequest) (Interaction, error) 
 			Actor:     ask.Actor,
 			CreatedAt: now,
 		}
-		if err := repository.AppendEvent(ctx, event); err != nil {
+		if err := repository.AppendEvent(ctx, event, caller); err != nil {
 			return err
 		}
-		if err := repository.TouchSession(ctx, path.ID, ask.Actor, now); err != nil {
+		if err := repository.TouchSession(ctx, path.ID, ask.Actor, now, caller); err != nil {
 			return err
 		}
 		asked = interaction
@@ -247,7 +251,7 @@ type GradeRequest struct {
 // The evidence is recorded *after* the close, so a call that loses the race to
 // close the question also records nothing: the winner's verdict is the one that
 // counts, and a second verdict on one answer is not a second observation.
-func (s *Service) Grade(ctx context.Context, grade GradeRequest) (Interaction, error) {
+func (s *Service) Grade(ctx context.Context, grade GradeRequest, caller authz.Caller) (Interaction, error) {
 	if err := grade.Actor.Validate(); err != nil {
 		return Interaction{}, err
 	}
@@ -260,12 +264,13 @@ func (s *Service) Grade(ctx context.Context, grade GradeRequest) (Interaction, e
 	err := s.repository.Within(ctx, func(repository Repository) error {
 		// The path is read for its version and for the fact that it is there: the
 		// answered event is a statement about the state the answer arrived at, and
-		// the evidence write below may move that state afterwards.
-		path, err := repository.Path(ctx, grade.PathID)
+		// the evidence write below may move that state afterwards. The read is
+		// scoped, so a verdict aimed at another account's path never gets past it.
+		path, err := repository.Path(ctx, grade.PathID, caller)
 		if err != nil {
 			return err
 		}
-		open, err := repository.ActiveInteraction(ctx, grade.PathID)
+		open, err := repository.ActiveInteraction(ctx, grade.PathID, caller)
 		if err != nil {
 			return err
 		}
@@ -281,7 +286,7 @@ func (s *Service) Grade(ctx context.Context, grade GradeRequest) (Interaction, e
 		if err != nil {
 			return fmt.Errorf("encode the verdict on %s: %w", open.ID, err)
 		}
-		closed, err := repository.CloseInteraction(ctx, open.ID, grade.UserAnswer, outcome, now)
+		closed, err := repository.CloseInteraction(ctx, open.ID, grade.UserAnswer, outcome, now, caller)
 		if err != nil {
 			return err
 		}
@@ -312,7 +317,7 @@ func (s *Service) Grade(ctx context.Context, grade GradeRequest) (Interaction, e
 			Actor:     grade.Actor,
 			CreatedAt: now,
 		}
-		if err := repository.AppendEvent(ctx, event); err != nil {
+		if err := repository.AppendEvent(ctx, event, caller); err != nil {
 			return err
 		}
 
@@ -331,7 +336,7 @@ func (s *Service) Grade(ctx context.Context, grade GradeRequest) (Interaction, e
 			Actor:          grade.Actor,
 			CreatedAt:      now,
 		}
-		if err := s.recordEvidence(ctx, repository, evidence, now); err != nil {
+		if err := s.recordEvidence(ctx, repository, evidence, now, caller); err != nil {
 			return err
 		}
 		graded = open
@@ -365,7 +370,7 @@ type SkipRequest struct {
 // left open. It is the case this tool exists for — the model asked, the learner
 // said not now — and leaving the row open would block the next question with a
 // refusal about a question nobody is going to answer.
-func (s *Service) Skip(ctx context.Context, skip SkipRequest) error {
+func (s *Service) Skip(ctx context.Context, skip SkipRequest, caller authz.Caller) error {
 	if err := skip.Actor.Validate(); err != nil {
 		return err
 	}
@@ -375,7 +380,9 @@ func (s *Service) Skip(ctx context.Context, skip SkipRequest) error {
 	now := s.clock()
 
 	return s.repository.Within(ctx, func(repository Repository) error {
-		path, err := repository.Path(ctx, skip.PathID)
+		// Scoped first, like the other two interaction writes: a skip aimed at
+		// another account's path is ErrNotFound before anything is written.
+		path, err := repository.Path(ctx, skip.PathID, caller)
 		if err != nil {
 			return err
 		}
@@ -388,7 +395,7 @@ func (s *Service) Skip(ctx context.Context, skip SkipRequest) error {
 				ErrNotFound, skip.KnowledgePointID, path.ID)
 		}
 
-		open, err := repository.ActiveInteraction(ctx, path.ID)
+		open, err := repository.ActiveInteraction(ctx, path.ID, caller)
 		closed := false
 		switch {
 		case err == nil && open.KnowledgePointID == skip.KnowledgePointID:
@@ -396,7 +403,7 @@ func (s *Service) Skip(ctx context.Context, skip SkipRequest) error {
 			if err != nil {
 				return fmt.Errorf("encode the skip of %s: %w", open.ID, err)
 			}
-			closed, err = repository.CloseInteraction(ctx, open.ID, "", outcome, now)
+			closed, err = repository.CloseInteraction(ctx, open.ID, "", outcome, now, caller)
 			if err != nil {
 				return err
 			}
@@ -425,10 +432,10 @@ func (s *Service) Skip(ctx context.Context, skip SkipRequest) error {
 			Actor:     skip.Actor,
 			CreatedAt: now,
 		}
-		if err := repository.AppendEvent(ctx, event); err != nil {
+		if err := repository.AppendEvent(ctx, event, caller); err != nil {
 			return err
 		}
-		return repository.TouchSession(ctx, path.ID, skip.Actor, now)
+		return repository.TouchSession(ctx, path.ID, skip.Actor, now, caller)
 	})
 }
 

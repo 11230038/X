@@ -95,6 +95,7 @@ func (c *conn) perform(ctx context.Context, cmd command) (any, func() error, err
 // starting a turn is asking to watch it.
 func (c *conn) startTurn(ctx context.Context, cmd command) (any, func() error, error) {
 	started, err := c.turns.Start(ctx, turn.StartRequest{
+		OwnerID:        c.caller.UserID,
 		SessionID:      cmd.SessionID,
 		Capability:     cmd.Capability,
 		Content:        cmd.Content,

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/httpx"
 	"backend/internal/reading"
 	"github.com/gin-gonic/gin"
@@ -19,23 +20,27 @@ import (
 // It is the domain service's whole surface apart from one thing: what runs an
 // extension is the registry, which is a value rather than a method on the
 // service, so it is held beside this interface rather than inside it (§2.9).
+//
+// Every method takes the account last, because every one of them reads or writes
+// something an account owns: a material is the caller's, and a position, a mark
+// or a pairing is the caller's through the material it hangs off.
 type Readings interface {
-	Materials(ctx context.Context, workspaceID string) ([]reading.Material, error)
-	Material(ctx context.Context, materialID string) (reading.Material, error)
-	Outline(ctx context.Context, materialID string) (reading.Outline, error)
-	Create(ctx context.Context, fileID, sourceType string) (reading.Material, error)
-	Position(ctx context.Context, materialID, sessionID string) (reading.Position, bool, error)
-	SavePosition(ctx context.Context, request reading.SavePositionRequest) (reading.Position, error)
-	Marks(ctx context.Context, materialID string) ([]reading.Mark, error)
-	AddMark(ctx context.Context, request reading.MarkRequest) (reading.Mark, error)
-	Resolve(ctx context.Context, materialID string, locator reading.Locator) (reading.Passage, error)
+	Materials(ctx context.Context, workspaceID string, caller authz.Caller) ([]reading.Material, error)
+	Material(ctx context.Context, materialID string, caller authz.Caller) (reading.Material, error)
+	Outline(ctx context.Context, materialID string, caller authz.Caller) (reading.Outline, error)
+	Create(ctx context.Context, fileID, sourceType string, caller authz.Caller) (reading.Material, error)
+	Position(ctx context.Context, materialID, sessionID string, caller authz.Caller) (reading.Position, bool, error)
+	SavePosition(ctx context.Context, request reading.SavePositionRequest, caller authz.Caller) (reading.Position, error)
+	Marks(ctx context.Context, materialID string, caller authz.Caller) ([]reading.Mark, error)
+	AddMark(ctx context.Context, request reading.MarkRequest, caller authz.Caller) (reading.Mark, error)
+	Resolve(ctx context.Context, materialID string, locator reading.Locator, caller authz.Caller) (reading.Passage, error)
 	// Pairings is the bilingual read: whether this material's bilingual reading is
 	// enabled and what it could be paired with (§2.10). ConfirmPairing and
 	// CancelPairing are the two writes that change it, and cancelling reports
 	// whether there was anything left to cancel.
-	Pairings(ctx context.Context, materialID string) (reading.Pairings, error)
-	ConfirmPairing(ctx context.Context, request reading.PairingRequest) (reading.Pairing, error)
-	CancelPairing(ctx context.Context, pairingID string) (bool, error)
+	Pairings(ctx context.Context, materialID string, caller authz.Caller) (reading.Pairings, error)
+	ConfirmPairing(ctx context.Context, request reading.PairingRequest, caller authz.Caller) (reading.Pairing, error)
+	CancelPairing(ctx context.Context, pairingID string, caller authz.Caller) (bool, error)
 }
 
 // ReadingHandler handles the reading layer: the catalogue, one material's units,
@@ -155,7 +160,11 @@ func (h *ReadingHandler) List(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	found, err := h.readings.Materials(c.Request.Context(), c.Query("workspace_id"))
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	found, err := h.readings.Materials(c.Request.Context(), c.Query("workspace_id"), account)
 	if err != nil {
 		h.fail(c, "list_materials_failed", err)
 		return
@@ -176,7 +185,11 @@ func (h *ReadingHandler) Create(c *gin.Context) {
 	if !readJSON(c, maxReadingRequestBytes, &request) {
 		return
 	}
-	created, err := h.readings.Create(c.Request.Context(), request.FileID, request.SourceType)
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	created, err := h.readings.Create(c.Request.Context(), request.FileID, request.SourceType, account)
 	if err != nil {
 		h.fail(c, "create_material_failed", err)
 		return
@@ -190,8 +203,12 @@ func (h *ReadingHandler) Get(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	materialID := c.Param("materialID")
-	outline, err := h.readings.Outline(c.Request.Context(), materialID)
+	outline, err := h.readings.Outline(c.Request.Context(), materialID, account)
 	if err != nil {
 		h.fail(c, "get_material_failed", err)
 		return
@@ -202,7 +219,7 @@ func (h *ReadingHandler) Get(c *gin.Context) {
 		TextChars: outline.TextChars,
 	}
 	if sessionID := strings.TrimSpace(c.Query("session_id")); sessionID != "" {
-		position, saved, err := h.readings.Position(c.Request.Context(), materialID, sessionID)
+		position, saved, err := h.readings.Position(c.Request.Context(), materialID, sessionID, account)
 		if err != nil {
 			h.fail(c, "get_material_failed", err)
 			return
@@ -230,7 +247,11 @@ func (h *ReadingHandler) Content(c *gin.Context) {
 	if !ok {
 		return
 	}
-	passage, err := h.readings.Resolve(c.Request.Context(), materialID, locator)
+	account, authenticated := caller(c)
+	if !authenticated {
+		return
+	}
+	passage, err := h.readings.Resolve(c.Request.Context(), materialID, locator, account)
 	if err != nil {
 		h.fail(c, "read_passage_failed", err)
 		return
@@ -245,7 +266,11 @@ func (h *ReadingHandler) Marks(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	found, err := h.readings.Marks(c.Request.Context(), c.Param("materialID"))
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	found, err := h.readings.Marks(c.Request.Context(), c.Param("materialID"), account)
 	if err != nil {
 		h.fail(c, "list_marks_failed", err)
 		return
@@ -267,13 +292,17 @@ func (h *ReadingHandler) AddMark(c *gin.Context) {
 	if !readJSON(c, maxReadingRequestBytes, &request) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	mark, err := h.readings.AddMark(c.Request.Context(), reading.MarkRequest{
 		MaterialID: materialID,
 		SessionID:  request.SessionID,
 		Kind:       reading.MarkKind(strings.TrimSpace(request.Kind)),
 		Locator:    h.locatorIn(materialID, request.Locator),
 		Body:       request.Body,
-	})
+	}, account)
 	if err != nil {
 		h.fail(c, "add_mark_failed", err)
 		return
@@ -295,12 +324,16 @@ func (h *ReadingHandler) SavePosition(c *gin.Context) {
 	if !readJSON(c, maxReadingRequestBytes, &request) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	position, err := h.readings.SavePosition(c.Request.Context(), reading.SavePositionRequest{
 		MaterialID: materialID,
 		SessionID:  request.SessionID,
 		Locator:    h.locatorIn(materialID, request.Locator),
 		Revision:   request.Revision,
-	})
+	}, account)
 	if err != nil {
 		h.fail(c, "save_position_failed", err)
 		return
@@ -318,7 +351,11 @@ func (h *ReadingHandler) Extensions(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	if _, err := h.readings.Material(c.Request.Context(), c.Param("materialID")); err != nil {
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	if _, err := h.readings.Material(c.Request.Context(), c.Param("materialID"), account); err != nil {
 		h.fail(c, "list_extensions_failed", err)
 		return
 	}
@@ -339,8 +376,12 @@ func (h *ReadingHandler) RunExtension(c *gin.Context) {
 	if !readJSON(c, maxReadingRequestBytes, &request) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	locator := h.locatorIn(materialID, request.Locator)
-	passage, err := h.readings.Resolve(c.Request.Context(), materialID, locator)
+	passage, err := h.readings.Resolve(c.Request.Context(), materialID, locator, account)
 	if err != nil {
 		h.fail(c, "run_extension_failed", err)
 		return

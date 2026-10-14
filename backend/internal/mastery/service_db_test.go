@@ -20,7 +20,7 @@ func TestDBArrivingWithNothingCreatesThePathTheConversationNames(t *testing.T) {
 	actor := h.conversation(t, "s_1", "t_1")
 	ctx := context.Background()
 
-	arrival, err := h.service.Arrive(ctx, ArriveRequest{Actor: actor, Goal: "  学会闭包  "})
+	arrival, err := h.service.Arrive(ctx, ArriveRequest{Actor: actor, Goal: "  学会闭包  "}, h.caller)
 	if err != nil {
 		t.Fatalf("arrive: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestDBArrivingWithNothingCreatesThePathTheConversationNames(t *testing.T) {
 	if len(arrival.Path.Tree.Modules) != 0 {
 		t.Errorf("a path created from a goal arrived with %d modules", len(arrival.Path.Tree.Modules))
 	}
-	view, err := h.service.Load(ctx, arrival.Path.ID)
+	view, err := h.service.Load(ctx, arrival.Path.ID, h.caller)
 	if err != nil {
 		t.Fatalf("read the path back: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestDBArrivingWithNothingCreatesThePathTheConversationNames(t *testing.T) {
 	// One transaction wrote the path, its metadata, its history and its link to
 	// the conversation, and the link is the only one of the four the arrival
 	// itself cannot be read off.
-	pathID, err := h.repository.PathOfSession(ctx, "s_1")
+	pathID, err := h.repository.PathOfSession(ctx, "s_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the path of the conversation: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestDBArrivingAgainComesBackToTheSamePath(t *testing.T) {
 	first := h.conversation(t, "s_1", "t_1")
 	ctx := context.Background()
 
-	opened, err := h.service.Arrive(ctx, ArriveRequest{Actor: first, Goal: "学会闭包"})
+	opened, err := h.service.Arrive(ctx, ArriveRequest{Actor: first, Goal: "学会闭包"}, h.caller)
 	if err != nil {
 		t.Fatalf("arrive: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestDBArrivingAgainComesBackToTheSamePath(t *testing.T) {
 	// already on. A goal of its own does not start a second one: the goal names a
 	// path only when there is no path to name.
 	second := h.turn(t, "t_2", "s_1")
-	again, err := h.service.Arrive(ctx, ArriveRequest{Actor: second, Goal: "学点别的"})
+	again, err := h.service.Arrive(ctx, ArriveRequest{Actor: second, Goal: "学点别的"}, h.caller)
 	if err != nil {
 		t.Fatalf("arrive again: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestDBArrivingAgainComesBackToTheSamePath(t *testing.T) {
 	if again.Lease.TurnID != "t_2" {
 		t.Errorf("the path is held by %s, want the second turn", again.Lease.TurnID)
 	}
-	seen, err := h.repository.SeenAt(ctx, opened.Path.ID, "s_1")
+	seen, err := h.repository.SeenAt(ctx, opened.Path.ID, "s_1", h.caller)
 	if err != nil {
 		t.Fatalf("read when the conversation last saw the path: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestDBArrivingIsNeverRefusedForHavingTooManyPaths(t *testing.T) {
 	for _, id := range []string{"mp_a", "mp_b", "mp_c"} {
 		h.create(t, id, "目标 "+id, actor)
 	}
-	active, err := h.repository.ActivePathsOfSession(ctx, "s_1")
+	active, err := h.repository.ActivePathsOfSession(ctx, "s_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the active paths: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestDBArrivingIsNeverRefusedForHavingTooManyPaths(t *testing.T) {
 	// counted per conversation or per person is a product question the design
 	// answers one way and this code the other (V4设计方案 §0.3). Changing it here
 	// would be this package answering that question on its own.
-	arrival, err := h.service.Arrive(ctx, ArriveRequest{Actor: actor, Goal: "第四条"})
+	arrival, err := h.service.Arrive(ctx, ArriveRequest{Actor: actor, Goal: "第四条"}, h.caller)
 	if err != nil {
 		t.Fatalf("arriving at the limit: %v, want the path the conversation is already on: %v",
 			err, ErrTooManyPaths)
@@ -190,7 +190,7 @@ func TestDBAChangeHonoursTheVersionTheCallerRead(t *testing.T) {
 	updated, err := h.service.AddKnowledgePoint(ctx, AddKnowledgePointRequest{
 		Change:   Change{PathID: "mp_1", Actor: actor, Expected: &one},
 		ModuleID: "m_basics", ID: "kp_new", Name: "新的知识点",
-	})
+	}, h.caller)
 	if err != nil {
 		t.Fatalf("add a knowledge point: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestDBAChangeHonoursTheVersionTheCallerRead(t *testing.T) {
 	if _, _, ok := updated.Tree.KnowledgePoint("kp_new"); !ok {
 		t.Error("the knowledge point the caller added is not in the tree that came back")
 	}
-	events, err := h.repository.Events(ctx, "mp_1")
+	events, err := h.repository.Events(ctx, "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the history: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestDBAChangeHonoursTheVersionTheCallerRead(t *testing.T) {
 	if _, err := h.service.EditKnowledgePoint(ctx, EditKnowledgePointRequest{
 		Change: Change{PathID: "mp_1", Actor: actor, Expected: &one},
 		ID:     "kp_new", Edit: edit,
-	}); !errors.Is(err, ErrStaleState) {
+	}, h.caller); !errors.Is(err, ErrStaleState) {
 		t.Fatalf("a change against a version that has moved: %v, want %v", err, ErrStaleState)
 	}
 	if stored := h.storedPath(t, "mp_1"); stored.Version == nil || *stored.Version != 2 {
@@ -235,7 +235,7 @@ func TestDBAChangeHonoursTheVersionTheCallerRead(t *testing.T) {
 	next, err := h.service.EditKnowledgePoint(ctx, EditKnowledgePointRequest{
 		Change: Change{PathID: "mp_1", Actor: actor},
 		ID:     "kp_new", Edit: edit,
-	})
+	}, h.caller)
 	if err != nil {
 		t.Fatalf("edit without naming a version: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestDBAChangeHonoursTheVersionTheCallerRead(t *testing.T) {
 		Change: Change{PathID: "mp_1", Actor: actor},
 		ID:     "kp_nobody",
 		Edit:   Edit{Name: ptr("换个说法")},
-	}); !errors.Is(err, ErrNotFound) {
+	}, h.caller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("editing a knowledge point that is not in the tree: %v, want %v", err, ErrNotFound)
 	}
 	if stored := h.storedPath(t, "mp_1"); stored.Version == nil || *stored.Version != 3 {
@@ -272,7 +272,7 @@ func TestDBNamingThePathsWritesNoHistoryAndTakesNoVersion(t *testing.T) {
 
 	renamed, err := h.service.UpdateMeta(ctx, MetaRequest{
 		PathID: "mp_1", Goal: ptr("把闭包学明白"), Emoji: ptr("📚"),
-	})
+	}, h.caller)
 	if err != nil {
 		t.Fatalf("rename the path: %v", err)
 	}
@@ -293,20 +293,20 @@ func TestDBNamingThePathsWritesNoHistoryAndTakesNoVersion(t *testing.T) {
 	// A status this version does not write is refused rather than stored: nothing
 	// reads the column, and accepting "archived" would be this package inventing
 	// a vocabulary and then not honouring it.
-	if _, err := h.service.UpdateMeta(ctx, MetaRequest{PathID: "mp_1", Status: ptr("archived")}); !errors.Is(err, ErrInvalidRequest) {
+	if _, err := h.service.UpdateMeta(ctx, MetaRequest{PathID: "mp_1", Status: ptr("archived")}, h.caller); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("setting a status this version does not write: %v, want %v", err, ErrInvalidRequest)
 	}
-	if _, err := h.service.UpdateMeta(ctx, MetaRequest{PathID: "mp_1"}); !errors.Is(err, ErrInvalidRequest) {
+	if _, err := h.service.UpdateMeta(ctx, MetaRequest{PathID: "mp_1"}, h.caller); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("a request that names nothing to change: %v, want %v", err, ErrInvalidRequest)
 	}
 	if _, err := h.service.UpdateMeta(ctx, MetaRequest{
 		PathID: "mp_missing", Goal: ptr("无处安放"),
-	}); !errors.Is(err, ErrNotFound) {
+	}, h.caller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("renaming a path that is not there: %v, want %v", err, ErrNotFound)
 	}
 	// And the refusals wrote nothing: the metadata is what the successful rename
 	// left, not a half-applied later one.
-	view, err := h.service.Load(ctx, "mp_1")
+	view, err := h.service.Load(ctx, "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the path back: %v", err)
 	}
@@ -334,11 +334,11 @@ func TestDBAListingReadsTheTreeAndTheCachedLevels(t *testing.T) {
 	if _, err := h.service.AddKnowledgePoint(ctx, AddKnowledgePointRequest{
 		Change:   Change{PathID: "mp_1", Actor: actor},
 		ModuleID: "m_advanced", ID: "kp_second", Name: "第二个",
-	}); err != nil {
+	}, h.caller); err != nil {
 		t.Fatalf("force the tree to be rewritten: %v", err)
 	}
 
-	list, err := h.service.List(ctx, ListRequest{})
+	list, err := h.service.List(ctx, ListRequest{Caller: h.caller})
 	if err != nil {
 		t.Fatalf("list the paths: %v", err)
 	}
@@ -368,19 +368,92 @@ func TestDBAListingReadsTheTreeAndTheCachedLevels(t *testing.T) {
 
 	// Narrowing by conversation is the other half of the request, and a
 	// conversation that has nothing lists nothing rather than listing everything.
-	mine, err := h.service.List(ctx, ListRequest{SessionID: "s_1"})
+	mine, err := h.service.List(ctx, ListRequest{Caller: h.caller, SessionID: "s_1"})
 	if err != nil {
 		t.Fatalf("list this conversation's paths: %v", err)
 	}
 	if len(mine) != 1 || mine[0].PathID != "mp_1" {
 		t.Errorf("the narrowed listing is %+v", mine)
 	}
-	theirs, err := h.service.List(ctx, ListRequest{SessionID: "s_elsewhere"})
+	theirs, err := h.service.List(ctx, ListRequest{Caller: h.caller, SessionID: "s_elsewhere"})
 	if err != nil {
 		t.Fatalf("list another conversation's paths: %v", err)
 	}
 	if len(theirs) != 0 {
 		t.Errorf("a conversation that has been on nothing lists %+v", theirs)
+	}
+}
+
+func TestDBAPathsOwnerIsWhatDecidesWhoCanReadIt(t *testing.T) {
+	h := newHarness(t)
+	actor := h.conversation(t, "s_1", "t_1")
+	ctx := context.Background()
+
+	// One path, written for h.caller, which is the account every read here has to
+	// be scoped to. §7.2 asks for this case by name and on every listing rather
+	// than on one of them, because a read that forgets the scope does not fail: it
+	// returns another account's rows, and a list with too much in it looks exactly
+	// like a list that works.
+	h.create(t, "mp_mine", "学会闭包", actor)
+
+	// The owner's listing holds the path, and the count is of the caller's rows
+	// rather than of the table's — which is the whole of the difference the scope
+	// makes.
+	mine, err := h.service.List(ctx, ListRequest{Caller: h.caller})
+	if err != nil {
+		t.Fatalf("list as the owner: %v", err)
+	}
+	if len(mine) != 1 || mine[0].PathID != "mp_mine" {
+		t.Errorf("the owner's listing is %+v, want the one path it made", mine)
+	}
+	// Another account's listing is empty, and not because it was filtered after the
+	// fact: the scope is in the SQL, so the row is never a candidate. An empty list
+	// is also the honest answer rather than a refusal — a person who has started
+	// nothing has no paths, and that is true whether the rows are theirs or
+	// somebody else's.
+	theirs, err := h.service.List(ctx, ListRequest{Caller: h.other})
+	if err != nil {
+		t.Fatalf("list as another account: %v", err)
+	}
+	if len(theirs) != 0 {
+		t.Errorf("another account's listing is %+v, want nothing of the owner's", theirs)
+	}
+
+	// Reading the path by id is the same rule at one row: not a 403 and not a
+	// refusal of any kind, but the absence sentinel the handler already maps to a
+	// 404 (§2.5). So another account cannot even learn that the path exists, which
+	// is why the answer is not "you may not have this" — that would say it is
+	// there.
+	if _, err := h.service.Load(ctx, "mp_mine", h.other); !errors.Is(err, ErrNotFound) {
+		t.Errorf("another account reading the owner's path: %v, want %v", err, ErrNotFound)
+	}
+	// The reads that hang off the same path answer the same way, because they are
+	// scoped the same way: the insight, the lease and the write that renames all
+	// go through the path's owner before they do anything else.
+	if _, err := h.service.Insight(ctx, "mp_mine", h.other); !errors.Is(err, ErrNotFound) {
+		t.Errorf("another account reading the insight: %v, want %v", err, ErrNotFound)
+	}
+	if _, err := h.service.Holder(ctx, "mp_mine", h.other); !errors.Is(err, ErrNotFound) {
+		t.Errorf("another account reading the lease: %v, want %v", err, ErrNotFound)
+	}
+	goal := "偷看别人的目标"
+	if _, err := h.service.UpdateMeta(ctx, MetaRequest{PathID: "mp_mine", Goal: &goal}, h.other); !errors.Is(err, ErrNotFound) {
+		t.Errorf("another account renaming the path: %v, want %v", err, ErrNotFound)
+	}
+	// The rename did not land, which is the half a status code cannot show.
+	if view, err := h.service.Load(ctx, "mp_mine", h.caller); err != nil {
+		t.Fatalf("the owner reading its own path: %v", err)
+	} else if view.Meta.Goal == goal {
+		t.Error("another account's rename reached the owner's path")
+	}
+
+	// The administrator is not a way past the scope, and that is the rule rather
+	// than an oversight: admin admits the rows that belong to nobody (the pre-V5
+	// history), not the rows that belong to somebody. An owned path is scoped away
+	// from the administrator exactly as it is from any other account, so the only
+	// paths the administrator reads are NULL-owner ones and its own.
+	if _, err := h.service.Load(ctx, "mp_mine", h.admin); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the administrator reading an owned path: %v, want %v", err, ErrNotFound)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/event"
 	"backend/internal/httpx"
 	"backend/internal/kb"
@@ -21,17 +22,23 @@ import (
 // routes below are one resource's CRUD, and every method here is one of its
 // verbs. Splitting it would be splitting by who reads it, and the answer is
 // every route here.
+//
+// Every method carries the caller, including the ones the route already names a
+// collection for. The route says which collection by id, and an id is a thing a
+// client writes down: what makes this request legitimate is that the collection
+// is the caller's, so the account travels with the request rather than being
+// assumed from the fact that a route exists.
 type KnowledgeBases interface {
-	CreateKnowledgeBase(ctx context.Context, name, description string) (kb.KnowledgeBase, error)
-	KnowledgeBases(ctx context.Context) ([]kb.KnowledgeBase, error)
-	KnowledgeBase(ctx context.Context, kbID string) (kb.KnowledgeBase, error)
-	SetDefaultKnowledgeBase(ctx context.Context, kbID string) error
-	DeleteKnowledgeBase(ctx context.Context, kbID string) error
-	Documents(ctx context.Context, kbID string) ([]kb.Document, error)
-	Document(ctx context.Context, documentID string) (kb.Document, error)
-	AddDocument(ctx context.Context, fileID, kbID string) (kb.Document, error)
-	RemoveDocument(ctx context.Context, documentID string) error
-	RebuildDocument(ctx context.Context, documentID string) (kb.Document, error)
+	CreateKnowledgeBase(ctx context.Context, name, description string, caller authz.Caller) (kb.KnowledgeBase, error)
+	KnowledgeBases(ctx context.Context, caller authz.Caller) ([]kb.KnowledgeBase, error)
+	KnowledgeBase(ctx context.Context, kbID string, caller authz.Caller) (kb.KnowledgeBase, error)
+	SetDefaultKnowledgeBase(ctx context.Context, kbID string, caller authz.Caller) error
+	DeleteKnowledgeBase(ctx context.Context, kbID string, caller authz.Caller) error
+	Documents(ctx context.Context, kbID string, caller authz.Caller) ([]kb.Document, error)
+	Document(ctx context.Context, documentID string, caller authz.Caller) (kb.Document, error)
+	AddDocument(ctx context.Context, fileID, kbID string, caller authz.Caller) (kb.Document, error)
+	RemoveDocument(ctx context.Context, documentID string, caller authz.Caller) error
+	RebuildDocument(ctx context.Context, documentID string, caller authz.Caller) (kb.Document, error)
 	Retrieve(ctx context.Context, input kb.RetrieveInput) (kb.Retrieval, error)
 }
 
@@ -132,11 +139,15 @@ func (h *KBHandler) Create(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	var request createKnowledgeBaseRequest
 	if !readJSON(c, maxKBRequestBytes, &request) {
 		return
 	}
-	created, err := h.bases.CreateKnowledgeBase(c.Request.Context(), request.Name, request.Description)
+	created, err := h.bases.CreateKnowledgeBase(c.Request.Context(), request.Name, request.Description, account)
 	if err != nil {
 		h.fail(c, "create_knowledge_base_failed", err)
 		return
@@ -149,7 +160,11 @@ func (h *KBHandler) List(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	found, err := h.bases.KnowledgeBases(c.Request.Context())
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	found, err := h.bases.KnowledgeBases(c.Request.Context(), account)
 	if err != nil {
 		h.fail(c, "list_knowledge_bases_failed", err)
 		return
@@ -166,13 +181,17 @@ func (h *KBHandler) Get(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	kbID := c.Param("kbID")
-	record, err := h.bases.KnowledgeBase(c.Request.Context(), kbID)
+	record, err := h.bases.KnowledgeBase(c.Request.Context(), kbID, account)
 	if err != nil {
 		h.fail(c, "get_knowledge_base_failed", err)
 		return
 	}
-	documents, err := h.bases.Documents(c.Request.Context(), record.ID)
+	documents, err := h.bases.Documents(c.Request.Context(), record.ID, account)
 	if err != nil {
 		h.fail(c, "get_knowledge_base_failed", err)
 		return
@@ -192,7 +211,11 @@ func (h *KBHandler) Delete(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	if err := h.bases.DeleteKnowledgeBase(c.Request.Context(), c.Param("kbID")); err != nil {
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	if err := h.bases.DeleteKnowledgeBase(c.Request.Context(), c.Param("kbID"), account); err != nil {
 		h.fail(c, "delete_knowledge_base_failed", err)
 		return
 	}
@@ -208,12 +231,16 @@ func (h *KBHandler) SetDefault(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	kbID := c.Param("kbID")
-	if err := h.bases.SetDefaultKnowledgeBase(c.Request.Context(), kbID); err != nil {
+	if err := h.bases.SetDefaultKnowledgeBase(c.Request.Context(), kbID, account); err != nil {
 		h.fail(c, "set_default_knowledge_base_failed", err)
 		return
 	}
-	record, err := h.bases.KnowledgeBase(c.Request.Context(), kbID)
+	record, err := h.bases.KnowledgeBase(c.Request.Context(), kbID, account)
 	if err != nil {
 		h.fail(c, "set_default_knowledge_base_failed", err)
 		return
@@ -231,11 +258,15 @@ func (h *KBHandler) AddDocument(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	var request addDocumentRequest
 	if !readJSON(c, maxKBRequestBytes, &request) {
 		return
 	}
-	document, err := h.bases.AddDocument(c.Request.Context(), request.FileID, c.Param("kbID"))
+	document, err := h.bases.AddDocument(c.Request.Context(), request.FileID, c.Param("kbID"), account)
 	if err != nil {
 		h.fail(c, "add_document_failed", err)
 		return
@@ -253,11 +284,15 @@ func (h *KBHandler) RemoveDocument(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	document, ok := h.documentIn(c, c.Param("kbID"), c.Param("documentID"))
+	account, ok := caller(c)
 	if !ok {
 		return
 	}
-	if err := h.bases.RemoveDocument(c.Request.Context(), document.ID); err != nil {
+	document, ok := h.documentIn(c, account, c.Param("kbID"), c.Param("documentID"))
+	if !ok {
+		return
+	}
+	if err := h.bases.RemoveDocument(c.Request.Context(), document.ID, account); err != nil {
 		h.fail(c, "remove_document_failed", err)
 		return
 	}
@@ -274,15 +309,19 @@ func (h *KBHandler) Rebuild(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	var request rebuildRequest
 	if !readJSON(c, maxKBRequestBytes, &request) {
 		return
 	}
-	document, ok := h.documentIn(c, c.Param("kbID"), request.DocumentID)
+	document, ok := h.documentIn(c, account, c.Param("kbID"), request.DocumentID)
 	if !ok {
 		return
 	}
-	rebuilt, err := h.bases.RebuildDocument(c.Request.Context(), document.ID)
+	rebuilt, err := h.bases.RebuildDocument(c.Request.Context(), document.ID, account)
 	if err != nil {
 		h.fail(c, "rebuild_document_failed", err)
 		return
@@ -297,12 +336,16 @@ func (h *KBHandler) Search(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	var request searchRequest
 	if !readJSON(c, maxKBRequestBytes, &request) {
 		return
 	}
 	result, err := h.bases.Retrieve(c.Request.Context(), kb.RetrieveInput{
-		KBIDs: []string{c.Param("kbID")},
+		KBIDs: []string{c.Param("kbID")}, Caller: account,
 		Query: request.Query,
 		TopK:  request.TopK,
 	})
@@ -325,8 +368,15 @@ func (h *KBHandler) Search(c *gin.Context) {
 }
 
 // documentIn reads a document and checks it belongs to the base the path names.
-func (h *KBHandler) documentIn(c *gin.Context, kbID, documentID string) (kb.Document, bool) {
-	document, err := h.bases.Document(c.Request.Context(), documentID)
+//
+// The ownership check is now two deep: the read is the caller's, so a document
+// belonging to another account is already ErrNotFound before the base is
+// compared, and the comparison then says the document is in the base the path
+// claims. Both halves are needed. The read alone would let a client holding one
+// base's path act on a document of another of its own bases; the comparison alone
+// would let it act on anybody's.
+func (h *KBHandler) documentIn(c *gin.Context, account authz.Caller, kbID, documentID string) (kb.Document, bool) {
+	document, err := h.bases.Document(c.Request.Context(), documentID, account)
 	if err != nil {
 		h.fail(c, "document_request_failed", err)
 		return kb.Document{}, false

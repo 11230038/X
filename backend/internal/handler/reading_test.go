@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/authz"
+	"backend/internal/middleware"
 	"backend/internal/reading"
 	"github.com/gin-gonic/gin"
 )
@@ -56,12 +58,12 @@ type readingStub struct {
 	cancels    []string
 }
 
-func (s *readingStub) Materials(_ context.Context, workspaceID string) ([]reading.Material, error) {
+func (s *readingStub) Materials(_ context.Context, workspaceID string, _ authz.Caller) ([]reading.Material, error) {
 	s.workspaces = append(s.workspaces, workspaceID)
 	return s.materials, s.err
 }
 
-func (s *readingStub) Material(_ context.Context, materialID string) (reading.Material, error) {
+func (s *readingStub) Material(_ context.Context, materialID string, _ authz.Caller) (reading.Material, error) {
 	if s.err != nil {
 		return reading.Material{}, s.err
 	}
@@ -71,35 +73,35 @@ func (s *readingStub) Material(_ context.Context, materialID string) (reading.Ma
 	return s.material, nil
 }
 
-func (s *readingStub) Outline(_ context.Context, _ string) (reading.Outline, error) {
+func (s *readingStub) Outline(_ context.Context, _ string, _ authz.Caller) (reading.Outline, error) {
 	return s.outline, s.err
 }
 
-func (s *readingStub) Create(_ context.Context, fileID, sourceType string) (reading.Material, error) {
+func (s *readingStub) Create(_ context.Context, fileID, sourceType string, _ authz.Caller) (reading.Material, error) {
 	s.creates = append(s.creates, [2]string{fileID, sourceType})
 	return s.created, s.err
 }
 
-func (s *readingStub) Position(_ context.Context, materialID, sessionID string) (reading.Position, bool, error) {
+func (s *readingStub) Position(_ context.Context, materialID, sessionID string, _ authz.Caller) (reading.Position, bool, error) {
 	s.positions = append(s.positions, [2]string{materialID, sessionID})
 	return s.position, s.saved, s.err
 }
 
-func (s *readingStub) SavePosition(_ context.Context, request reading.SavePositionRequest) (reading.Position, error) {
+func (s *readingStub) SavePosition(_ context.Context, request reading.SavePositionRequest, _ authz.Caller) (reading.Position, error) {
 	s.saves = append(s.saves, request)
 	return s.position, s.err
 }
 
-func (s *readingStub) Marks(_ context.Context, _ string) ([]reading.Mark, error) {
+func (s *readingStub) Marks(_ context.Context, _ string, _ authz.Caller) ([]reading.Mark, error) {
 	return s.marks, s.err
 }
 
-func (s *readingStub) AddMark(_ context.Context, request reading.MarkRequest) (reading.Mark, error) {
+func (s *readingStub) AddMark(_ context.Context, request reading.MarkRequest, _ authz.Caller) (reading.Mark, error) {
 	s.adds = append(s.adds, request)
 	return s.mark, s.err
 }
 
-func (s *readingStub) Resolve(_ context.Context, materialID string, locator reading.Locator) (reading.Passage, error) {
+func (s *readingStub) Resolve(_ context.Context, materialID string, locator reading.Locator, _ authz.Caller) (reading.Passage, error) {
 	if s.err != nil {
 		return reading.Passage{}, s.err
 	}
@@ -109,37 +111,43 @@ func (s *readingStub) Resolve(_ context.Context, materialID string, locator read
 	return passage, nil
 }
 
-func (s *readingStub) Pairings(_ context.Context, materialID string) (reading.Pairings, error) {
+func (s *readingStub) Pairings(_ context.Context, materialID string, _ authz.Caller) (reading.Pairings, error) {
 	s.paired = append(s.paired, materialID)
 	return s.pairings, s.err
 }
 
-func (s *readingStub) ConfirmPairing(_ context.Context, request reading.PairingRequest) (reading.Pairing, error) {
+func (s *readingStub) ConfirmPairing(_ context.Context, request reading.PairingRequest, _ authz.Caller) (reading.Pairing, error) {
 	s.confirms = append(s.confirms, request)
 	return s.pairing, s.err
 }
 
-func (s *readingStub) CancelPairing(_ context.Context, pairingID string) (bool, error) {
+func (s *readingStub) CancelPairing(_ context.Context, pairingID string, _ authz.Caller) (bool, error) {
 	s.cancels = append(s.cancels, pairingID)
 	return s.cancelled, s.err
 }
 
 func newReadingRouter(readings Readings, extensions *reading.Registry) *gin.Engine {
 	gin.SetMode(gin.TestMode)
-	handler := NewReadingHandler(readings, extensions, testHandlerLogger())
+	logger := testHandlerLogger()
+	handler := NewReadingHandler(readings, extensions, logger)
+	// Every reading route is behind the real bearer middleware: each of them reads
+	// or writes something an account owns, so there is no version of one of these
+	// requests that arrives without an account, and a test that reached a handler
+	// without one would be exercising a path production cannot take.
+	guarded := middleware.RequireAuth(handlerVerifierStub{}, logger)
 	router := gin.New()
-	router.GET("/api/v1/reading/materials", handler.List)
-	router.POST("/api/v1/reading/materials", handler.Create)
-	router.GET("/api/v1/reading/materials/:materialID", handler.Get)
-	router.GET("/api/v1/reading/materials/:materialID/content", handler.Content)
-	router.GET("/api/v1/reading/materials/:materialID/marks", handler.Marks)
-	router.POST("/api/v1/reading/materials/:materialID/marks", handler.AddMark)
-	router.POST("/api/v1/reading/materials/:materialID/position", handler.SavePosition)
-	router.GET("/api/v1/reading/materials/:materialID/pairings", handler.Pairings)
-	router.POST("/api/v1/reading/materials/:materialID/pairings", handler.ConfirmPairing)
-	router.DELETE("/api/v1/reading/pairings/:pairingID", handler.CancelPairing)
-	router.GET("/api/v1/reading/materials/:materialID/extensions", handler.Extensions)
-	router.POST("/api/v1/reading/materials/:materialID/extensions/:name", handler.RunExtension)
+	router.GET("/api/v1/reading/materials", guarded, handler.List)
+	router.POST("/api/v1/reading/materials", guarded, handler.Create)
+	router.GET("/api/v1/reading/materials/:materialID", guarded, handler.Get)
+	router.GET("/api/v1/reading/materials/:materialID/content", guarded, handler.Content)
+	router.GET("/api/v1/reading/materials/:materialID/marks", guarded, handler.Marks)
+	router.POST("/api/v1/reading/materials/:materialID/marks", guarded, handler.AddMark)
+	router.POST("/api/v1/reading/materials/:materialID/position", guarded, handler.SavePosition)
+	router.GET("/api/v1/reading/materials/:materialID/pairings", guarded, handler.Pairings)
+	router.POST("/api/v1/reading/materials/:materialID/pairings", guarded, handler.ConfirmPairing)
+	router.DELETE("/api/v1/reading/pairings/:pairingID", guarded, handler.CancelPairing)
+	router.GET("/api/v1/reading/materials/:materialID/extensions", guarded, handler.Extensions)
+	router.POST("/api/v1/reading/materials/:materialID/extensions/:name", guarded, handler.RunExtension)
 	return router
 }
 
@@ -153,7 +161,7 @@ func TestReadingHandlerListAsksForTheWorkspaceItWasGiven(t *testing.T) {
 		},
 		{MaterialID: "rm_2", ContentID: "doc_2", Filename: "另一本.md", CreatedAt: handlerReadingTime},
 	}}
-	recorder := call(t, newReadingRouter(stub, nil), http.MethodGet,
+	recorder := callAs(t, newReadingRouter(stub, nil), http.MethodGet,
 		"/api/v1/reading/materials?workspace_id=rw_1", "")
 
 	if recorder.Code != http.StatusOK {
@@ -212,7 +220,7 @@ func TestReadingHandlerGetCarriesThePositionOnlyWhenASessionIsNamed(t *testing.T
 
 	// Without a session this is a catalogue read: "what is this", and nobody's
 	// place in it.
-	recorder := call(t, router, http.MethodGet, "/api/v1/reading/materials/rm_1", "")
+	recorder := callAs(t, router, http.MethodGet, "/api/v1/reading/materials/rm_1", "")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -234,7 +242,7 @@ func TestReadingHandlerGetCarriesThePositionOnlyWhenASessionIsNamed(t *testing.T
 
 	// Naming a session is one question — "what is this and where was I" — and one
 	// round trip is enough to draw the first screen.
-	recorder = call(t, router, http.MethodGet, "/api/v1/reading/materials/rm_1?session_id=s_1", "")
+	recorder = callAs(t, router, http.MethodGet, "/api/v1/reading/materials/rm_1?session_id=s_1", "")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -266,7 +274,7 @@ func TestReadingHandlerContentReadsTheCoordinateOffTheQueryString(t *testing.T) 
 	}
 	router := newReadingRouter(stub, nil)
 
-	recorder := call(t, router, http.MethodGet,
+	recorder := callAs(t, router, http.MethodGet,
 		"/api/v1/reading/materials/rm_1/content?char_start=10&char_end=20&ordinal=3", "")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -312,7 +320,7 @@ func TestReadingHandlerContentNeedsTheCoordinatesItReadsBy(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			stub := &readingStub{}
-			recorder := call(t, newReadingRouter(stub, nil), http.MethodGet,
+			recorder := callAs(t, newReadingRouter(stub, nil), http.MethodGet,
 				"/api/v1/reading/materials/rm_1/content"+test.query, "")
 
 			// A read that would have to guess which characters to hand back is
@@ -339,7 +347,7 @@ func TestReadingHandlerAddMarkTakesTheMaterialFromTheRoute(t *testing.T) {
 
 	// The body leaves the material out, which is not missing anything: the route
 	// already said which one.
-	recorder := call(t, router, http.MethodPost, "/api/v1/reading/materials/rm_1/marks",
+	recorder := callAs(t, router, http.MethodPost, "/api/v1/reading/materials/rm_1/marks",
 		`{"session_id":"s_1","kind":"note","body":"这里说的是捕获",
 		  "locator":{"char_start":10,"char_end":20,"ordinal":2}}`)
 	if recorder.Code != http.StatusCreated {
@@ -362,7 +370,7 @@ func TestReadingHandlerAddMarkTakesTheMaterialFromTheRoute(t *testing.T) {
 	// A body that fills the material in is held to what it said rather than
 	// quietly overwritten: the offsets were measured in the material the client
 	// named, and the domain is the one that refuses a mismatch.
-	recorder = call(t, router, http.MethodPost, "/api/v1/reading/materials/rm_1/marks",
+	recorder = callAs(t, router, http.MethodPost, "/api/v1/reading/materials/rm_1/marks",
 		`{"session_id":"s_1","kind":"bookmark","locator":{"material_id":"rm_2","char_start":1,"char_end":1}}`)
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", recorder.Code, recorder.Body.String())
@@ -376,7 +384,7 @@ func TestReadingHandlerSavePositionCarriesTheRevisionThrough(t *testing.T) {
 	stub := &readingStub{position: reading.Position{
 		MaterialID: "rm_1", SessionID: "s_1", Revision: 5, UpdatedAt: handlerReadingTime,
 	}}
-	recorder := call(t, newReadingRouter(stub, nil), http.MethodPost,
+	recorder := callAs(t, newReadingRouter(stub, nil), http.MethodPost,
 		"/api/v1/reading/materials/rm_1/position",
 		`{"session_id":"s_1","revision":4,"locator":{"char_start":40,"char_end":40}}`)
 
@@ -428,7 +436,7 @@ func TestReadingHandlerMapsARefusalToTheStatusAClientActsOn(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			stub := &readingStub{err: test.err}
-			recorder := call(t, newReadingRouter(stub, nil), http.MethodGet,
+			recorder := callAs(t, newReadingRouter(stub, nil), http.MethodGet,
 				"/api/v1/reading/materials", "")
 
 			if recorder.Code != test.status {
@@ -463,7 +471,7 @@ func TestReadingHandlerWithoutTheReadingLayerSaysSo(t *testing.T) {
 	router := gin.New()
 	router.GET("/api/v1/reading/materials", handler.List)
 
-	recorder := call(t, router, http.MethodGet, "/api/v1/reading/materials", "")
+	recorder := callAs(t, router, http.MethodGet, "/api/v1/reading/materials", "")
 	// A deployment that did not assemble the reading layer is a mistake on the
 	// operator's side of the line, and it is answered as one rather than as a
 	// crash in a goroutine.

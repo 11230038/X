@@ -25,7 +25,7 @@ func TestDBReplaceRevisionMovesVisibilityInOneStep(t *testing.T) {
 	if got := activeChunkCount(t, repo, before); got != 2 {
 		t.Fatalf("%d of the first revision's chunks are active, want 2", got)
 	}
-	if err := repo.ReplaceRevision(context.Background(), second, 1); err != nil {
+	if err := repo.ReplaceRevision(context.Background(), second, 1, testCaller()); err != nil {
 		t.Fatalf("replace the revision: %v", err)
 	}
 
@@ -48,7 +48,7 @@ func TestDBReplaceRevisionMovesVisibilityInOneStep(t *testing.T) {
 	// The pointer and the flag are one decision: the document says which
 	// revision is current, and the chunks it points at are exactly the active
 	// ones.
-	document, err := repo.Document(context.Background(), "doc_1")
+	document, err := repo.Document(context.Background(), "doc_1", testCaller())
 	if err != nil {
 		t.Fatalf("document: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestDBReplaceRevisionRefusesARevisionSomebodyElseMoved(t *testing.T) {
 		ID: "doc_1", KBID: "kb_a", FileID: first.FileID, Revision: 2,
 		CreatedAt: atSecond(2), Text: "second", Chunks: []string{"second"},
 	})
-	if err := repo.ReplaceRevision(context.Background(), second, 1); err != nil {
+	if err := repo.ReplaceRevision(context.Background(), second, 1, testCaller()); err != nil {
 		t.Fatalf("replace the revision: %v", err)
 	}
 
@@ -79,13 +79,13 @@ func TestDBReplaceRevisionRefusesARevisionSomebodyElseMoved(t *testing.T) {
 		ID: "doc_1", KBID: "kb_a", FileID: first.FileID, Revision: 3,
 		CreatedAt: atSecond(3), Text: "stale text", Chunks: []string{"stale"},
 	})
-	if err := repo.ReplaceRevision(context.Background(), stale, 1); !errors.Is(err, ErrConflict) {
+	if err := repo.ReplaceRevision(context.Background(), stale, 1, testCaller()); !errors.Is(err, ErrConflict) {
 		t.Errorf("a rebuild against a moved document: %v, want %v", err, ErrConflict)
 	}
 	if got := len(chunkIDsOf(t, repo, "doc_1", 3)); got != 0 {
 		t.Errorf("%d chunks of the refused revision were written, want none", got)
 	}
-	document, err := repo.Document(context.Background(), "doc_1")
+	document, err := repo.Document(context.Background(), "doc_1", testCaller())
 	if err != nil {
 		t.Fatalf("document: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestDBTwoRebuildsLeaveOneCoherentRevision(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			errs[i] = repo.ReplaceRevision(context.Background(), writes[i], 1)
+			errs[i] = repo.ReplaceRevision(context.Background(), writes[i], 1, testCaller())
 		}()
 	}
 	close(start)
@@ -142,7 +142,7 @@ func TestDBTwoRebuildsLeaveOneCoherentRevision(t *testing.T) {
 
 	// Whichever won, the document is at revision 2 with that rebuild's text and
 	// one set of chunks — never both, never neither.
-	document, err := repo.Document(context.Background(), "doc_1")
+	document, err := repo.Document(context.Background(), "doc_1", testCaller())
 	if err != nil {
 		t.Fatalf("document: %v", err)
 	}

@@ -26,13 +26,13 @@ func TestDBALinkIsWrittenOnceAndThenMoved(t *testing.T) {
 	// The upsert on the composite key: "which conversations have touched this path"
 	// and "when was the last time" are one row's two questions, and the first one
 	// never stops being true.
-	if err := h.service.Touch(ctx, "mp_1", actor); err != nil {
+	if err := h.service.Touch(ctx, "mp_1", actor, h.caller); err != nil {
 		t.Fatalf("touch the path: %v", err)
 	}
 	if got := h.countRows(t, "mastery_path_sessions"); got != 1 {
 		t.Fatalf("%d links are stored, want the second touch to have moved the first", got)
 	}
-	seen, err := h.repository.SeenAt(ctx, "mp_1", "s_1")
+	seen, err := h.repository.SeenAt(ctx, "mp_1", "s_1", h.caller)
 	if err != nil {
 		t.Fatalf("read when the conversation last saw the path: %v", err)
 	}
@@ -45,10 +45,10 @@ func TestDBALinkIsWrittenOnceAndThenMoved(t *testing.T) {
 	h.session(t, "s_2")
 	second := h.turn(t, "t_2", "s_2")
 	h.clock.advance(time.Hour)
-	if err := h.service.Touch(ctx, "mp_1", second); err != nil {
+	if err := h.service.Touch(ctx, "mp_1", second, h.caller); err != nil {
 		t.Fatalf("touch the path from another conversation: %v", err)
 	}
-	sessions, err := h.repository.SessionsOn(ctx, "mp_1")
+	sessions, err := h.repository.SessionsOn(ctx, "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the conversations on the path: %v", err)
 	}
@@ -56,14 +56,14 @@ func TestDBALinkIsWrittenOnceAndThenMoved(t *testing.T) {
 		t.Errorf("the conversations on the path are %v, want the newest first", sessions)
 	}
 	// "Where was I" is the newest link, which is a question with one answer.
-	newest, err := h.repository.PathOfSession(ctx, "s_2")
+	newest, err := h.repository.PathOfSession(ctx, "s_2", h.caller)
 	if err != nil {
 		t.Fatalf("read the path of the second conversation: %v", err)
 	}
 	if newest != "mp_1" {
 		t.Errorf("the second conversation is on %q, want mp_1", newest)
 	}
-	if _, err := h.repository.PathOfSession(ctx, "s_nobody"); !errors.Is(err, ErrNotFound) {
+	if _, err := h.repository.PathOfSession(ctx, "s_nobody", h.caller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a conversation that is on no path: %v, want %v", err, ErrNotFound)
 	}
 }
@@ -93,7 +93,7 @@ func TestDBTheListingIsMostRecentlySeenFirstAndAnUntouchedPathComesLast(t *testi
 		t.Fatalf("unlink a path: %v", err)
 	}
 
-	listed, err := h.service.List(context.Background(), ListRequest{})
+	listed, err := h.service.List(context.Background(), ListRequest{Caller: h.caller})
 	if err != nil {
 		t.Fatalf("list the paths: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestDBTheListingIsMostRecentlySeenFirstAndAnUntouchedPathComesLast(t *testi
 	}
 
 	// Narrowed to a conversation, the same listing loses the path it never touched.
-	narrowed, err := h.service.List(context.Background(), ListRequest{SessionID: "s_1"})
+	narrowed, err := h.service.List(context.Background(), ListRequest{Caller: h.caller, SessionID: "s_1"})
 	if err != nil {
 		t.Fatalf("list one conversation's paths: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestDBOnlyTheLinksOnActivePathsCount(t *testing.T) {
 	h.create(t, "mp_z", "乙", actor)
 	ctx := context.Background()
 
-	paths, err := h.repository.ActivePathsOfSession(ctx, "s_1")
+	paths, err := h.repository.ActivePathsOfSession(ctx, "s_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the active paths: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestDBOnlyTheLinksOnActivePathsCount(t *testing.T) {
 		"WHERE path_id = 'mp_a'").Error; err != nil {
 		t.Fatalf("put a path down: %v", err)
 	}
-	paths, err = h.repository.ActivePathsOfSession(ctx, "s_1")
+	paths, err = h.repository.ActivePathsOfSession(ctx, "s_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the active paths again: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestDBOnlyTheLinksOnActivePathsCount(t *testing.T) {
 	if err := h.resource.GORM().Exec("DELETE FROM mastery_topic_meta WHERE path_id = 'mp_a'").Error; err != nil {
 		t.Fatalf("drop a metadata row: %v", err)
 	}
-	paths, err = h.repository.ActivePathsOfSession(ctx, "s_1")
+	paths, err = h.repository.ActivePathsOfSession(ctx, "s_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the active paths once more: %v", err)
 	}

@@ -67,7 +67,7 @@ func (h *dbHarness) storeFile(t *testing.T, fileID, content string) {
 
 func (h *dbHarness) createBase(t *testing.T) KnowledgeBase {
 	t.Helper()
-	base, err := h.service.CreateKnowledgeBase(context.Background(), "材料", "")
+	base, err := h.service.CreateKnowledgeBase(context.Background(), "材料", "", testCaller())
 	if err != nil {
 		t.Fatalf("create the knowledge base: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestDBTwoCallersAddingOneFileGetOneDocument(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			documents[i], errs[i] = h.service.AddDocument(context.Background(), fileID, base.ID)
+			documents[i], errs[i] = h.service.AddDocument(context.Background(), fileID, base.ID, testCaller())
 		}()
 	}
 	close(start)
@@ -136,7 +136,7 @@ func TestDBOnlyOneOfTwoWorkersIndexesADocument(t *testing.T) {
 	base := h.createBase(t)
 	fileID := libraryFileID(1)
 	h.storeFile(t, fileID, "alpha beta gamma delta epsilon")
-	document, err := h.service.AddDocument(context.Background(), fileID, base.ID)
+	document, err := h.service.AddDocument(context.Background(), fileID, base.ID, testCaller())
 	if err != nil {
 		t.Fatalf("add the file: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestDBOnlyOneOfTwoWorkersIndexesADocument(t *testing.T) {
 
 	// The document is done, and every chunk of it carries a vector — written
 	// once, by the worker that held it.
-	stored, err := h.repo.Document(context.Background(), document.ID)
+	stored, err := h.repo.Document(context.Background(), document.ID, testCaller())
 	if err != nil {
 		t.Fatalf("read the document back: %v", err)
 	}
@@ -226,11 +226,11 @@ func TestDBAddingAFileToTwoBasesParsesItOnceEach(t *testing.T) {
 	// A file in two collections is two documents, and the second one is written
 	// from the same bytes: the parse is per place, not per file.
 	for _, base := range []KnowledgeBase{first, second} {
-		if _, err := h.service.AddDocument(context.Background(), fileID, base.ID); err != nil {
+		if _, err := h.service.AddDocument(context.Background(), fileID, base.ID, testCaller()); err != nil {
 			t.Fatalf("add the file to %s: %v", base.ID, err)
 		}
 	}
-	documents, err := h.repo.Documents(context.Background(), first.ID)
+	documents, err := h.repo.Documents(context.Background(), first.ID, testCaller())
 	if err != nil {
 		t.Fatalf("list the documents of %s: %v", first.ID, err)
 	}
@@ -240,7 +240,7 @@ func TestDBAddingAFileToTwoBasesParsesItOnceEach(t *testing.T) {
 
 	// Asking again for a file that is already there returns the document that
 	// is there, and does not parse it a second time.
-	again, err := h.service.AddDocument(context.Background(), fileID, first.ID)
+	again, err := h.service.AddDocument(context.Background(), fileID, first.ID, testCaller())
 	if err != nil {
 		t.Fatalf("add the file again: %v", err)
 	}

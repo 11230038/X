@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"backend/internal/authz"
 )
 
 // Which path a conversation is working on.
@@ -26,11 +28,11 @@ import (
 // ErrNotFound when the conversation has never touched one, which is not a
 // failure: it is a conversation that has not started a path yet, and the caller
 // decides whether that means creating one or doing nothing.
-func (s *Service) SessionPath(ctx context.Context, sessionID string) (string, error) {
+func (s *Service) SessionPath(ctx context.Context, sessionID string, caller authz.Caller) (string, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return "", fmt.Errorf("%w: the session is blank", ErrInvalidRequest)
 	}
-	return s.repository.PathOfSession(ctx, sessionID)
+	return s.repository.PathOfSession(ctx, sessionID, caller)
 }
 
 // SessionsOn reports the conversations that have touched a path, most recently
@@ -40,11 +42,11 @@ func (s *Service) SessionPath(ctx context.Context, sessionID string) (string, er
 // knows its own conversation — and the endpoints that show a path's history do,
 // which is why it returns ids rather than a count: the caller has to look each
 // one up to say anything about it.
-func (s *Service) SessionsOn(ctx context.Context, pathID string) ([]string, error) {
+func (s *Service) SessionsOn(ctx context.Context, pathID string, caller authz.Caller) ([]string, error) {
 	if strings.TrimSpace(pathID) == "" {
 		return nil, fmt.Errorf("%w: the path is blank", ErrInvalidRequest)
 	}
-	return s.repository.SessionsOn(ctx, pathID)
+	return s.repository.SessionsOn(ctx, pathID, caller)
 }
 
 // SeenAt reports when a conversation last touched a path, and ErrNotFound when
@@ -56,6 +58,6 @@ func (s *Service) SessionsOn(ctx context.Context, pathID string) ([]string, erro
 // caller deciding whether a conversation is still working on a path asks it
 // about the newest one. The second is the only caller that could have got the
 // answer for free, and it does not need a time.
-func (s *Service) SeenAt(ctx context.Context, pathID, sessionID string) (time.Time, error) {
-	return s.repository.SeenAt(ctx, pathID, sessionID)
+func (s *Service) SeenAt(ctx context.Context, pathID, sessionID string, caller authz.Caller) (time.Time, error) {
+	return s.repository.SeenAt(ctx, pathID, sessionID, caller)
 }

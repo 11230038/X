@@ -62,13 +62,18 @@ func libraryFileID(number int) string {
 // md/lib_<32 lowercase hex digits>.md and that the name before the extension is
 // the id, so a document fixture cannot invent a file id — it has to be one the
 // library would have stored at that path.
+//
+// The owner is not decoration either. A document attached to no collection is
+// read through the file it came from, so an ownerless file row here would make
+// the attachment invisible to the account these tests act as, and the failure
+// would look like a broken query rather than a fixture that forgot a column.
 func addLibraryFile(t *testing.T, resource *data.Resource, id string) {
 	t.Helper()
 	sum := sha256.Sum256([]byte(id))
 	testdb.Exec(t, resource, "INSERT INTO library_files "+
-		"(id, sha256, filename, mime_type, size_bytes, library_path, is_deleted) "+
-		"VALUES (?, ?, ?, 'text/markdown', 0, ?, FALSE)",
-		id, hex.EncodeToString(sum[:]), id+".md", "md/"+id+".md")
+		"(id, sha256, filename, mime_type, size_bytes, library_path, is_deleted, owner_id) "+
+		"VALUES (?, ?, ?, 'text/markdown', 0, ?, FALSE, ?)",
+		id, hex.EncodeToString(sum[:]), id+".md", "md/"+id+".md", testOwnerID)
 }
 
 // createBase stores one base as of a time the caller chooses.
@@ -76,7 +81,7 @@ func createBase(t *testing.T, repo *GORMRepository, id string, createdAt time.Ti
 	t.Helper()
 	record := KnowledgeBase{
 		ID: id, Name: id, Provider: ProviderNative,
-		EmbeddingModel: "test-embed", CreatedAt: createdAt,
+		EmbeddingModel: "test-embed", OwnerID: testOwnerID, CreatedAt: createdAt,
 	}
 	if err := repo.CreateKnowledgeBase(context.Background(), record); err != nil {
 		t.Fatalf("create knowledge base %s: %v", id, err)
@@ -85,14 +90,14 @@ func createBase(t *testing.T, repo *GORMRepository, id string, createdAt time.Ti
 
 func setDefault(t *testing.T, repo *GORMRepository, kbID string) {
 	t.Helper()
-	if err := repo.SetDefaultKnowledgeBase(context.Background(), kbID); err != nil {
+	if err := repo.SetDefaultKnowledgeBase(context.Background(), kbID, testCaller()); err != nil {
 		t.Fatalf("set the default knowledge base to %s: %v", kbID, err)
 	}
 }
 
 func listBases(t *testing.T, repo *GORMRepository) []KnowledgeBase {
 	t.Helper()
-	bases, err := repo.KnowledgeBases(context.Background())
+	bases, err := repo.KnowledgeBases(context.Background(), testCaller())
 	if err != nil {
 		t.Fatalf("list knowledge bases: %v", err)
 	}
@@ -251,7 +256,7 @@ func TestDBTwoCreatorsOnAnEmptyTableLeaveOneDefault(t *testing.T) {
 			<-start
 			errs[i] = repo.CreateKnowledgeBase(context.Background(), KnowledgeBase{
 				ID: fmt.Sprintf("kb_%d", i), Name: "base", Provider: ProviderNative,
-				EmbeddingModel: "test-embed", CreatedAt: atSecond(i),
+				EmbeddingModel: "test-embed", OwnerID: testOwnerID, CreatedAt: atSecond(i),
 			})
 		}()
 	}
@@ -284,7 +289,7 @@ func TestDBConcurrentSettersLeaveOneDefault(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			errs[i] = repo.SetDefaultKnowledgeBase(context.Background(), id)
+			errs[i] = repo.SetDefaultKnowledgeBase(context.Background(), id, testCaller())
 		}()
 	}
 	close(start)
@@ -305,7 +310,7 @@ func TestDBDeletingTheDefaultPromotesTheOldestRemaining(t *testing.T) {
 	createBase(t, repo, "kb_c", atSecond(4))
 	setDefault(t, repo, "kb_c")
 
-	if err := repo.DeleteKnowledgeBase(context.Background(), "kb_c"); err != nil {
+	if err := repo.DeleteKnowledgeBase(context.Background(), "kb_c", testCaller()); err != nil {
 		t.Fatalf("delete the default base: %v", err)
 	}
 
@@ -332,7 +337,7 @@ func TestDBDeletingABaseTakesItsDocumentsAndChunks(t *testing.T) {
 		t.Fatalf("the fixture stored %d chunks, want 2", got)
 	}
 
-	if err := repo.DeleteKnowledgeBase(context.Background(), "kb_a"); err != nil {
+	if err := repo.DeleteKnowledgeBase(context.Background(), "kb_a", testCaller()); err != nil {
 		t.Fatalf("delete the base: %v", err)
 	}
 

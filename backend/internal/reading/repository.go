@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"time"
 
+	"backend/internal/authz"
+	"backend/internal/data"
 	"backend/internal/data/models"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Repository is the storage the reading layer needs.
@@ -18,48 +21,69 @@ import (
 // statement, and no decisions. Whether a position write is a create or a move,
 // whether a mark is allowed to have no text, and whether a stale revision is a
 // conflict are the service's to answer; the repository answers what is stored.
+//
+// Every read here takes a caller and narrows itself to that account's rows.
+// Ownership is a filter rather than a check: a material — or a position, a mark
+// or a pairing hanging off one — belonging to somebody else is not refused, it
+// is absent, which is why a request for it is answered exactly as a request for
+// an id that was never issued (AUTH-06).
+//
+// Only reading_materials carries an owner column (migration 00014). The rows
+// that hang off a material — positions, marks and pairings — have none, because
+// their lifetime is the material's: a position or a mark is reached per account
+// by narrowing on the material in it, and a pairing requires both of its ends to
+// be the caller's so that no row here can name a material they cannot read.
 type Repository interface {
-	// Materials lists the catalogue. workspaceID may be empty, and then every
-	// material comes back with no tab state.
-	Materials(ctx context.Context, workspaceID string) ([]Material, error)
-	// Material reads one material by its id, ErrNotFound when there is none.
-	Material(ctx context.Context, materialID string) (Material, error)
+	// Materials lists the catalogue for one caller. workspaceID may be empty, and
+	// then every material comes back with no tab state.
+	Materials(ctx context.Context, workspaceID string, caller authz.Caller) ([]Material, error)
+	// Material reads one material by its id, ErrNotFound when there is none the
+	// caller may see.
+	Material(ctx context.Context, materialID string, caller authz.Caller) (Material, error)
 	// MaterialOfContent reads the material built from one document, ErrNotFound
-	// when that document has none.
-	MaterialOfContent(ctx context.Context, contentID string) (Material, error)
-	// CreateMaterial writes one material row.
+	// when that document has none the caller may see.
+	MaterialOfContent(ctx context.Context, contentID string, caller authz.Caller) (Material, error)
+	// CreateMaterial writes one material row. The owner travels in the record
+	// rather than as a caller, the same way it does on a session: there is no
+	// row yet to narrow against, so the caller only supplies the owner value.
 	CreateMaterial(ctx context.Context, material Material) error
 
-	// Position reads where a reader stopped, ErrNotFound when nothing was saved.
-	Position(ctx context.Context, materialID, sessionID string) (Position, error)
+	// Position reads where a reader stopped, ErrNotFound when nothing was saved
+	// or the material is not the caller's.
+	Position(ctx context.Context, materialID, sessionID string, caller authz.Caller) (Position, error)
 	// CreatePosition writes the first position for a pair at revision 1.
-	// ErrDuplicate means somebody else created it first.
-	CreatePosition(ctx context.Context, position Position) error
+	// ErrDuplicate means somebody else created it first, and ErrNotFound means
+	// the material is not the caller's.
+	CreatePosition(ctx context.Context, position Position, caller authz.Caller) error
 	// SavePosition moves a position from the revision it was read at to the next
 	// one, and reports whether it was still there to move. False is the answer
 	// this whole path exists to be able to give.
-	SavePosition(ctx context.Context, materialID, sessionID string, expected int64, locator Locator, now time.Time) (bool, error)
+	SavePosition(ctx context.Context, materialID, sessionID string, expected int64, locator Locator, now time.Time, caller authz.Caller) (bool, error)
 
 	// Marks lists the marks on one material, oldest first.
-	Marks(ctx context.Context, materialID string) ([]Mark, error)
-	// Mark reads one mark by its id, ErrNotFound when there is none.
-	Mark(ctx context.Context, markID string) (Mark, error)
-	// CreateMark writes one mark.
-	CreateMark(ctx context.Context, mark Mark) error
-	// DeleteMark removes one mark, ErrNotFound when there was none to remove.
-	DeleteMark(ctx context.Context, markID string) error
+	Marks(ctx context.Context, materialID string, caller authz.Caller) ([]Mark, error)
+	// Mark reads one mark by its id, ErrNotFound when there is none the caller
+	// may see.
+	Mark(ctx context.Context, markID string, caller authz.Caller) (Mark, error)
+	// CreateMark writes one mark, ErrNotFound when its material is not the
+	// caller's.
+	CreateMark(ctx context.Context, mark Mark, caller authz.Caller) error
+	// DeleteMark removes one mark, ErrNotFound when there was none to remove or
+	// the material it hangs off is not the caller's.
+	DeleteMark(ctx context.Context, markID string, caller authz.Caller) error
 
 	// PairingOf reads the confirmed pairing a material is in, from either end of
 	// it, ErrNotFound when it is in none.
-	PairingOf(ctx context.Context, materialID string) (Pairing, error)
+	PairingOf(ctx context.Context, materialID string, caller authz.Caller) (Pairing, error)
 	// PairingBetween reads the confirmed pairing of one pair of materials,
 	// whichever way round it was confirmed.
-	PairingBetween(ctx context.Context, first, second string) (Pairing, error)
+	PairingBetween(ctx context.Context, first, second string, caller authz.Caller) (Pairing, error)
 	// CreatePairing writes one confirmation. ErrDuplicate means it is already
-	// there, which is the one collision this row can have.
-	CreatePairing(ctx context.Context, pairing Pairing) error
+	// there, which is the one collision this row can have; ErrNotFound means one
+	// of the two materials is not the caller's.
+	CreatePairing(ctx context.Context, pairing Pairing, caller authz.Caller) error
 	// DeletePairing removes one confirmation, ErrNotFound when there was none.
-	DeletePairing(ctx context.Context, pairingID string) error
+	DeletePairing(ctx context.Context, pairingID string, caller authz.Caller) error
 }
 
 // GORMRepository reads and writes the reading tables through GORM (seekdb over
@@ -75,38 +99,49 @@ func NewGORMRepository(db *gorm.DB) *GORMRepository {
 
 var _ Repository = (*GORMRepository)(nil)
 
-// catalogueSQL reads the materials with the tab state of one workspace.
+// ownedMaterials is the ids of the materials one caller may read, as a query.
 //
-// The workspace is a bound parameter rather than a second statement. A read
-// outside a workspace passes the empty string, which matches no tab row because
-// a workspace id may not be blank (migration 00004's CHECK) — so the catalogue
-// and a workspace's tab list are one read that differs only in what comes back
-// in the last two columns.
-//
-// The order is most recently touched first, and NULL update times sort last,
-// which is what a material nobody has written to should do.
-const catalogueSQL = "SELECT m.material_id, m.content_id, m.filename, m.source_type, " +
-	"m.creat_time, m.update_time, t.pinned, t.opened " +
-	"FROM reading_materials m " +
-	"LEFT JOIN reading_workspace_materials t " +
-	"ON t.material_id = m.material_id AND t.workspace_id = ? " +
-	"ORDER BY m.update_time DESC, m.material_id ASC"
+// It is the whole of how a table with no owner column is narrowed: a position,
+// a mark or a pairing reaches its account through the material in it, and each of
+// those reads says `material_id IN (this)`. Building it here rather than four
+// times means the rule "a derived row's owner is its material's" is written once,
+// which is the same reason documentScope exists in the knowledge base.
+func ownedMaterials(ctx context.Context, db *gorm.DB, caller authz.Caller) *gorm.DB {
+	return data.OwnerScope(
+		db.WithContext(ctx).Model(&models.ReadingMaterial{}).Select("material_id"),
+		caller.UserID, caller.IsAdmin(), "owner_id",
+	)
+}
 
-// materialSQL is one material, without the tab state: the columns a single row
-// has are the material's own.
-const materialSQL = "SELECT material_id, content_id, filename, source_type, " +
-	"creat_time, update_time, NULL AS pinned, NULL AS opened " +
-	"FROM reading_materials WHERE material_id = ?"
-
-// materialOfContentSQL reads the material built from one document.
+// requireMaterial reports a material that is not the caller's, checking by
+// reading it rather than by what an insert or an update of a child reports.
 //
-// The earliest row wins when a document has more than one, and the order is
-// spelled out rather than left to the storage engine: which of two materials a
-// reader gets should not change between runs.
-const materialOfContentSQL = "SELECT material_id, content_id, filename, source_type, " +
-	"creat_time, update_time, NULL AS pinned, NULL AS opened " +
-	"FROM reading_materials WHERE content_id = ? " +
-	"ORDER BY creat_time ASC, material_id ASC LIMIT 1"
+// It is the scoped, locking read a derived write is made under (rule 5): a stale
+// material id from another account must not be a way to attach a position or a
+// mark to a row this caller cannot read, and the lock is what keeps the answer
+// true while the row it guards about is written. A material another account owns
+// is reported as missing rather than as forbidden, so a write aimed at somebody
+// else's material says nothing about whether it exists.
+func requireMaterial(tx *gorm.DB, materialID string, caller authz.Caller) error {
+	var stored models.ReadingMaterial
+	query := data.OwnerScope(tx, caller.UserID, caller.IsAdmin(), "owner_id")
+	err := query.Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(&stored, "material_id = ?", materialID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("%w: material %s", ErrNotFound, materialID)
+	}
+	if err != nil {
+		return fmt.Errorf("look for material %s: %w", materialID, err)
+	}
+	return nil
+}
+
+// The three catalogue reads are built with the query builder rather than written
+// out as SQL, and the reason is ownership: every one of them is narrowed to the
+// caller through data.OwnerScope, and that predicate cannot be spliced into a
+// Raw statement — the `?`s in a Raw are values, not the query fragments the
+// scope is. The builder is the shape §2.4's convention uses everywhere else, so
+// this is also one predicate in one place rather than a fourth hand-written copy.
 
 // materialRow is one catalogue row as it is scanned, with every nullable column
 // in its nullable form.
@@ -139,13 +174,30 @@ func (row materialRow) material() Material {
 }
 
 // Materials lists the catalogue.
-func (r *GORMRepository) Materials(ctx context.Context, workspaceID string) ([]Material, error) {
+//
+// The workspace is a bound parameter rather than a second statement. A read
+// outside a workspace passes the empty string, which matches no tab row because
+// a workspace id may not be blank (migration 00004's CHECK) — so the catalogue
+// and a workspace's tab list are one read that differs only in what comes back
+// in the last two columns.
+//
+// The order is most recently touched first, and NULL update times sort last,
+// which is what a material nobody has written to should do.
+func (r *GORMRepository) Materials(ctx context.Context, workspaceID string, caller authz.Caller) ([]Material, error) {
 	if err := r.ready(); err != nil {
 		return nil, err
 	}
 	var rows []materialRow
-	err := r.db.WithContext(ctx).Raw(catalogueSQL, workspaceID).Scan(&rows).Error
-	if err != nil {
+	query := r.db.WithContext(ctx).
+		Model(&models.ReadingMaterial{}).
+		Select("reading_materials.material_id, reading_materials.content_id, "+
+			"reading_materials.filename, reading_materials.source_type, "+
+			"reading_materials.creat_time, reading_materials.update_time, t.pinned, t.opened").
+		Joins("LEFT JOIN reading_workspace_materials t "+
+			"ON t.material_id = reading_materials.material_id AND t.workspace_id = ?", workspaceID).
+		Order("reading_materials.update_time DESC, reading_materials.material_id ASC")
+	query = data.OwnerScope(query, caller.UserID, caller.IsAdmin(), "reading_materials.owner_id")
+	if err := query.Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list the reading materials: %w", err)
 	}
 	materials := make([]Material, 0, len(rows))
@@ -155,19 +207,31 @@ func (r *GORMRepository) Materials(ctx context.Context, workspaceID string) ([]M
 	return materials, nil
 }
 
+// materialQuery is one material's own columns, narrowed to the caller, without
+// the tab state: the two tab columns belong to a workspace and are absent here,
+// which is what leaves materialRow's flags nil — the same nothing a single row
+// says about a workspace it was not read against.
+func (r *GORMRepository) materialQuery(ctx context.Context, caller authz.Caller) *gorm.DB {
+	query := r.db.WithContext(ctx).
+		Model(&models.ReadingMaterial{}).
+		Select("material_id, content_id, filename, source_type, creat_time, update_time")
+	return data.OwnerScope(query, caller.UserID, caller.IsAdmin(), "owner_id")
+}
+
 // Material reads one material.
-func (r *GORMRepository) Material(ctx context.Context, materialID string) (Material, error) {
+func (r *GORMRepository) Material(ctx context.Context, materialID string, caller authz.Caller) (Material, error) {
 	if err := r.ready(); err != nil {
 		return Material{}, err
 	}
 	var row materialRow
-	err := r.db.WithContext(ctx).Raw(materialSQL, materialID).Scan(&row).Error
+	err := r.materialQuery(ctx, caller).Where("material_id = ?", materialID).Scan(&row).Error
 	if err != nil {
 		return Material{}, fmt.Errorf("read reading material %s: %w", materialID, err)
 	}
-	// A raw scan of no rows is an empty row rather than an error, and an empty row
+	// A scan of no rows leaves the id empty rather than erroring, and an empty id
 	// is exactly what "not found" looks like here: the id is the key, so no id
-	// means no material.
+	// means no material — including one whose owner is another account, which the
+	// scope removed before this could see it.
 	if row.MaterialID == "" {
 		return Material{}, fmt.Errorf("%w: material %s", ErrNotFound, materialID)
 	}
@@ -175,7 +239,11 @@ func (r *GORMRepository) Material(ctx context.Context, materialID string) (Mater
 }
 
 // MaterialOfContent reads the material built from one document.
-func (r *GORMRepository) MaterialOfContent(ctx context.Context, contentID string) (Material, error) {
+//
+// The earliest row wins when a document has more than one, and the order is
+// spelled out rather than left to the storage engine: which of two materials a
+// reader gets should not change between runs.
+func (r *GORMRepository) MaterialOfContent(ctx context.Context, contentID string, caller authz.Caller) (Material, error) {
 	if err := r.ready(); err != nil {
 		return Material{}, err
 	}
@@ -183,7 +251,11 @@ func (r *GORMRepository) MaterialOfContent(ctx context.Context, contentID string
 		return Material{}, fmt.Errorf("%w: the material names no document", ErrNotFound)
 	}
 	var row materialRow
-	err := r.db.WithContext(ctx).Raw(materialOfContentSQL, contentID).Scan(&row).Error
+	err := r.materialQuery(ctx, caller).
+		Where("content_id = ?", contentID).
+		Order("creat_time ASC, material_id ASC").
+		Limit(1).
+		Scan(&row).Error
 	if err != nil {
 		return Material{}, fmt.Errorf("read the material of document %s: %w", contentID, err)
 	}
@@ -209,6 +281,11 @@ func (r *GORMRepository) CreateMaterial(ctx context.Context, material Material) 
 		Filename:   nullable(material.Filename),
 		SourceType: nullable(material.SourceType),
 		CreatedAt:  material.CreatedAt,
+		// A zero owner becomes SQL NULL and not 0, which is the difference between
+		// a material that belongs to nobody and one that belongs to account zero and
+		// can never be read back. OwnerPointer owns that decision, so this is the
+		// only place the record's owner is set.
+		OwnerID: data.OwnerPointer(material.OwnerID),
 	}
 	// Written rather than left to the database, and it is the column the
 	// catalogue is ordered by: a material nobody has written to yet was touched
@@ -223,199 +300,6 @@ func (r *GORMRepository) CreateMaterial(ctx context.Context, material Material) 
 		return fmt.Errorf("create reading material %s: %w", material.MaterialID, err)
 	}
 	return nil
-}
-
-// Position reads where a reader stopped.
-func (r *GORMRepository) Position(ctx context.Context, materialID, sessionID string) (Position, error) {
-	if err := r.ready(); err != nil {
-		return Position{}, err
-	}
-	var record models.ReadingPosition
-	err := r.db.WithContext(ctx).First(&record, "material_id = ? AND session_id = ?", materialID, sessionID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return Position{}, fmt.Errorf("%w: no position for material %s in conversation %s", ErrNotFound, materialID, sessionID)
-	}
-	if err != nil {
-		return Position{}, fmt.Errorf("read the position of material %s: %w", materialID, err)
-	}
-	return positionOf(record)
-}
-
-// CreatePosition writes the first position for a material and a conversation.
-func (r *GORMRepository) CreatePosition(ctx context.Context, position Position) error {
-	if err := r.ready(); err != nil {
-		return err
-	}
-	payload, err := encodeLocator(position.Locator)
-	if err != nil {
-		return err
-	}
-	record := models.ReadingPosition{
-		MaterialID:  position.MaterialID,
-		SessionID:   position.SessionID,
-		LocatorJSON: payload,
-		Revision:    position.Revision,
-	}
-	if !position.UpdatedAt.IsZero() {
-		updated := position.UpdatedAt
-		record.UpdatedAt = &updated
-	}
-	err = r.db.WithContext(ctx).Create(&record).Error
-	return duplicateOr(err, "create the position of material %s in conversation %s", position.MaterialID, position.SessionID)
-}
-
-// SavePosition moves a position from the revision it was read at to the next one.
-//
-// `revision = revision + 1` and not a value, for the same reason the review state
-// is advanced that way: the revision that lands is the one the row had plus one,
-// which is what makes the guard a comparison rather than a write, and which stays
-// correct when two writers reach the row in the same instant and only the first
-// may count.
-func (r *GORMRepository) SavePosition(
-	ctx context.Context,
-	materialID, sessionID string,
-	expected int64,
-	locator Locator,
-	now time.Time,
-) (bool, error) {
-	if err := r.ready(); err != nil {
-		return false, err
-	}
-	payload, err := encodeLocator(locator)
-	if err != nil {
-		return false, err
-	}
-	result := r.db.WithContext(ctx).Table(models.ReadingPosition{}.TableName()).
-		Where("material_id = ? AND session_id = ? AND revision = ?", materialID, sessionID, expected).
-		Updates(map[string]any{
-			"locator_json": payload,
-			"revision":     gorm.Expr("revision + 1"),
-			"update_time":  now,
-		})
-	if result.Error != nil {
-		return false, fmt.Errorf("save the position of material %s: %w", materialID, result.Error)
-	}
-	return result.RowsAffected == 1, nil
-}
-
-// Marks lists the marks on one material.
-//
-// The order is the order they were written, and it is the only order available:
-// a mark's place in the document lives in its locator, which is JSON, and a
-// database cannot sort by a coordinate inside a document. A client that wants
-// them in reading order sorts them itself, where the text it is displaying lives.
-func (r *GORMRepository) Marks(ctx context.Context, materialID string) ([]Mark, error) {
-	if err := r.ready(); err != nil {
-		return nil, err
-	}
-	var records []models.ReadingMark
-	err := r.db.WithContext(ctx).
-		Where("material_id = ?", materialID).
-		Order("creat_time ASC, mark_id ASC").
-		Find(&records).Error
-	if err != nil {
-		return nil, fmt.Errorf("list the marks of material %s: %w", materialID, err)
-	}
-	marks := make([]Mark, 0, len(records))
-	for _, record := range records {
-		mark, err := markOf(record)
-		if err != nil {
-			return nil, err
-		}
-		marks = append(marks, mark)
-	}
-	return marks, nil
-}
-
-// Mark reads one mark by its id.
-func (r *GORMRepository) Mark(ctx context.Context, markID string) (Mark, error) {
-	if err := r.ready(); err != nil {
-		return Mark{}, err
-	}
-	var record models.ReadingMark
-	err := r.db.WithContext(ctx).First(&record, "mark_id = ?", markID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return Mark{}, fmt.Errorf("%w: mark %s", ErrNotFound, markID)
-	}
-	if err != nil {
-		return Mark{}, fmt.Errorf("read mark %s: %w", markID, err)
-	}
-	return markOf(record)
-}
-
-// CreateMark writes one mark.
-func (r *GORMRepository) CreateMark(ctx context.Context, mark Mark) error {
-	if err := r.ready(); err != nil {
-		return err
-	}
-	payload, err := encodeLocator(mark.Locator)
-	if err != nil {
-		return err
-	}
-	record := models.ReadingMark{
-		MarkID:      mark.MarkID,
-		MaterialID:  mark.MaterialID,
-		SessionID:   nullable(mark.SessionID),
-		Kind:        string(mark.Kind),
-		LocatorJSON: payload,
-		Body:        nullable(mark.Body),
-		Revision:    mark.Revision,
-	}
-	err = r.db.WithContext(ctx).Create(&record).Error
-	return duplicateOr(err, "create mark %s", mark.MarkID)
-}
-
-// DeleteMark removes one mark.
-func (r *GORMRepository) DeleteMark(ctx context.Context, markID string) error {
-	if err := r.ready(); err != nil {
-		return err
-	}
-	result := r.db.WithContext(ctx).
-		Where("mark_id = ?", markID).
-		Delete(&models.ReadingMark{})
-	if result.Error != nil {
-		return fmt.Errorf("delete mark %s: %w", markID, result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("%w: mark %s", ErrNotFound, markID)
-	}
-	return nil
-}
-
-// positionOf reads a stored row as a position, decoding its coordinate.
-func positionOf(record models.ReadingPosition) (Position, error) {
-	locator, err := decodeLocator(record.LocatorJSON,
-		fmt.Sprintf("the position of material %s in conversation %s", record.MaterialID, record.SessionID))
-	if err != nil {
-		return Position{}, err
-	}
-	return Position{
-		MaterialID: record.MaterialID,
-		SessionID:  record.SessionID,
-		Locator:    locator,
-		Revision:   record.Revision,
-		CreatedAt:  record.CreatedAt,
-		UpdatedAt:  deref(record.UpdatedAt),
-	}, nil
-}
-
-// markOf reads a stored row as a mark, decoding its coordinate.
-func markOf(record models.ReadingMark) (Mark, error) {
-	locator, err := decodeLocator(record.LocatorJSON, fmt.Sprintf("mark %s", record.MarkID))
-	if err != nil {
-		return Mark{}, err
-	}
-	return Mark{
-		MarkID:     record.MarkID,
-		MaterialID: record.MaterialID,
-		SessionID:  text(record.SessionID),
-		Kind:       MarkKind(record.Kind),
-		Locator:    locator,
-		Body:       text(record.Body),
-		Revision:   record.Revision,
-		CreatedAt:  record.CreatedAt,
-		UpdatedAt:  deref(record.UpdatedAt),
-	}, nil
 }
 
 // encodeLocator writes a coordinate for the JSON column.

@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/data"
 	"backend/internal/data/testdb"
 )
@@ -36,8 +37,11 @@ var (
 )
 
 // dbTables are the tables these cases write, children first. turns and sessions
-// come last because five of the seven mastery tables are foreign keys into them,
-// and emptying the conversation is what the cascades are watched removing.
+// come next-to-last because five of the seven mastery tables are foreign keys
+// into them, and emptying the conversation is what the cascades are watched
+// removing. users is last of all: sessions and mastery_paths both point at it
+// (migration 00014 gave them owner_id), so the accounts cannot go before the rows
+// that name them.
 var dbTables = []string{
 	"mastery_learning_evidences",
 	"mastery_events",
@@ -48,6 +52,7 @@ var dbTables = []string{
 	"mastery_paths",
 	"turns",
 	"sessions",
+	"users",
 }
 
 // testClock is the service's clock, and it is a field of the harness because a
@@ -60,11 +65,20 @@ func (c *testClock) read() time.Time         { return c.now }
 
 // harness is one empty database, the service over it, and the clock that service
 // reads.
+//
+// The three callers are the accounts the cases are run for: caller owns the rows
+// the helpers write, other is a second ordinary account that owns none of them
+// and is what a cross-account read is asked as, and admin is the one account that
+// sees rows belonging to nobody. Most cases need only the first, which is why the
+// helpers below use it without being told.
 type harness struct {
 	service    *Service
 	repository *GORMRepository
 	resource   *data.Resource
 	clock      *testClock
+	caller     authz.Caller
+	other      authz.Caller
+	admin      authz.Caller
 }
 
 // newHarness opens the package's database, empties it, and builds a service whose
@@ -88,7 +102,36 @@ func newHarness(t *testing.T) *harness {
 	}
 	clock := &testClock{now: atNine}
 	service.clock = clock.read
-	return &harness{service: service, repository: repository, resource: resource, clock: clock}
+	// The three accounts every case has. They are written here rather than by the
+	// cases because ownership is now load-bearing for every read in this package:
+	// a path is written by some account, and the account that asks for it back is
+	// what decides whether it is found. A case that had to create its own owner
+	// would be a case whose subject is the schema, not the domain.
+	built := &harness{service: service, repository: repository, resource: resource, clock: clock}
+	built.caller = built.account(t, "owner", authz.RoleUser)
+	built.other = built.account(t, "other", authz.RoleUser)
+	built.admin = built.account(t, "administrator", authz.RoleAdmin)
+	return built
+}
+
+// account writes one user row and returns it as the caller the domain now takes.
+//
+// The password and profile columns are not read by anything in this domain; they
+// are filled because migration 00001 makes them NOT NULL, and a case that left
+// them out would be testing the users table.
+func (h *harness) account(t *testing.T, username, role string) authz.Caller {
+	t.Helper()
+	testdb.Exec(t, h.resource,
+		"INSERT INTO users (username, password, learner_profile, extra) VALUES (?, 'hash', '{}', '{}')",
+		username)
+	var row struct {
+		UserID int64 `gorm:"column:user_id"`
+	}
+	if err := h.resource.GORM().Raw("SELECT user_id FROM users WHERE username = ?", username).
+		Scan(&row).Error; err != nil {
+		t.Fatalf("read account %s: %v", username, err)
+	}
+	return authz.Caller{UserID: row.UserID, Role: role}
 }
 
 // session writes the conversation a path is created from. Four of these tables
@@ -192,11 +235,13 @@ func aTree() Tree {
 
 // create writes a path through the domain, which is what puts the row, its
 // event, its metadata and its link to the conversation there in one transaction.
+// The path is written for h.caller, which is what every read in the domain will
+// later take it as belonging to.
 func (h *harness) create(t *testing.T, pathID, goal string, actor Actor) Path {
 	t.Helper()
 	path, err := h.service.Create(context.Background(), Create{
 		PathID: pathID, Goal: goal, Tree: aTree(), Actor: actor,
-	})
+	}, h.caller)
 	if err != nil {
 		t.Fatalf("create path %s: %v", pathID, err)
 	}
@@ -213,6 +258,6 @@ func (h *harness) storeEvidence(t *testing.T, id, pathID, point string, result R
 		return repository.AppendEvidence(context.Background(), Evidence{
 			ID: id, PathID: pathID, KnowledgePoint: point, Result: result,
 			Source: SourceAssessment, Actor: actor, CreatedAt: at,
-		})
+		}, h.caller)
 	})
 }

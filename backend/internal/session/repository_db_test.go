@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/data"
 	"backend/internal/data/testdb"
 )
@@ -44,10 +45,19 @@ func atSecond(second int) time.Time {
 	return time.Date(2026, 10, 1, 12, 0, second, 0, time.UTC)
 }
 
-// storeSession creates one session as of a time the caller chooses.
+// storeSession creates one session owned by the account these tests act as, as
+// of a time the caller chooses.
 func storeSession(t *testing.T, repo *GORMRepository, id string, at time.Time) Session {
 	t.Helper()
-	record := Session{ID: id, Title: id, CreatedAt: at, UpdatedAt: at}
+	return storeOwnedSession(t, repo, id, testOwnerID, at)
+}
+
+// storeOwnedSession writes a session with a stated owner. An ownerID of zero is
+// the NULL state §2.5 defines — a row from before V5, belonging to no account —
+// and is written as such rather than as a zero the column would hold.
+func storeOwnedSession(t *testing.T, repo *GORMRepository, id string, ownerID int64, at time.Time) Session {
+	t.Helper()
+	record := Session{ID: id, Title: id, OwnerID: ownerID, CreatedAt: at, UpdatedAt: at}
 	if err := repo.Create(context.Background(), record); err != nil {
 		t.Fatalf("create session %s: %v", id, err)
 	}
@@ -61,7 +71,7 @@ func appendMessage(t *testing.T, repo *GORMRepository, id, sessionID string,
 	t.Helper()
 	err := repo.AppendMessage(context.Background(), Message{
 		ID: id, SessionID: sessionID, Role: role, Content: "说了一句", CreatedAt: at,
-	})
+	}, testCaller())
 	if err != nil {
 		t.Fatalf("append message %s: %v", id, err)
 	}
@@ -95,8 +105,17 @@ func sessionIDs(sessions []Session) []string {
 	return ids
 }
 
+// listSessions lists as the account these tests act as. The listing is per
+// account, so a listing with no account in it is not a listing of everything:
+// see listSessionsAs.
 func listSessions(t *testing.T, repo *GORMRepository, options ListOptions) []string {
 	t.Helper()
+	return listSessionsAs(t, repo, options, testCaller())
+}
+
+func listSessionsAs(t *testing.T, repo *GORMRepository, options ListOptions, caller authz.Caller) []string {
+	t.Helper()
+	options.Caller = caller
 	sessions, err := repo.List(context.Background(), options)
 	if err != nil {
 		t.Fatalf("list sessions: %v", err)
@@ -112,7 +131,7 @@ func TestDBTheListingIsByActivityThenID(t *testing.T) {
 
 	// What was stored is what the fixture said: without this the ordering below
 	// would be asserting against a clock the fixture does not control.
-	stored, err := repo.Session(context.Background(), "s_b")
+	stored, err := repo.Session(context.Background(), "s_b", testCaller())
 	if err != nil {
 		t.Fatalf("read the session back: %v", err)
 	}
@@ -149,7 +168,7 @@ func TestDBTheListingIsByActivityThenID(t *testing.T) {
 
 	// The bin is a listing of its own: a client showing both would have to
 	// filter every row to know which actions to offer.
-	if err := repo.SetDeleted(context.Background(), "s_b", true, atSecond(10)); err != nil {
+	if err := repo.SetDeleted(context.Background(), "s_b", true, atSecond(10), testCaller()); err != nil {
 		t.Fatalf("move a session to the bin: %v", err)
 	}
 	want = []string{"s_old", "s_c"}
@@ -161,7 +180,7 @@ func TestDBTheListingIsByActivityThenID(t *testing.T) {
 	}
 	// And the session itself is still readable, in the state it is in: the
 	// service decides what that state allows, not the adapter.
-	binned, err := repo.Session(context.Background(), "s_b")
+	binned, err := repo.Session(context.Background(), "s_b", testCaller())
 	if err != nil {
 		t.Fatalf("read a session in the bin: %v", err)
 	}
@@ -185,7 +204,7 @@ func TestDBMessagesAreOldestFirstThenByID(t *testing.T) {
 	appendMessage(t, repo, "msg_a", "s_1", RoleAssistant, atSecond(1))
 	appendMessage(t, repo, "msg_late", "s_1", RoleUser, atSecond(4))
 
-	messages, err := repo.Messages(context.Background(), "s_1")
+	messages, err := repo.Messages(context.Background(), "s_1", testCaller())
 	if err != nil {
 		t.Fatalf("list messages: %v", err)
 	}
@@ -210,7 +229,7 @@ func TestDBMessagesAreOldestFirstThenByID(t *testing.T) {
 	err = repo.AppendMessage(context.Background(), Message{
 		ID: "msg_orphan", SessionID: "s_missing", Role: RoleUser,
 		Content: "说给一个不存在的会话", CreatedAt: atSecond(5),
-	})
+	}, testCaller())
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("appending to a session that is not there: %v, want %v", err, ErrNotFound)
 	}
@@ -219,7 +238,7 @@ func TestDBMessagesAreOldestFirstThenByID(t *testing.T) {
 	}
 
 	// And a session with nothing appended has no messages and no error.
-	if messages, err := repo.Messages(context.Background(), "s_1"); err != nil || len(messages) != 3 {
+	if messages, err := repo.Messages(context.Background(), "s_1", testCaller()); err != nil || len(messages) != 3 {
 		t.Errorf("the messages are %d long (err %v), want 3", len(messages), err)
 	}
 }
@@ -253,7 +272,7 @@ func TestDBASessionCannotBeHalfDeleted(t *testing.T) {
 
 	// The adapter writes both columns together, which is the schema's rule kept
 	// from the other side: taking a session out of the bin clears both.
-	if err := repo.SetDeleted(context.Background(), "s_1", false, atSecond(3)); err != nil {
+	if err := repo.SetDeleted(context.Background(), "s_1", false, atSecond(3), testCaller()); err != nil {
 		t.Fatalf("restore the session: %v", err)
 	}
 	var row struct {
@@ -282,7 +301,7 @@ func TestDBDeletingASessionTakesItsMessagesAndTurns(t *testing.T) {
 	// The delete takes the session's messages and turns with it through the
 	// foreign keys, and leaves the other session's alone: what a permanent
 	// delete has to be is the whole of one conversation and nothing of another.
-	if err := repo.Delete(context.Background(), "s_1"); err != nil {
+	if err := repo.Delete(context.Background(), "s_1", testCaller()); err != nil {
 		t.Fatalf("delete the session: %v", err)
 	}
 	if got := countRows(t, resource, "messages"); got != 1 {
@@ -298,7 +317,7 @@ func TestDBDeletingASessionTakesItsMessagesAndTurns(t *testing.T) {
 	// A delete reports the rows it removed, so this one has an answer to give
 	// and it does not have to read the table to find it — unlike an update,
 	// where a row written back its own values reports nothing changed.
-	if err := repo.Delete(context.Background(), "s_1"); !errors.Is(err, ErrNotFound) {
+	if err := repo.Delete(context.Background(), "s_1", testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("deleting a session twice: %v, want %v", err, ErrNotFound)
 	}
 }
@@ -324,7 +343,7 @@ func TestDBAnUpdateThatChangesNothingIsNotAMissingSession(t *testing.T) {
 	// Which is why the adapter reads the session instead of believing that
 	// count: renaming a session to the title it already has, in the second it
 	// was last active, succeeds.
-	if err := repo.Rename(context.Background(), "s_1", "s_1", atSecond(1)); err != nil {
+	if err := repo.Rename(context.Background(), "s_1", "s_1", atSecond(1), testCaller()); err != nil {
 		t.Errorf("renaming a session to what it is already called: %v", err)
 	}
 	// Nor is a message appended in the same second as the session's own write a
@@ -336,10 +355,154 @@ func TestDBAnUpdateThatChangesNothingIsNotAMissingSession(t *testing.T) {
 
 	// A session that really is not there is still reported as missing, which is
 	// the answer the read is there to give.
-	if err := repo.Rename(context.Background(), "s_missing", "任何名字", atSecond(2)); !errors.Is(err, ErrNotFound) {
+	if err := repo.Rename(context.Background(), "s_missing", "任何名字", atSecond(2), testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("renaming a session that is not there: %v, want %v", err, ErrNotFound)
 	}
-	if err := repo.SetDeleted(context.Background(), "s_missing", true, atSecond(2)); !errors.Is(err, ErrNotFound) {
+	if err := repo.SetDeleted(context.Background(), "s_missing", true, atSecond(2), testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("deleting a session that is not there: %v, want %v", err, ErrNotFound)
+	}
+}
+
+// TestDBOneAccountsConversationsAreNotInAnothers is the contract the whole of V5
+// rests on, checked where it is really enforced: the SQL. Everything above this
+// line would pass against a database with no owner column at all, which is why
+// none of it is the evidence for this.
+func TestDBOneAccountsConversationsAreNotInAnothers(t *testing.T) {
+	repo, resource := newDBRepository(t)
+	mine := testCaller()
+	theirs := otherCaller()
+
+	storeSession(t, repo, "s_mine", atSecond(1))
+	storeOwnedSession(t, repo, "s_theirs", theirs.UserID, atSecond(2))
+	// A row from before V5: written by migration 00014's era, belonging to nobody.
+	storeOwnedSession(t, repo, "s_legacy", 0, atSecond(3))
+
+	// The listing is per account. s_theirs is not missing from it in the sense of
+	// having been filtered out after the fact — the row is not in the query's
+	// result, which is what makes this a scope rather than a check.
+	if got := listSessions(t, repo, ListOptions{}); !slices.Equal(got, []string{"s_mine"}) {
+		t.Errorf("my listing is %v, want only my own session", got)
+	}
+	if got := listSessionsAs(t, repo, ListOptions{}, theirs); !slices.Equal(got, []string{"s_theirs"}) {
+		t.Errorf("their listing is %v, want only theirs", got)
+	}
+	// The administrator is the one account that sees a row belonging to nobody.
+	// Reading somebody else's conversation is not what that buys: adminCaller sees
+	// s_legacy and not s_theirs, and not s_mine either.
+	if got := listSessionsAs(t, repo, ListOptions{}, adminCaller()); !slices.Equal(got, []string{"s_legacy"}) {
+		t.Errorf("the administrator's listing is %v, want the ownerless row alone", got)
+	}
+
+	// Every read and every write of a row that is somebody else's answers the way
+	// it answers an id that was never issued (AUTH-06). The important one is the
+	// first: it is not that the write is refused, it is that there is nothing to
+	// refuse.
+	if _, err := repo.Session(context.Background(), "s_theirs", mine); !errors.Is(err, ErrNotFound) {
+		t.Errorf("reading somebody else's session: %v, want %v", err, ErrNotFound)
+	}
+	if err := repo.Rename(context.Background(), "s_theirs", "我的了", atSecond(4), mine); !errors.Is(err, ErrNotFound) {
+		t.Errorf("renaming somebody else's session: %v, want %v", err, ErrNotFound)
+	}
+	if err := repo.SetDeleted(context.Background(), "s_theirs", true, atSecond(4), mine); !errors.Is(err, ErrNotFound) {
+		t.Errorf("deleting somebody else's session: %v, want %v", err, ErrNotFound)
+	}
+	if err := repo.Delete(context.Background(), "s_theirs", mine); !errors.Is(err, ErrNotFound) {
+		t.Errorf("erasing somebody else's session: %v, want %v", err, ErrNotFound)
+	}
+	if err := repo.AppendMessage(context.Background(), Message{
+		ID: "msg_intruder", SessionID: "s_theirs", Role: RoleUser,
+		Content: "写进别人的会话", CreatedAt: atSecond(4),
+	}, mine); !errors.Is(err, ErrNotFound) {
+		t.Errorf("writing into somebody else's session: %v, want %v", err, ErrNotFound)
+	}
+	// Messages are reached through their session, so the same filter has to hold
+	// one table away. Empty and refused are different answers here: an empty
+	// history is a conversation nobody has written in.
+	if _, err := repo.Messages(context.Background(), "s_theirs", mine); !errors.Is(err, ErrNotFound) {
+		t.Errorf("reading somebody else's history: %v, want %v", err, ErrNotFound)
+	}
+
+	// And none of it wrote: sqlite-style "refused" that left a row behind would
+	// pass every error check above.
+	if got := countRows(t, resource, "messages"); got != 0 {
+		t.Errorf("%d messages are stored, want none: every write above was for a row that is not there", got)
+	}
+	if got := countRows(t, resource, "sessions"); got != 3 {
+		t.Errorf("%d sessions are stored, want all 3 still there", got)
+	}
+	untouched, err := repo.Session(context.Background(), "s_theirs", theirs)
+	if err != nil {
+		t.Fatalf("reading their own session: %v", err)
+	}
+	if untouched.Title != "s_theirs" || untouched.Deleted() {
+		t.Errorf("their session is now %+v, want it as it was written", untouched)
+	}
+}
+
+// TestDBClaimingIsHowAnOwnerlessSessionFindsAnAccount covers the exit from the
+// state migration 00014 left every earlier row in (§2.5). It is a write whose
+// whole decision is in its WHERE clause, so the two ways it can come up empty —
+// the row is somebody else's, the row was never there — are one answer, and the
+// one way it can come up full is a row that now belongs to the claimer.
+func TestDBClaimingIsHowAnOwnerlessSessionFindsAnAccount(t *testing.T) {
+	repo, resource := newDBRepository(t)
+	mine := testCaller()
+	theirs := otherCaller()
+
+	storeOwnedSession(t, repo, "s_legacy", 0, atSecond(1))
+	storeSession(t, repo, "s_mine", atSecond(2))
+
+	// Claiming somebody else's session changes nothing. It is refused as a row
+	// that is not there rather than as a conflict, because the second fact — that
+	// the row exists and belongs to somebody — is not one an account is entitled
+	// to learn.
+	if err := repo.Claim(context.Background(), "s_mine", theirs); !errors.Is(err, ErrNotFound) {
+		t.Errorf("claiming somebody's session: %v, want %v", err, ErrNotFound)
+	}
+	if err := repo.Claim(context.Background(), "s_missing", mine); !errors.Is(err, ErrNotFound) {
+		t.Errorf("claiming a session that was never there: %v, want %v", err, ErrNotFound)
+	}
+	var owner *int64
+	if err := resource.GORM().Raw(
+		"SELECT owner_id FROM sessions WHERE session_id = 's_mine'").Scan(&owner).Error; err != nil {
+		t.Fatalf("read the owner of their session: %v", err)
+	}
+	if owner == nil || *owner != mine.UserID {
+		t.Errorf("their session is owned by %v, want it untouched at %d", owner, mine.UserID)
+	}
+
+	// Before a claim, the ownerless row is the administrator's alone: it is not
+	// that the user is refused it, it is that there is no row for them to be
+	// refused about.
+	if _, err := repo.Session(context.Background(), "s_legacy", mine); !errors.Is(err, ErrNotFound) {
+		t.Errorf("reading a session belonging to nobody: %v, want %v", err, ErrNotFound)
+	}
+	if _, err := repo.Session(context.Background(), "s_legacy", adminCaller()); err != nil {
+		t.Fatalf("the administrator reading a session belonging to nobody: %v", err)
+	}
+
+	// The claim itself, and then the two views of it: the claimer has it, and the
+	// administrator has it as the claimer's.
+	if err := repo.Claim(context.Background(), "s_legacy", mine); err != nil {
+		t.Fatalf("claiming a session belonging to nobody: %v", err)
+	}
+	claimed, err := repo.Session(context.Background(), "s_legacy", mine)
+	if err != nil {
+		t.Fatalf("reading back the session just claimed: %v", err)
+	}
+	if claimed.OwnerID != mine.UserID {
+		t.Errorf("the claimed session is owned by %d, want %d", claimed.OwnerID, mine.UserID)
+	}
+	if _, err := repo.Session(context.Background(), "s_legacy", adminCaller()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the administrator after the claim: %v, want the row to be somebody's now", err)
+	}
+	// Claiming what is already yours is the outcome the caller asked for, and a
+	// second click is not an error. It is also not a second write: the row is
+	// unchanged.
+	if err := repo.Claim(context.Background(), "s_legacy", mine); err != nil {
+		t.Errorf("claiming a session that is already mine: %v", err)
+	}
+	if got := countRows(t, resource, "sessions"); got != 2 {
+		t.Errorf("%d sessions are stored, want both: a claim renames an owner, it does not move a row", got)
 	}
 }

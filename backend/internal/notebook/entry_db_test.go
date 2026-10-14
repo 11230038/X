@@ -65,7 +65,7 @@ func TestEntryReadsBackWhatWasWritten(t *testing.T) {
 
 func TestEntryReportsAQuestionThatIsNotThere(t *testing.T) {
 	repository, _ := newDBRepository(t)
-	_, err := repository.Entry(context.Background(), "qn_000000000000000000000000")
+	_, err := repository.Entry(context.Background(), "qn_000000000000000000000000", testCaller())
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Entry of a question that is not there = %v, want ErrNotFound", err)
 	}
@@ -81,7 +81,7 @@ func TestEntryRefusesARowItCannotRead(t *testing.T) {
 	testdb.Exec(t, resource, "UPDATE notebook_entries SET options = ? WHERE question_id = ?",
 		`{"A":"甲"}`, result.QuestionID)
 
-	if _, err := repository.Entry(context.Background(), result.QuestionID); err == nil {
+	if _, err := repository.Entry(context.Background(), result.QuestionID, testCaller()); err == nil {
 		t.Fatal("a row whose options are not a list was read as if they were")
 	}
 }
@@ -100,7 +100,7 @@ func TestMarkSetsTheMarksAndIsRepeatable(t *testing.T) {
 	ctx := context.Background()
 	yes, no := true, false
 
-	if err := repository.Mark(ctx, result.QuestionID, Change{Bookmarked: &yes, Resolved: &no}); err != nil {
+	if err := repository.Mark(ctx, result.QuestionID, Change{Bookmarked: &yes, Resolved: &no}, testCaller()); err != nil {
 		t.Fatalf("mark the question: %v", err)
 	}
 	row := readRow(t, resource, result.QuestionID)
@@ -114,10 +114,10 @@ func TestMarkSetsTheMarksAndIsRepeatable(t *testing.T) {
 		t.Errorf("update_time = %v, want NULL: a bookmark is not an answer", row.UpdateTime)
 	}
 
-	if err := repository.Mark(ctx, result.QuestionID, Change{Bookmarked: &yes}); err != nil {
+	if err := repository.Mark(ctx, result.QuestionID, Change{Bookmarked: &yes}, testCaller()); err != nil {
 		t.Fatalf("marking an already bookmarked question: %v", err)
 	}
-	if err := repository.Mark(ctx, result.QuestionID, Change{Resolved: &yes}); err != nil {
+	if err := repository.Mark(ctx, result.QuestionID, Change{Resolved: &yes}, testCaller()); err != nil {
 		t.Fatalf("resolving it: %v", err)
 	}
 	row = readRow(t, resource, result.QuestionID)
@@ -128,8 +128,38 @@ func TestMarkSetsTheMarksAndIsRepeatable(t *testing.T) {
 		t.Errorf("bookmarked = %v, want the mark from the earlier call left alone", row.Bookmarked)
 	}
 
-	err := repository.Mark(ctx, "qn_000000000000000000000000", Change{Bookmarked: &yes})
+	err := repository.Mark(ctx, "qn_000000000000000000000000", Change{Bookmarked: &yes}, testCaller())
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("marking a question that is not there = %v, want ErrNotFound", err)
+	}
+}
+
+// TestDBAnotherAccountsQuestionIsNotThere is §7.2's second acceptance: a read by
+// id of a row another account owns is answered exactly as an id that was never
+// issued. The filter is inside the SQL, so the two accounts' questions are not
+// even candidates for the same query.
+func TestDBAnotherAccountsQuestionIsNotThere(t *testing.T) {
+	repository, _ := newDBRepository(t)
+	mine := saveAtAs(t, repository, sampleQuestion("我的题"), atSecond(0), testCaller())
+	theirs := saveAtAs(t, repository, sampleQuestion("别人的题"), atSecond(1), otherCaller())
+	ctx := context.Background()
+
+	if _, err := repository.Entry(ctx, mine.QuestionID, testCaller()); err != nil {
+		t.Fatalf("reading my own question: %v", err)
+	}
+	if _, err := repository.Entry(ctx, theirs.QuestionID, otherCaller()); err != nil {
+		t.Fatalf("reading the other account's own question: %v", err)
+	}
+	if _, err := repository.Entry(ctx, theirs.QuestionID, testCaller()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("reading another account's question = %v, want %v", err, ErrNotFound)
+	}
+	if _, err := repository.Entry(ctx, mine.QuestionID, otherCaller()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the other account reading my question = %v, want %v", err, ErrNotFound)
+	}
+	// A mark is a write to a row by id, so it is scoped the same way: another
+	// account's question is not one this caller can reach to mark.
+	yes := true
+	if err := repository.Mark(ctx, theirs.QuestionID, Change{Bookmarked: &yes}, testCaller()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("marking another account's question = %v, want %v", err, ErrNotFound)
 	}
 }

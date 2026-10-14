@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/embed"
 	"backend/internal/event"
 )
@@ -68,8 +69,13 @@ type KnowledgeBase struct {
 	Provider       string
 	EmbeddingModel string
 	IsDefault      bool
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// OwnerID is the account the collection belongs to, or zero for a base
+	// written before V5 (migration 00014 left every earlier row NULL). A
+	// collection is built rather than talked into existence, so it hangs off no
+	// conversation and there is no chain to derive this from.
+	OwnerID   int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
 	// Documents and ReadyDocuments are how much is in the base and how much of
 	// it can be found semantically yet. They are read for the list endpoint, not
 	// stored on this row.
@@ -188,7 +194,11 @@ type SourceFile struct {
 // small wrapper: two interfaces with the same shape but different return types
 // are not interchangeable even when the fields match.)
 type FileSource interface {
-	Open(ctx context.Context, fileID string) (SourceFile, error)
+	// Open reads one stored file. The caller is passed through rather than
+	// assumed, because the file library narrows its own reads to an account: a
+	// caller who could name somebody else's file id would turn "parse this into
+	// my collection" into a way to read bytes it was never given.
+	Open(ctx context.Context, fileID string, caller authz.Caller) (SourceFile, error)
 }
 
 // RetrieveInput is one retrieval over a turn's knowledge base scope.
@@ -197,7 +207,12 @@ type RetrieveInput struct {
 	// bases named here, so a base the user had and no longer has is reported,
 	// not replaced by the default one or by any other (KB-07).
 	KBIDs []string
-	Query string
+	// Caller is who is searching. The scope is a list of ids, and an id is a
+	// thing anyone can write down, so the list is not what makes the search
+	// legitimate — this is: the named bases are read as the caller's own, and
+	// one that is not comes back as unavailable rather than as a place to look.
+	Caller authz.Caller
+	Query  string
 	// TopK caps the returned sources. Zero means the configured default.
 	TopK int
 	// Vector is the query's embedding, when the caller already has one. Empty
@@ -288,31 +303,43 @@ func (o Options) Validate() error {
 // — one default base, one visible revision — are testable without a database.
 type Repository interface {
 	// Knowledge bases.
+	//
+	// Every read here is narrowed to the caller's own collections. A collection
+	// belonging to another account is not refused, it is not found — the same
+	// answer as an id that was never issued (AUTH-06).
 	CreateKnowledgeBase(ctx context.Context, record KnowledgeBase) error
-	KnowledgeBase(ctx context.Context, kbID string) (KnowledgeBase, error)
-	KnowledgeBases(ctx context.Context) ([]KnowledgeBase, error)
+	KnowledgeBase(ctx context.Context, kbID string, caller authz.Caller) (KnowledgeBase, error)
+	KnowledgeBases(ctx context.Context, caller authz.Caller) ([]KnowledgeBase, error)
 	KnowledgeBaseCounts(ctx context.Context) (map[string]Counts, error)
-	SetDefaultKnowledgeBase(ctx context.Context, kbID string) error
-	DeleteKnowledgeBase(ctx context.Context, kbID string) error
+	SetDefaultKnowledgeBase(ctx context.Context, kbID string, caller authz.Caller) error
+	DeleteKnowledgeBase(ctx context.Context, kbID string, caller authz.Caller) error
 
 	// Documents. For DocumentForFile an empty kbID means "the attachment of
 	// this file", which is a different row from the same file inside a base.
-	Document(ctx context.Context, documentID string) (Document, error)
-	DocumentForFile(ctx context.Context, fileID, kbID string) (Document, error)
+	//
+	// A document has no owner column of its own. It is reachable when the
+	// collection it is in belongs to the caller, or — for an attachment, which
+	// is in no collection — when the file it was parsed from does.
+	Document(ctx context.Context, documentID string, caller authz.Caller) (Document, error)
+	DocumentForFile(ctx context.Context, fileID, kbID string, caller authz.Caller) (Document, error)
 	// DocumentOfFile reads a file's document when the caller has no collection
 	// in mind: the attachment if the file has one, otherwise the oldest document
 	// of any collection. A file is parsed from the same bytes wherever it is
 	// used, so for the question a preview asks — what text did the model get —
 	// any of them answers the same.
-	DocumentOfFile(ctx context.Context, fileID string) (Document, error)
-	Documents(ctx context.Context, kbID string) ([]Document, error)
+	DocumentOfFile(ctx context.Context, fileID string, caller authz.Caller) (Document, error)
+	Documents(ctx context.Context, kbID string, caller authz.Caller) ([]Document, error)
+	// CreateDocument is the one write here that takes no caller, and the reason
+	// is that it creates a row rather than reaching for one: the collection it is
+	// about was just read through a scoped read, so there is no earlier row to
+	// guard. Every write that names a document that already exists does take one.
 	CreateDocument(ctx context.Context, write DocumentWrite) error
 	// ReplaceRevision writes a document's new revision and moves the document's
 	// active pointer onto it in one transaction. fromRevision is checked before
 	// anything is written, so two concurrent rebuilds cannot interleave: the one
 	// that loses gets ErrConflict.
-	ReplaceRevision(ctx context.Context, write DocumentWrite, fromRevision int) error
-	DeleteDocument(ctx context.Context, documentID string) error
+	ReplaceRevision(ctx context.Context, write DocumentWrite, fromRevision int, caller authz.Caller) error
+	DeleteDocument(ctx context.Context, documentID string, caller authz.Caller) error
 
 	// Chunks. Chunks reads one revision of one document through the chunk id
 	// prefix, because nothing indexes document_id.

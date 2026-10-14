@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"backend/internal/authz"
 )
 
 // DueNext is the question bank's view of the schedule (§1.2, notebook.DueReader).
@@ -16,7 +18,7 @@ import (
 // review is recorded — that is where the "how long until next time" arithmetic
 // lives, once — and a read that recomputed it would be a second implementation
 // of the same rule, free to disagree with the first.
-func (s *Service) DueNext(ctx context.Context, entryIDs []string) (map[string]time.Time, error) {
+func (s *Service) DueNext(ctx context.Context, entryIDs []string, caller authz.Caller) (map[string]time.Time, error) {
 	due := make(map[string]time.Time)
 	wanted := make([]string, 0, len(entryIDs))
 	for _, id := range entryIDs {
@@ -31,5 +33,5 @@ func (s *Service) DueNext(ctx context.Context, entryIDs []string) (map[string]ti
 		// failure.
 		return due, nil
 	}
-	return s.repository.DueTimes(ctx, wanted)
+	return s.repository.DueTimes(ctx, wanted, caller)
 }

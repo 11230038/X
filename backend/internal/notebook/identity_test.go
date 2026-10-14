@@ -108,15 +108,22 @@ func TestQuestionIDIsReadable(t *testing.T) {
 // category at the same moment collide instead of making two rows. It is also
 // the reason the id is not random, which is the opposite of the row key's rule.
 func TestCategoryIDComesFromTheName(t *testing.T) {
-	if categoryID("数学") != categoryID("数学") {
+	if categoryID(testOwnerID, "数学") != categoryID(testOwnerID, "数学") {
 		t.Fatal("the same category name got two ids")
 	}
 	// Named-matched under a binary collation, so case is part of the name.
-	if categoryID("Math") == categoryID("math") {
+	if categoryID(testOwnerID, "Math") == categoryID(testOwnerID, "math") {
 		t.Fatal("two categories the schema treats as different got one id")
 	}
+	// The owner is part of the key, which is what the composite unique index
+	// promises: two accounts may each have a category of the same name, so the
+	// id they derive cannot be the same one or the second account's filing would
+	// land in the first account's row.
+	if categoryID(testOwnerID, "数学") == categoryID(testOwnerID+1, "数学") {
+		t.Fatal("two owners' categories of one name got one id")
+	}
 	pattern := regexp.MustCompile(`^nbc_[0-9a-f]{24}$`)
-	if id := categoryID("数学"); !pattern.MatchString(id) {
+	if id := categoryID(testOwnerID, "数学"); !pattern.MatchString(id) {
 		t.Fatalf("categoryID = %q, want %s", id, pattern)
 	}
 }

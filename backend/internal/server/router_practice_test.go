@@ -1,6 +1,7 @@
 package server
 
 import (
+	"backend/internal/authz"
 	"context"
 	"fmt"
 	"net/http"
@@ -18,7 +19,7 @@ const routerQueueSize = 13
 
 type routerQuestionsStub struct{}
 
-func (routerQuestionsStub) Get(_ context.Context, questionID string) (notebook.Entry, error) {
+func (routerQuestionsStub) Get(_ context.Context, questionID string, _ authz.Caller) (notebook.Entry, error) {
 	return routerQuestionBankEntry(questionID), nil
 }
 
@@ -26,17 +27,21 @@ func (routerQuestionsStub) List(context.Context, notebook.Filter) ([]notebook.En
 	return []notebook.Entry{routerQuestionBankEntry("qn_1")}, nil
 }
 
-func (routerQuestionsStub) Mark(context.Context, string, notebook.Change) error { return nil }
+func (routerQuestionsStub) Mark(context.Context, string, notebook.Change, authz.Caller) error {
+	return nil
+}
 
-func (routerQuestionsStub) SetCategories(context.Context, string, []string) error { return nil }
+func (routerQuestionsStub) SetCategories(context.Context, string, []string, authz.Caller) error {
+	return nil
+}
 
-func (routerQuestionsStub) Categories(context.Context) ([]notebook.Category, error) {
+func (routerQuestionsStub) Categories(context.Context, authz.Caller) ([]notebook.Category, error) {
 	return []notebook.Category{{Name: "数学", Count: 3}}, nil
 }
 
 // Import answers the batch import with an empty report: this file is about which
 // routes exist, and what the import says about a file is handler/question_import_test.go's.
-func (routerQuestionsStub) Import(context.Context, string, bool) (notebook.ImportReport, error) {
+func (routerQuestionsStub) Import(context.Context, string, bool, authz.Caller) (notebook.ImportReport, error) {
 	return notebook.ImportReport{Entries: []notebook.ImportEntry{}}, nil
 }
 
@@ -52,7 +57,7 @@ type routerPracticeStub struct {
 	err error
 }
 
-func (s routerPracticeStub) Queue(context.Context, int) ([]practice.QueueItem, error) {
+func (s routerPracticeStub) Queue(context.Context, int, authz.Caller) ([]practice.QueueItem, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -62,14 +67,14 @@ func (s routerPracticeStub) Queue(context.Context, int) ([]practice.QueueItem, e
 	}}, nil
 }
 
-func (s routerPracticeStub) Review(context.Context, practice.Review) (practice.ReviewResult, error) {
+func (s routerPracticeStub) Review(context.Context, practice.Review, authz.Caller) (practice.ReviewResult, error) {
 	if s.err != nil {
 		return practice.ReviewResult{}, s.err
 	}
 	return routerReviewResult(), nil
 }
 
-func (s routerPracticeStub) Recorded(context.Context, string) (practice.ReviewResult, error) {
+func (s routerPracticeStub) Recorded(context.Context, string, authz.Caller) (practice.ReviewResult, error) {
 	if s.err != nil {
 		return practice.ReviewResult{}, s.err
 	}

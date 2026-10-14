@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"backend/internal/authz"
 )
 
 // The bilingual pairing of two materials (READ-06).
@@ -173,12 +175,12 @@ type materialFacts struct {
 // The recommendation is computed here, per request, from the catalogue — and it
 // is not computed at all for a material that is already paired: a reader who has
 // confirmed a counterpart is not asking to be offered another one.
-func (s *Service) Pairings(ctx context.Context, materialID string) (Pairings, error) {
-	material, err := s.repository.Material(ctx, strings.TrimSpace(materialID))
+func (s *Service) Pairings(ctx context.Context, materialID string, caller authz.Caller) (Pairings, error) {
+	material, err := s.repository.Material(ctx, strings.TrimSpace(materialID), caller)
 	if err != nil {
 		return Pairings{}, err
 	}
-	state, facts, err := s.bilingualOf(ctx, material)
+	state, facts, err := s.bilingualOf(ctx, material, caller)
 	if err != nil {
 		return Pairings{}, err
 	}
@@ -186,7 +188,7 @@ func (s *Service) Pairings(ctx context.Context, materialID string) (Pairings, er
 	if state.Enabled || facts.Language == "" {
 		return answer, nil
 	}
-	candidates, err := s.candidatesOf(ctx, material, facts)
+	candidates, err := s.candidatesOf(ctx, material, facts, caller)
 	if err != nil {
 		return Pairings{}, err
 	}
@@ -196,12 +198,12 @@ func (s *Service) Pairings(ctx context.Context, materialID string) (Pairings, er
 
 // Bilingual answers the downstream question for one material, and it is the same
 // answer the pairing read carries: one rule, two doors onto it.
-func (s *Service) Bilingual(ctx context.Context, materialID string) (Bilingual, error) {
-	material, err := s.repository.Material(ctx, strings.TrimSpace(materialID))
+func (s *Service) Bilingual(ctx context.Context, materialID string, caller authz.Caller) (Bilingual, error) {
+	material, err := s.repository.Material(ctx, strings.TrimSpace(materialID), caller)
 	if err != nil {
 		return Bilingual{}, err
 	}
-	state, _, err := s.bilingualOf(ctx, material)
+	state, _, err := s.bilingualOf(ctx, material, caller)
 	return state, err
 }
 
@@ -221,22 +223,22 @@ func (s *Service) Bilingual(ctx context.Context, materialID string) (Bilingual, 
 // than the table's: the downstream question is "which material is the other one",
 // one answer, and a build where a material could sit in two pairings would have
 // to pick one to answer with. Refusing the second confirmation says so out loud.
-func (s *Service) ConfirmPairing(ctx context.Context, request PairingRequest) (Pairing, error) {
+func (s *Service) ConfirmPairing(ctx context.Context, request PairingRequest, caller authz.Caller) (Pairing, error) {
 	if err := request.Validate(); err != nil {
 		return Pairing{}, err
 	}
-	primary, err := s.repository.Material(ctx, request.MaterialID)
+	primary, err := s.repository.Material(ctx, request.MaterialID, caller)
 	if err != nil {
 		return Pairing{}, err
 	}
-	counterpart, err := s.repository.Material(ctx, request.CounterpartMaterialID)
+	counterpart, err := s.repository.Material(ctx, request.CounterpartMaterialID, caller)
 	if err != nil {
 		return Pairing{}, err
 	}
 	// Confirming what is already confirmed is answered with the row that is there
 	// rather than refused: a reader who clicks twice asked for the state they
 	// already have, and it is the same answer a cancel of nothing gets.
-	confirmed, err := s.repository.PairingBetween(ctx, primary.MaterialID, counterpart.MaterialID)
+	confirmed, err := s.repository.PairingBetween(ctx, primary.MaterialID, counterpart.MaterialID, caller)
 	if err == nil {
 		return confirmed, nil
 	}
@@ -244,7 +246,7 @@ func (s *Service) ConfirmPairing(ctx context.Context, request PairingRequest) (P
 		return Pairing{}, err
 	}
 	for _, material := range []Material{primary, counterpart} {
-		existing, err := s.repository.PairingOf(ctx, material.MaterialID)
+		existing, err := s.repository.PairingOf(ctx, material.MaterialID, caller)
 		if err == nil {
 			other, _ := existing.Other(material.MaterialID)
 			return Pairing{}, fmt.Errorf(
@@ -255,11 +257,11 @@ func (s *Service) ConfirmPairing(ctx context.Context, request PairingRequest) (P
 			return Pairing{}, err
 		}
 	}
-	primaryFacts, err := s.factsOf(ctx, primary)
+	primaryFacts, err := s.factsOf(ctx, primary, caller)
 	if err != nil {
 		return Pairing{}, err
 	}
-	counterpartFacts, err := s.factsOf(ctx, counterpart)
+	counterpartFacts, err := s.factsOf(ctx, counterpart, caller)
 	if err != nil {
 		return Pairing{}, err
 	}
@@ -284,12 +286,12 @@ func (s *Service) ConfirmPairing(ctx context.Context, request PairingRequest) (P
 		CounterpartLanguage:   counterpartFacts.Language,
 		CreatedAt:             time.Now().UTC(),
 	}
-	err = s.repository.CreatePairing(ctx, pairing)
+	err = s.repository.CreatePairing(ctx, pairing, caller)
 	if errors.Is(err, ErrDuplicate) {
 		// Two confirmations of the same pair at the same instant: the row that won
 		// is the confirmation, and handing it back is what makes a repeated click
 		// an answer rather than a conflict.
-		return s.repository.PairingBetween(ctx, primary.MaterialID, counterpart.MaterialID)
+		return s.repository.PairingBetween(ctx, primary.MaterialID, counterpart.MaterialID, caller)
 	}
 	if err != nil {
 		return Pairing{}, err
@@ -309,12 +311,12 @@ func (s *Service) ConfirmPairing(ctx context.Context, request PairingRequest) (P
 // It is the whole of "cancel" because the row is the whole of the confirmation:
 // removing it returns the material to not-enabled, and there is nothing else to
 // undo — no derived text was ever made, and no job was ever queued (§2.10).
-func (s *Service) CancelPairing(ctx context.Context, pairingID string) (bool, error) {
+func (s *Service) CancelPairing(ctx context.Context, pairingID string, caller authz.Caller) (bool, error) {
 	pairingID = strings.TrimSpace(pairingID)
 	if pairingID == "" {
 		return false, fmt.Errorf("%w: no pairing was named", ErrInvalidRequest)
 	}
-	err := s.repository.DeletePairing(ctx, pairingID)
+	err := s.repository.DeletePairing(ctx, pairingID, caller)
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}
@@ -332,8 +334,8 @@ func (s *Service) CancelPairing(ctx context.Context, pairingID string) (bool, er
 // A paired material is answered before its text is read at all. Nothing needs the
 // language then — the row already records both — and a request whose answer is
 // "enabled" should not fail because a document has become unreadable.
-func (s *Service) bilingualOf(ctx context.Context, material Material) (Bilingual, materialFacts, error) {
-	pairing, err := s.repository.PairingOf(ctx, material.MaterialID)
+func (s *Service) bilingualOf(ctx context.Context, material Material, caller authz.Caller) (Bilingual, materialFacts, error) {
+	pairing, err := s.repository.PairingOf(ctx, material.MaterialID, caller)
 	if err == nil {
 		return Bilingual{
 			MaterialID: material.MaterialID,
@@ -344,7 +346,7 @@ func (s *Service) bilingualOf(ctx context.Context, material Material) (Bilingual
 	if !errors.Is(err, ErrNotFound) {
 		return Bilingual{}, materialFacts{}, err
 	}
-	facts, err := s.factsOf(ctx, material)
+	facts, err := s.factsOf(ctx, material, caller)
 	if err != nil {
 		return Bilingual{}, materialFacts{}, err
 	}
@@ -364,8 +366,8 @@ func (s *Service) bilingualOf(ctx context.Context, material Material) (Bilingual
 // read is skipped rather than failing the request — one unreadable book in a
 // shelf is not the whole recommendation's problem — and one in the same language
 // is skipped because two books in one language are not a translation pair.
-func (s *Service) candidatesOf(ctx context.Context, material Material, facts materialFacts) ([]Candidate, error) {
-	all, err := s.repository.Materials(ctx, "")
+func (s *Service) candidatesOf(ctx context.Context, material Material, facts materialFacts, caller authz.Caller) ([]Candidate, error) {
+	all, err := s.repository.Materials(ctx, "", caller)
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +376,7 @@ func (s *Service) candidatesOf(ctx context.Context, material Material, facts mat
 		if other.MaterialID == material.MaterialID {
 			continue
 		}
-		otherFacts, err := s.factsOf(ctx, other)
+		otherFacts, err := s.factsOf(ctx, other, caller)
 		if err != nil || otherFacts.Language == "" || otherFacts.Language == facts.Language {
 			continue
 		}
@@ -409,11 +411,11 @@ func (s *Service) candidatesOf(ctx context.Context, material Material, facts mat
 // and a material with no document or no text answers with no language rather than
 // with an error: a material row that names no document is a row the catalogue may
 // still list.
-func (s *Service) factsOf(ctx context.Context, material Material) (materialFacts, error) {
+func (s *Service) factsOf(ctx context.Context, material Material, caller authz.Caller) (materialFacts, error) {
 	if strings.TrimSpace(material.ContentID) == "" {
 		return materialFacts{}, nil
 	}
-	document, err := s.documents.Document(ctx, material.ContentID)
+	document, err := s.documents.Document(ctx, material.ContentID, caller)
 	if err != nil {
 		return materialFacts{}, err
 	}
@@ -421,7 +423,7 @@ func (s *Service) factsOf(ctx context.Context, material Material) (materialFacts
 	if document.TextChars <= 0 {
 		return facts, nil
 	}
-	window, err := s.documents.Text(ctx, material.ContentID, 0, min(document.TextChars, languageWindow))
+	window, err := s.documents.Text(ctx, material.ContentID, 0, min(document.TextChars, languageWindow), caller)
 	if err != nil {
 		return materialFacts{}, err
 	}

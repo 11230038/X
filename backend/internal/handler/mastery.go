@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/httpx"
 	"backend/internal/mastery"
 	"github.com/gin-gonic/gin"
@@ -21,17 +22,22 @@ import (
 // design's rather than an omission: a path is created inside a turn, by the
 // turn that was asked to work on it (§2.1), so the way to make one is to start
 // a turn — the mastery_path capability — not to POST a tree.
+//
+// Every read here carries the caller, and that is not decoration: the scope
+// travels *into* the query, so a path belonging to another account is not a
+// refusal the handler has to translate — it is simply not found, and fail maps it
+// to the 404 it already maps every absent path to.
 type Mastery interface {
 	List(context.Context, mastery.ListRequest) ([]mastery.Summary, error)
-	Load(context.Context, string) (mastery.View, error)
-	Insight(context.Context, string) (mastery.Insight, error)
-	UpdateMeta(context.Context, mastery.MetaRequest) (mastery.TopicMeta, error)
+	Load(context.Context, string, authz.Caller) (mastery.View, error)
+	Insight(context.Context, string, authz.Caller) (mastery.Insight, error)
+	UpdateMeta(context.Context, mastery.MetaRequest, authz.Caller) (mastery.TopicMeta, error)
 	// Holder reports who is writing a path. ErrNotFound when nobody ever has,
 	// which is the ordinary state of a path nobody is on rather than a failure.
-	Holder(context.Context, string) (mastery.Lease, error)
+	Holder(context.Context, string, authz.Caller) (mastery.Lease, error)
 	// ReleaseAny gives up a path's claim whoever holds it, and reports whether
 	// there was one to give up.
-	ReleaseAny(context.Context, string) (mastery.Lease, bool, error)
+	ReleaseAny(context.Context, string, authz.Caller) (mastery.Lease, bool, error)
 }
 
 // MasteryHandler handles the mastery paths: the list, one path, its insight,
@@ -167,7 +173,11 @@ func (h *MasteryHandler) List(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	request := mastery.ListRequest{SessionID: strings.TrimSpace(c.Query("session_id"))}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	request := mastery.ListRequest{Caller: account, SessionID: strings.TrimSpace(c.Query("session_id"))}
 	found, err := h.paths.List(c.Request.Context(), request)
 	if err != nil {
 		h.fail(c, "list_paths_failed", err)
@@ -191,7 +201,11 @@ func (h *MasteryHandler) Get(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	view, err := h.paths.Load(c.Request.Context(), c.Param("pathID"))
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	view, err := h.paths.Load(c.Request.Context(), c.Param("pathID"), account)
 	if err != nil {
 		h.fail(c, "get_path_failed", err)
 		return
@@ -223,6 +237,12 @@ func (h *MasteryHandler) Patch(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
+	// The account is read before the body is: who is asking is settled first, so
+	// a request that may not act on any path never gets as far as being parsed.
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	var request metaRequest
 	if !readJSON(c, maxSessionRequestBytes, &request) {
 		return
@@ -235,12 +255,12 @@ func (h *MasteryHandler) Patch(c *gin.Context) {
 	_, err := h.paths.UpdateMeta(c.Request.Context(), mastery.MetaRequest{
 		PathID: pathID, Goal: request.Goal, Description: request.Description,
 		Emoji: request.Emoji, Status: request.Status,
-	})
+	}, account)
 	if err != nil {
 		h.fail(c, "update_path_failed", err)
 		return
 	}
-	view, err := h.paths.Load(c.Request.Context(), pathID)
+	view, err := h.paths.Load(c.Request.Context(), pathID, account)
 	if err != nil {
 		h.fail(c, "update_path_failed", err)
 		return
@@ -254,7 +274,11 @@ func (h *MasteryHandler) Insight(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	insight, err := h.paths.Insight(c.Request.Context(), c.Param("pathID"))
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	insight, err := h.paths.Insight(c.Request.Context(), c.Param("pathID"), account)
 	if err != nil {
 		h.fail(c, "read_insight_failed", err)
 		return
@@ -267,8 +291,12 @@ func (h *MasteryHandler) Lease(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	pathID := c.Param("pathID")
-	lease, err := h.paths.Holder(c.Request.Context(), pathID)
+	lease, err := h.paths.Holder(c.Request.Context(), pathID, account)
 	if err != nil && !errors.Is(err, mastery.ErrNotFound) {
 		h.fail(c, "read_lease_failed", err)
 		return
@@ -277,7 +305,7 @@ func (h *MasteryHandler) Lease(c *gin.Context) {
 		// Nobody has ever claimed it. The path itself is still checked, so that
 		// a lease read of a path that does not exist is a 404 rather than a
 		// confident "nobody is writing this".
-		if _, err := h.paths.Load(c.Request.Context(), pathID); err != nil {
+		if _, err := h.paths.Load(c.Request.Context(), pathID, account); err != nil {
 			h.fail(c, "read_lease_failed", err)
 			return
 		}
@@ -302,8 +330,12 @@ func (h *MasteryHandler) ReleaseLease(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	pathID := c.Param("pathID")
-	lease, released, err := h.paths.ReleaseAny(c.Request.Context(), pathID)
+	lease, released, err := h.paths.ReleaseAny(c.Request.Context(), pathID, account)
 	if err != nil {
 		h.fail(c, "release_lease_failed", err)
 		return

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"backend/internal/agentloop"
+	"backend/internal/authz"
 	"backend/internal/capability"
 	"backend/internal/event"
 	"backend/internal/llm"
@@ -32,6 +33,11 @@ type turnRun struct {
 	runner  *Runner
 	turn    Turn
 	session session.Session
+	// caller is the account this turn runs for, carried from the request rather
+	// than read off the session: an administrator may run a turn in a session
+	// that belongs to nobody, and the owner column would then say zero while the
+	// writes this turn makes still have to be narrowed to the administrator.
+	caller authz.Caller
 	// question is what the user asked, kept for naming the session afterwards.
 	question string
 	// titleNeeded is whether this turn is the one that names the session: the
@@ -91,6 +97,7 @@ func (r *Runner) newTurnRun(
 	cancel context.CancelFunc,
 	turn Turn,
 	conversation session.Session,
+	caller authz.Caller,
 	question string,
 	declared Declaration,
 	emitter *Emitter,
@@ -100,6 +107,7 @@ func (r *Runner) newTurnRun(
 		runner:      r,
 		turn:        turn,
 		session:     conversation,
+		caller:      caller,
 		question:    question,
 		titleNeeded: conversation.Title == "",
 		declared:    declared,
@@ -159,6 +167,7 @@ func (r *turnRun) claimPath() error {
 		SessionID:  r.session.ID,
 		TurnID:     r.turn.ID,
 		Goal:       r.question,
+		Caller:     r.caller,
 	})
 	if err != nil {
 		return err
@@ -262,7 +271,7 @@ func (r *turnRun) runCapability() error {
 // Every turn re-reads it rather than carrying it in memory, so that a turn
 // started in a session someone else has been writing in sees what is there now.
 func (r *turnRun) messages(ctx context.Context) ([]llm.Message, error) {
-	history, err := r.runner.sessions.Messages(ctx, r.session.ID)
+	history, err := r.runner.sessions.Messages(ctx, r.session.ID, r.caller)
 	if err != nil {
 		return nil, err
 	}

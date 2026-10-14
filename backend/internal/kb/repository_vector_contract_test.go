@@ -271,7 +271,7 @@ func TestDBReasonsSurviveTheStateTheyExplain(t *testing.T) {
 	if err := repo.FailDocument(context.Background(), claim.ID, "worker_1", "the provider refused"); err != nil {
 		t.Fatalf("fail the document: %v", err)
 	}
-	stored, err := repo.Document(context.Background(), claim.ID)
+	stored, err := repo.Document(context.Background(), claim.ID, testCaller())
 	if err != nil {
 		t.Fatalf("read the document back: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestDBARebuildHandsTheDocumentBackToTheQueue(t *testing.T) {
 		ID: "doc_1", KBID: "kb_a", FileID: first.FileID, Revision: 2,
 		CreatedAt: atSecond(2), Text: "alpha beta gamma", Chunks: []string{"alpha", "beta gamma"},
 	})
-	if err := repo.ReplaceRevision(context.Background(), second, 1); err != nil {
+	if err := repo.ReplaceRevision(context.Background(), second, 1, testCaller()); err != nil {
 		t.Fatalf("replace the revision: %v", err)
 	}
 	state, owner, claimedAt := claimColumns(t, resource, "doc_1")

@@ -79,7 +79,7 @@ func (r *turnRun) storeAnswer(ctx context.Context) {
 		Role:       session.RoleAssistant,
 		Content:    answer,
 		Capability: r.turn.Capability,
-	})
+	}, r.caller)
 	if err != nil {
 		// The turn still ends and the client still hears about it: the answer
 		// has already been streamed, so failing the turn now would tell the
@@ -154,7 +154,7 @@ func (r *turnRun) nameSession(ctx context.Context, completed bool) {
 		if err != nil {
 			r.runner.logger.WarnContext(ctx, "could not name a session",
 				"session_id", r.session.ID, "error", err)
-		} else if renamed, err := r.runner.sessions.Rename(ctx, r.session.ID, generated); err != nil {
+		} else if renamed, err := r.runner.sessions.Rename(ctx, r.session.ID, generated, r.caller); err != nil {
 			r.runner.logger.WarnContext(ctx, "could not store a session name",
 				"session_id", r.session.ID, "error", err)
 		} else {

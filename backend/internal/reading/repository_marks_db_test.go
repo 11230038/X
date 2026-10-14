@@ -51,7 +51,7 @@ func TestDBMarksAreOldestFirstThenByID(t *testing.T) {
 	storeMarkRow(t, resource, "rmk_a", "rm_1", "s_1", "note", ptr(atSecond(1)))
 	storeMarkRow(t, resource, "rmk_late", "rm_1", nil, "highlight", ptr(atSecond(4)))
 
-	marks, err := repo.Marks(context.Background(), "rm_1")
+	marks, err := repo.Marks(context.Background(), "rm_1", dbCaller)
 	if err != nil {
 		t.Fatalf("list the marks: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestDBMarksAreOldestFirstThenByID(t *testing.T) {
 	}
 	// Marks belong to one material: a listing is about a book, not about every
 	// book at once.
-	if _, err := repo.Marks(context.Background(), "rm_missing"); err != nil {
+	if _, err := repo.Marks(context.Background(), "rm_missing", dbCaller); err != nil {
 		t.Errorf("listing the marks of a material with none: %v", err)
 	}
 }
@@ -90,7 +90,7 @@ func TestDBAMarkIsReadBackWhole(t *testing.T) {
 	err := repo.CreateMark(ctx, Mark{
 		MarkID: "rmk_1", MaterialID: "rm_1", SessionID: "s_1", Kind: MarkHighlight, Revision: 1,
 		Locator: Locator{MaterialID: "rm_1", Ordinal: 3, CharStart: 10, CharEnd: 20, Page: page(7)},
-	})
+	}, dbCaller)
 	if err != nil {
 		t.Fatalf("create a highlight: %v", err)
 	}
@@ -99,12 +99,12 @@ func TestDBAMarkIsReadBackWhole(t *testing.T) {
 	err = repo.CreateMark(ctx, Mark{
 		MarkID: "rmk_2", MaterialID: "rm_1", SessionID: "s_1", Kind: MarkNote, Revision: 1,
 		Locator: Locator{MaterialID: "rm_1", CharStart: 30, CharEnd: 40}, Body: "这里说的是捕获",
-	})
+	}, dbCaller)
 	if err != nil {
 		t.Fatalf("create a note: %v", err)
 	}
 
-	highlight, err := repo.Mark(ctx, "rmk_1")
+	highlight, err := repo.Mark(ctx, "rmk_1", dbCaller)
 	if err != nil {
 		t.Fatalf("read the highlight back: %v", err)
 	}
@@ -121,14 +121,14 @@ func TestDBAMarkIsReadBackWhole(t *testing.T) {
 	if highlight.Revision != 1 || highlight.CreatedAt.IsZero() {
 		t.Errorf("the stored highlight is %+v, want the first revision and a moment", highlight)
 	}
-	note, err := repo.Mark(ctx, "rmk_2")
+	note, err := repo.Mark(ctx, "rmk_2", dbCaller)
 	if err != nil {
 		t.Fatalf("read the note back: %v", err)
 	}
 	if note.Body != "这里说的是捕获" || note.Kind != MarkNote {
 		t.Errorf("the stored note is %+v", note)
 	}
-	if _, err := repo.Mark(ctx, "rmk_missing"); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.Mark(ctx, "rmk_missing", dbCaller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("reading a mark that is not there: %v, want %v", err, ErrNotFound)
 	}
 }
@@ -143,7 +143,7 @@ func TestDBAMarkIsOneOfThreeKindsAndOutlivesWhatItIsNotOwnedBy(t *testing.T) {
 		err := repo.CreateMark(ctx, Mark{
 			MarkID: "rmk_" + string(kind), MaterialID: "rm_1", SessionID: "s_1", Kind: kind, Revision: 1,
 			Locator: Locator{MaterialID: "rm_1", CharStart: 10, CharEnd: 20},
-		})
+		}, dbCaller)
 		if err != nil {
 			t.Fatalf("create a %s: %v", kind, err)
 		}
@@ -158,7 +158,7 @@ func TestDBAMarkIsOneOfThreeKindsAndOutlivesWhatItIsNotOwnedBy(t *testing.T) {
 	err := repo.CreateMark(ctx, Mark{
 		MarkID: "rmk_kept", MaterialID: "rm_2", SessionID: "s_1", Kind: MarkNote, Revision: 1,
 		Locator: Locator{MaterialID: "rm_2", CharStart: 10, CharEnd: 20}, Body: "另一本书上的",
-	})
+	}, dbCaller)
 	if err != nil {
 		t.Fatalf("create a mark on the other material: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestDBAMarkIsOneOfThreeKindsAndOutlivesWhatItIsNotOwnedBy(t *testing.T) {
 		t.Fatalf("%d marks are left, want the one: a tidied conversation list must not "+
 			"take somebody's notes with it", got)
 	}
-	kept, err := repo.Mark(ctx, "rmk_kept")
+	kept, err := repo.Mark(ctx, "rmk_kept", dbCaller)
 	if err != nil {
 		t.Fatalf("read the mark back: %v", err)
 	}
@@ -221,13 +221,13 @@ func TestDBAMarkCannotExistHalfWritten(t *testing.T) {
 	if err := repo.CreateMark(context.Background(), Mark{
 		MarkID: "rmk_1", MaterialID: "rm_1", Kind: MarkBookmark, Revision: 1,
 		Locator: Locator{MaterialID: "rm_1", CharStart: 10, CharEnd: 10},
-	}); err != nil {
+	}, dbCaller); err != nil {
 		t.Fatalf("create a bookmark: %v", err)
 	}
-	if err := repo.DeleteMark(context.Background(), "rmk_1"); err != nil {
+	if err := repo.DeleteMark(context.Background(), "rmk_1", dbCaller); err != nil {
 		t.Fatalf("remove the bookmark: %v", err)
 	}
-	if err := repo.DeleteMark(context.Background(), "rmk_1"); !errors.Is(err, ErrNotFound) {
+	if err := repo.DeleteMark(context.Background(), "rmk_1", dbCaller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("removing the same mark twice: %v, want %v", err, ErrNotFound)
 	}
 }

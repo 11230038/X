@@ -44,7 +44,7 @@ func TestPracticeHandlerStatsReadsTheWindow(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			stub := &practiceStub{}
-			recorder := call(t, newPracticeRouter(stub, 20), http.MethodGet,
+			recorder := callAs(t, newPracticeRouter(stub, 20), http.MethodGet,
 				"/api/v1/practice/stats"+test.query, "")
 			if recorder.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -64,7 +64,7 @@ func TestPracticeHandlerStatsReadsTheWindow(t *testing.T) {
 func TestPracticeHandlerStatsRefusesAnInstantItCannotRead(t *testing.T) {
 	stub := &practiceStub{}
 	for _, query := range []string{"?from=yesterday", "?to=13/10/2026", "?from=2026-13-45"} {
-		recorder := call(t, newPracticeRouter(stub, 20), http.MethodGet, "/api/v1/practice/stats"+query, "")
+		recorder := callAs(t, newPracticeRouter(stub, 20), http.MethodGet, "/api/v1/practice/stats"+query, "")
 		if recorder.Code != http.StatusBadRequest {
 			t.Fatalf("query %q gave status %d, want 400; body=%s",
 				query, recorder.Code, recorder.Body.String())
@@ -93,7 +93,7 @@ func TestPracticeHandlerStatsReportsTheWindowItCovered(t *testing.T) {
 		Sources:    []practice.Distribution{{Name: "knowledge_base", Count: 2}, {Name: "", Count: 1}},
 		Categories: []practice.Distribution{{Name: "数学", Count: 3}},
 	}}
-	recorder := call(t, newPracticeRouter(stub, 20), http.MethodGet,
+	recorder := callAs(t, newPracticeRouter(stub, 20), http.MethodGet,
 		"/api/v1/practice/stats?from=2026-10-06&to=2026-10-12", "")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -127,7 +127,7 @@ func TestPracticeHandlerStatsReportsTheWindowItCovered(t *testing.T) {
 
 func TestPracticeHandlerStatsShowsAnEmptyHistoryAsEmptyLists(t *testing.T) {
 	stub := &practiceStub{stats: practice.Stats{Bucket: practice.BucketDay}}
-	recorder := call(t, newPracticeRouter(stub, 20), http.MethodGet, "/api/v1/practice/stats", "")
+	recorder := callAs(t, newPracticeRouter(stub, 20), http.MethodGet, "/api/v1/practice/stats", "")
 	body := recorder.Body.String()
 	for _, want := range []string{`"series":[]`, `"sources":[]`, `"categories":[]`} {
 		if !containsJSON(body, want) {

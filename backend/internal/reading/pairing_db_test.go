@@ -52,7 +52,7 @@ func newPairingShelf(t *testing.T) (*Service, *GORMRepository, *data.Resource, *
 func TestDBARecommendationLeavesTheTableEmpty(t *testing.T) {
 	service, _, resource, _ := newPairingShelf(t)
 
-	answer, err := service.Pairings(context.Background(), "rm_zh")
+	answer, err := service.Pairings(context.Background(), "rm_zh", dbCaller)
 	if err != nil {
 		t.Fatalf("Pairings() error = %v", err)
 	}
@@ -74,7 +74,7 @@ func TestDBAConfirmationIsOneRowReadFromEitherEnd(t *testing.T) {
 
 	confirmed, err := service.ConfirmPairing(ctx, PairingRequest{
 		MaterialID: "rm_zh", CounterpartMaterialID: "rm_en",
-	})
+	}, dbCaller)
 	if err != nil {
 		t.Fatalf("ConfirmPairing() error = %v", err)
 	}
@@ -98,7 +98,7 @@ func TestDBAConfirmationIsOneRowReadFromEitherEnd(t *testing.T) {
 			stored.PrimaryLanguage, stored.CounterpartLanguage)
 	}
 
-	found, err := repository.PairingOf(ctx, "rm_en")
+	found, err := repository.PairingOf(ctx, "rm_en", dbCaller)
 	if err != nil {
 		t.Fatalf("PairingOf() from the far end error = %v", err)
 	}
@@ -107,7 +107,7 @@ func TestDBAConfirmationIsOneRowReadFromEitherEnd(t *testing.T) {
 	}
 	// Asked for the other way round, which is the OR in the statement and not
 	// something a double can be wrong about.
-	reversed, err := repository.PairingBetween(ctx, "rm_en", "rm_zh")
+	reversed, err := repository.PairingBetween(ctx, "rm_en", "rm_zh", dbCaller)
 	if err != nil {
 		t.Fatalf("PairingBetween() reversed error = %v", err)
 	}
@@ -119,7 +119,7 @@ func TestDBAConfirmationIsOneRowReadFromEitherEnd(t *testing.T) {
 	// index is what makes that true even when two requests arrive together.
 	again, err := service.ConfirmPairing(ctx, PairingRequest{
 		MaterialID: "rm_zh", CounterpartMaterialID: "rm_en",
-	})
+	}, dbCaller)
 	if err != nil {
 		t.Fatalf("ConfirmPairing() again error = %v", err)
 	}
@@ -208,7 +208,7 @@ func TestDBDeletingAMaterialTakesItsPairingWithIt(t *testing.T) {
 
 	if _, err := service.ConfirmPairing(ctx, PairingRequest{
 		MaterialID: "rm_zh", CounterpartMaterialID: "rm_en",
-	}); err != nil {
+	}, dbCaller); err != nil {
 		t.Fatalf("ConfirmPairing() error = %v", err)
 	}
 	testdb.Exec(t, resource, "DELETE FROM reading_materials WHERE material_id = ?", "rm_en")
@@ -216,7 +216,7 @@ func TestDBDeletingAMaterialTakesItsPairingWithIt(t *testing.T) {
 	if got := countRows(t, resource, "reading_pairings"); got != 0 {
 		t.Errorf("%d pairings outlived the material they pointed at, want none", got)
 	}
-	state, err := service.Bilingual(ctx, "rm_zh")
+	state, err := service.Bilingual(ctx, "rm_zh", dbCaller)
 	if err != nil {
 		t.Fatalf("Bilingual() error = %v", err)
 	}
@@ -234,18 +234,18 @@ func TestDBCancellingRemovesTheRowAndTheStateWithIt(t *testing.T) {
 
 	confirmed, err := service.ConfirmPairing(ctx, PairingRequest{
 		MaterialID: "rm_en", CounterpartMaterialID: "rm_zh",
-	})
+	}, dbCaller)
 	if err != nil {
 		t.Fatalf("ConfirmPairing() error = %v", err)
 	}
-	cancelled, err := service.CancelPairing(ctx, confirmed.PairingID)
+	cancelled, err := service.CancelPairing(ctx, confirmed.PairingID, dbCaller)
 	if err != nil || !cancelled {
 		t.Fatalf("CancelPairing() = %v, %v; want the row removed", cancelled, err)
 	}
 	if got := countRows(t, resource, "reading_pairings"); got != 0 {
 		t.Errorf("%d rows left after cancelling, want none", got)
 	}
-	state, err := service.Bilingual(ctx, "rm_en")
+	state, err := service.Bilingual(ctx, "rm_en", dbCaller)
 	if err != nil {
 		t.Fatalf("Bilingual() error = %v", err)
 	}
@@ -253,7 +253,7 @@ func TestDBCancellingRemovesTheRowAndTheStateWithIt(t *testing.T) {
 		t.Errorf("after cancelling the material is %+v, want not enabled", state)
 	}
 	// And there is nothing else to cancel: the row was the whole of it.
-	again, err := service.CancelPairing(ctx, confirmed.PairingID)
+	again, err := service.CancelPairing(ctx, confirmed.PairingID, dbCaller)
 	if err != nil || again {
 		t.Errorf("cancelling twice = %v, %v; want the state it is already in", again, err)
 	}

@@ -10,6 +10,8 @@ import (
 	"context"
 	"slices"
 	"testing"
+
+	"backend/internal/authz"
 )
 
 // seed is one question to put in the bank before a listing test runs.
@@ -33,12 +35,12 @@ func seedBank(t *testing.T, repository *GORMRepository, seeds []seed) map[string
 		}
 		result := saveAt(t, repository, question, atSecond(item.second))
 		if len(item.names) > 0 {
-			if err := repository.AddCategories(context.Background(), result.ID, item.names); err != nil {
+			if err := repository.AddCategories(context.Background(), result.ID, item.names, testCaller()); err != nil {
 				t.Fatalf("file %q under %q: %v", item.text, item.names, err)
 			}
 		}
 		if !item.marks.Empty() {
-			if err := repository.Mark(context.Background(), result.QuestionID, item.marks); err != nil {
+			if err := repository.Mark(context.Background(), result.QuestionID, item.marks, testCaller()); err != nil {
 				t.Fatalf("mark %q: %v", item.text, err)
 			}
 		}
@@ -49,9 +51,17 @@ func seedBank(t *testing.T, repository *GORMRepository, seeds []seed) map[string
 
 // listed returns a page of the bank as the texts of the questions on it, sorted,
 // so that a test about which questions a filter selects is not also a test about
-// their order.
+// their order. It reads as the account these tests act as, and sets the caller in
+// the filter rather than taking it as a parameter: every listing is somebody's,
+// and a filter a test writes names only what it is narrowing on.
 func listed(t *testing.T, repository *GORMRepository, filter Filter) []string {
 	t.Helper()
+	return listedAs(t, repository, filter, testCaller())
+}
+
+func listedAs(t *testing.T, repository *GORMRepository, filter Filter, caller authz.Caller) []string {
+	t.Helper()
+	filter.Caller = caller
 	entries, err := repository.List(context.Background(), filter)
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -82,7 +92,7 @@ func TestListReturnsTheNewestFirst(t *testing.T) {
 		{text: "第三题", second: 1},
 	})
 
-	entries, err := repository.List(context.Background(), Filter{})
+	entries, err := repository.List(context.Background(), Filter{Caller: testCaller()})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -218,7 +228,7 @@ func TestListNarrowsToWhatTheFilterSelects(t *testing.T) {
 // a page of nothing-but-a-nil: a caller ranges over what it gets back.
 func TestListOfAnEmptyBankIsAnEmptyPage(t *testing.T) {
 	repository, _ := newDBRepository(t)
-	entries, err := repository.List(context.Background(), Filter{})
+	entries, err := repository.List(context.Background(), Filter{Caller: testCaller()})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -238,7 +248,7 @@ func TestListCarriesTheCategoriesOfEveryEntry(t *testing.T) {
 		{text: "没人归档的题", second: 2},
 	})
 
-	entries, err := repository.List(context.Background(), Filter{})
+	entries, err := repository.List(context.Background(), Filter{Caller: testCaller()})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -282,5 +292,36 @@ func TestListPagesQuestionsWrittenInTheSameSecond(t *testing.T) {
 		if !seen[text] {
 			t.Errorf("paging never returned %q", text)
 		}
+	}
+}
+
+// TestDBOneAccountsBankIsNotAnothers is §7.2's acceptance for the listing:
+// ownership is a filter rather than a check, so each account's page contains its
+// own questions and not the other's, and the same filter that returns rows for
+// one account returns nothing of the other's.
+func TestDBOneAccountsBankIsNotAnothers(t *testing.T) {
+	repository, _ := newDBRepository(t)
+	saveAtAs(t, repository, withCategories(sampleQuestion("我的题"), "我的标签"), atSecond(0), testCaller())
+	saveAtAs(t, repository, withCategories(sampleQuestion("别人的题"), "别人的标签"), atSecond(1), otherCaller())
+
+	if got := listed(t, repository, Filter{}); !slices.Equal(got, []string{"我的题"}) {
+		t.Errorf("my page is %q, want only my own question", got)
+	}
+	if got := listedAs(t, repository, Filter{}, otherCaller()); !slices.Equal(got, []string{"别人的题"}) {
+		t.Errorf("the other account's page is %q, want only its own question", got)
+	}
+	// A filter that names the other account's label selects nothing for me: the
+	// narrowing happens inside the query, so the row is never a candidate.
+	if got := listed(t, repository, Filter{Category: "别人的标签"}); len(got) != 0 {
+		t.Errorf("my page filtered by the other account's label is %q, want nothing", got)
+	}
+	// The categories listing is scoped the same way: each account sees the labels
+	// its own questions carry.
+	mine, err := repository.Categories(context.Background(), testCaller())
+	if err != nil {
+		t.Fatalf("list my categories: %v", err)
+	}
+	if len(mine) != 1 || mine[0].Name != "我的标签" {
+		t.Errorf("my categories are %+v, want only my own label", mine)
 	}
 }

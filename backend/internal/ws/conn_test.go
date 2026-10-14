@@ -9,7 +9,7 @@ import (
 func TestAFullQueueIsAClientThatStoppedReading(t *testing.T) {
 	// A connection with nowhere to put a frame, so that one frame is already
 	// more than the client is taking.
-	connection := newConn(nil, newStubTurns(), testLogger(), 0)
+	connection := newConn(nil, newStubTurns(), testCaller, testLogger(), 0)
 
 	err := connection.send(pongFrame{ProtocolVersion: ProtocolVersion, Frame: FramePong})
 	if !errors.Is(err, errSlowConsumer) {
@@ -30,7 +30,7 @@ func TestAFullQueueIsAClientThatStoppedReading(t *testing.T) {
 }
 
 func TestTheFirstReasonIsTheOneKept(t *testing.T) {
-	connection := newConn(nil, newStubTurns(), testLogger(), queueSize)
+	connection := newConn(nil, newStubTurns(), testCaller, testLogger(), queueSize)
 	connection.record(context.Background(), errSlowConsumer)
 	connection.record(context.Background(), errClosed)
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"backend/internal/authz"
 )
 
 // Selection is the passage a reader had chosen when a turn started (§2.8).
@@ -79,7 +81,7 @@ type Passage struct {
 //     passage, and a client asking for characters the document does not have has
 //     a stale view of it. Answering about a shorter span than the one asked for
 //     would hide that.
-func (s *Service) Resolve(ctx context.Context, materialID string, locator Locator) (Passage, error) {
+func (s *Service) Resolve(ctx context.Context, materialID string, locator Locator, caller authz.Caller) (Passage, error) {
 	materialID = strings.TrimSpace(materialID)
 	if materialID == "" {
 		return Passage{}, fmt.Errorf("%w: no material was named", ErrInvalidRequest)
@@ -98,14 +100,14 @@ func (s *Service) Resolve(ctx context.Context, materialID string, locator Locato
 		// differs: one is "select something", the other is "this is where I am".
 		return Passage{}, fmt.Errorf("%w: the locator names no text", ErrInvalidRequest)
 	}
-	material, err := s.repository.Material(ctx, materialID)
+	material, err := s.repository.Material(ctx, materialID, caller)
 	if err != nil {
 		return Passage{}, err
 	}
 	if material.ContentID == "" {
 		return Passage{}, fmt.Errorf("%w: this material has no text behind it", ErrInvalidRequest)
 	}
-	document, err := s.documents.Document(ctx, material.ContentID)
+	document, err := s.documents.Document(ctx, material.ContentID, caller)
 	if err != nil {
 		return Passage{}, err
 	}
@@ -117,7 +119,7 @@ func (s *Service) Resolve(ctx context.Context, materialID string, locator Locato
 		return Passage{}, fmt.Errorf("%w: the locator spans %d characters, more than the %d one passage may hold",
 			ErrInvalidRequest, locator.CharEnd-locator.CharStart, s.maxPassageChars)
 	}
-	text, err := s.documents.Text(ctx, material.ContentID, locator.CharStart, locator.CharEnd)
+	text, err := s.documents.Text(ctx, material.ContentID, locator.CharStart, locator.CharEnd, caller)
 	if err != nil {
 		return Passage{}, err
 	}

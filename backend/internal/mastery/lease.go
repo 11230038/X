@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"backend/internal/authz"
 )
 
 // The lease, and the fence that goes with it.
@@ -91,8 +93,8 @@ func (l Lease) Expired(now time.Time, ttl time.Duration) bool {
 // in — expired ones included — because "nobody is writing this" and "somebody
 // was writing this two hours ago" are different answers, and only the caller
 // knows whether the second one matters.
-func (s *Service) Holder(ctx context.Context, pathID string) (Lease, error) {
-	return s.repository.Lease(ctx, pathID)
+func (s *Service) Holder(ctx context.Context, pathID string, caller authz.Caller) (Lease, error) {
+	return s.repository.Lease(ctx, pathID, caller)
 }
 
 // Acquire takes the lease on a path for one turn, and reports the lease it ends
@@ -113,22 +115,25 @@ func (s *Service) Holder(ctx context.Context, pathID string) (Lease, error) {
 // the holder that was read, so of two turns that both decided the lease was
 // expired, exactly one wins. The loser does not fail; it re-reads and reports
 // the winner as the holder, which is the truth about the path now.
-func (s *Service) Acquire(ctx context.Context, pathID string, actor Actor) (Lease, error) {
+func (s *Service) Acquire(ctx context.Context, pathID string, actor Actor, caller authz.Caller) (Lease, error) {
 	if err := actor.Validate(); err != nil {
 		return Lease{}, err
 	}
-	if err := s.requirePath(ctx, pathID); err != nil {
+	// Scoped before anything is written: a lease taken on another account's path
+	// is the same failure as reading one, and refusing it here is what stops a
+	// turn from claiming the right to rewrite somebody else's tree.
+	if err := s.requirePath(ctx, pathID, caller); err != nil {
 		return Lease{}, err
 	}
 	now := s.clock()
 
 	var held Lease
 	err := s.repository.Within(ctx, func(repository Repository) error {
-		current, err := repository.Lease(ctx, pathID)
+		current, err := repository.Lease(ctx, pathID, caller)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			lease := Lease{PathID: pathID, SessionID: actor.SessionID, TurnID: actor.TurnID, AcquiredAt: now}
-			if err := repository.ClaimLease(ctx, lease); err != nil {
+			if err := repository.ClaimLease(ctx, lease, caller); err != nil {
 				return err
 			}
 			if err := s.fence(ctx, repository, "", actor.TurnID); err != nil {
@@ -149,7 +154,7 @@ func (s *Service) Acquire(ctx context.Context, pathID string, actor Actor) (Leas
 		}
 
 		taken := Lease{PathID: pathID, SessionID: actor.SessionID, TurnID: actor.TurnID, AcquiredAt: now}
-		moved, err := repository.TakeoverLease(ctx, pathID, current.TurnID, taken)
+		moved, err := repository.TakeoverLease(ctx, pathID, current.TurnID, taken, caller)
 		if err != nil {
 			return err
 		}
@@ -157,7 +162,7 @@ func (s *Service) Acquire(ctx context.Context, pathID string, actor Actor) (Leas
 			// Somebody else read the same expired lease and got there first. Re-reading
 			// rather than reporting the lease that was read is what makes the refusal
 			// name the holder that is actually there.
-			winner, err := repository.Lease(ctx, pathID)
+			winner, err := repository.Lease(ctx, pathID, caller)
 			if errors.Is(err, ErrNotFound) {
 				// The winner released it again between the two reads, which leaves the
 				// path free. Reporting a holder that is gone would be wrong; the next
@@ -188,13 +193,13 @@ func (s *Service) Acquire(ctx context.Context, pathID string, actor Actor) (Leas
 // was taken over while it was still running cannot release the new holder's. It
 // does not fail when that happens — it reports false, because "you no longer
 // hold this" is the answer, not an error.
-func (s *Service) Release(ctx context.Context, pathID string, actor Actor) (bool, error) {
+func (s *Service) Release(ctx context.Context, pathID string, actor Actor, caller authz.Caller) (bool, error) {
 	if err := actor.Validate(); err != nil {
 		return false, err
 	}
 	var released bool
 	err := s.repository.Within(ctx, func(repository Repository) error {
-		moved, err := repository.ReleaseLease(ctx, pathID, actor.TurnID)
+		moved, err := repository.ReleaseLease(ctx, pathID, actor.TurnID, caller)
 		if err != nil {
 			return err
 		}
@@ -237,8 +242,12 @@ func (s *Service) fence(ctx context.Context, repository Repository, fromTurnID, 
 // Without it, a lease would be the one way to create a row in a table whose
 // foreign key says the path exists — and a lease nobody can ever take over,
 // because the path it names cannot be read.
-func (s *Service) requirePath(ctx context.Context, pathID string) error {
-	if _, err := s.repository.Path(ctx, pathID); err != nil {
+//
+// "Not there" includes "not the caller's": the read is scoped, so a path another
+// account owns is ErrNotFound here exactly as a path that was never created is,
+// and the lease that follows never has another account's path to name.
+func (s *Service) requirePath(ctx context.Context, pathID string, caller authz.Caller) error {
+	if _, err := s.repository.Path(ctx, pathID, caller); err != nil {
 		return err
 	}
 	return nil

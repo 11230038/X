@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"backend/internal/agentloop"
+	"backend/internal/authz"
 	"backend/internal/capability"
 	"backend/internal/event"
 	"backend/internal/kb"
@@ -225,7 +226,7 @@ type Readings interface {
 	// it as material that could not be read rather than failing the turn: the
 	// reader's question is still a question, and losing the passage it was about
 	// costs the answer its grounding and not its existence (§2.3).
-	Passage(ctx context.Context, selection Selection) (event.Source, error)
+	Passage(ctx context.Context, selection Selection, caller authz.Caller) (event.Source, error)
 }
 
 // Selection is a passage a client said the reader had chosen, in the vocabulary
@@ -280,6 +281,13 @@ type ClaimRequest struct {
 	// own words rather than a summary of them, because a path's goal is read
 	// back to the learner as the thing they set out to learn.
 	Goal string
+	// Caller is who is running this turn. It is here rather than derived from the
+	// session because the two are not the same fact: a turn started in a session
+	// that has no owner — one written before this version, which only the
+	// administrator can see — has an account it is being run on behalf of, and
+	// deriving would lose it. A path created for that turn is created for this
+	// account, which is the one that will come back for it.
+	Caller authz.Caller
 }
 
 // Claimed is a turn's path, as the runtime holds it.
@@ -307,7 +315,12 @@ type Notebook interface {
 	// Save stores one question and reports what that did. A question written
 	// twice is one question: the bank finds the row by content address, so the
 	// second call rewrites the first rather than adding a copy.
-	Save(ctx context.Context, question notebook.Question) (notebook.Upserted, error)
+	//
+	// The caller is the turn's. A question is written in a conversation's name
+	// and belongs to the account running it, and the session id is not a
+	// substitute: the session may have no owner, and the bank files the row
+	// under the account either way.
+	Save(ctx context.Context, question notebook.Question, caller authz.Caller) (notebook.Upserted, error)
 }
 
 var _ Notebook = (*notebook.Service)(nil)
@@ -365,7 +378,7 @@ func (Banker) Save(ctx context.Context, question notebook.Question) (tool.Saved,
 // the calls that come from outside it.
 func (r *turnRun) saveQuestion(ctx context.Context, question notebook.Question) (tool.Saved, error) {
 	question.SessionID, question.TurnID = r.session.ID, r.turn.ID
-	upserted, err := r.runner.questions.Save(ctx, question)
+	upserted, err := r.runner.questions.Save(ctx, question, r.caller)
 	if err != nil {
 		return tool.Saved{}, err
 	}

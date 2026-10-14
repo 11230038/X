@@ -8,16 +8,22 @@ import (
 	"strings"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/httpx"
 	"backend/internal/practice"
 	"github.com/gin-gonic/gin"
 )
 
 // Practice is the reviewing use case consumed by the HTTP handler.
+//
+// Every method but Stats takes the caller last; Stats takes it inside its query.
+// The account is read from the request rather than passed in from outside,
+// because it is the request's: it comes from the token this call is being served
+// under, and nowhere else.
 type Practice interface {
-	Queue(context.Context, int) ([]practice.QueueItem, error)
-	Review(context.Context, practice.Review) (practice.ReviewResult, error)
-	Recorded(context.Context, string) (practice.ReviewResult, error)
+	Queue(context.Context, int, authz.Caller) ([]practice.QueueItem, error)
+	Review(context.Context, practice.Review, authz.Caller) (practice.ReviewResult, error)
+	Recorded(context.Context, string, authz.Caller) (practice.ReviewResult, error)
 	Stats(context.Context, practice.StatsQuery) (practice.Stats, error)
 }
 
@@ -96,7 +102,11 @@ func (h *PracticeHandler) Queue(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	items, err := h.reviews.Queue(c.Request.Context(), h.queueSize)
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	items, err := h.reviews.Queue(c.Request.Context(), h.queueSize, account)
 	if err != nil {
 		h.fail(c, "read_queue_failed", err)
 		return
@@ -129,11 +139,15 @@ func (h *PracticeHandler) Submit(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	var review practice.Review
 	if !readJSON(c, maxQuestionRequestBytes, &review) {
 		return
 	}
-	result, err := h.reviews.Review(c.Request.Context(), review)
+	result, err := h.reviews.Review(c.Request.Context(), review, account)
 	if err != nil {
 		h.fail(c, "submit_review_failed", err)
 		return
@@ -150,7 +164,11 @@ func (h *PracticeHandler) Read(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	result, err := h.reviews.Recorded(c.Request.Context(), c.Param("requestID"))
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	result, err := h.reviews.Recorded(c.Request.Context(), c.Param("requestID"), account)
 	if err != nil {
 		h.fail(c, "read_review_failed", err)
 		return
@@ -163,7 +181,11 @@ func (h *PracticeHandler) Stats(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	query, ok := statsQuery(c)
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	query, ok := statsQuery(c, account)
 	if !ok {
 		return
 	}
@@ -189,8 +211,12 @@ func (h *PracticeHandler) Stats(c *gin.Context) {
 
 // statsQuery reads the window a statistics request names. A parameter that is
 // absent is left zero, and the domain decides what an unnamed window is.
-func statsQuery(c *gin.Context) (practice.StatsQuery, bool) {
-	var query practice.StatsQuery
+//
+// The account is put in here rather than left to the domain, because it is not
+// part of the window: it never appears in the request, and a query built without
+// it would be a trend for nobody.
+func statsQuery(c *gin.Context, account authz.Caller) (practice.StatsQuery, bool) {
+	query := practice.StatsQuery{Caller: account}
 	from, ok := instantParam(c, "from")
 	if !ok {
 		return practice.StatsQuery{}, false

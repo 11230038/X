@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"backend/internal/authz"
 )
 
 // Arriving on a path.
@@ -45,19 +47,23 @@ type OpenRequest struct {
 // rather than a count of rows. A person's paths are bounded because the surface
 // shows them at once, and the bound is configuration because how many a person
 // can hold in mind is a product decision, not this package's (MASTERY_MAX_ACTIVE_PATHS).
-func (s *Service) Open(ctx context.Context, request OpenRequest) (Path, error) {
+func (s *Service) Open(ctx context.Context, request OpenRequest, caller authz.Caller) (Path, error) {
 	if err := request.Actor.Validate(); err != nil {
 		return Path{}, err
 	}
-	pathID, err := s.repository.PathOfSession(ctx, request.Actor.SessionID)
+	// Both reads are scoped to the caller, which is what keeps a conversation from
+	// arriving on a path that is not this account's: the link table is searched
+	// only over owned paths, so a link to somebody else's path is not found and
+	// this turn starts — or continues — one of its own instead.
+	pathID, err := s.repository.PathOfSession(ctx, request.Actor.SessionID, caller)
 	switch {
 	case err == nil:
-		return s.repository.Path(ctx, pathID)
+		return s.repository.Path(ctx, pathID, caller)
 	case !errors.Is(err, ErrNotFound):
 		return Path{}, err
 	}
 
-	active, err := s.repository.ActivePathsOfSession(ctx, request.Actor.SessionID)
+	active, err := s.repository.ActivePathsOfSession(ctx, request.Actor.SessionID, caller)
 	if err != nil {
 		return Path{}, err
 	}
@@ -75,5 +81,5 @@ func (s *Service) Open(ctx context.Context, request OpenRequest) (Path, error) {
 		PathID: id,
 		Goal:   strings.TrimSpace(request.Goal),
 		Actor:  request.Actor,
-	})
+	}, caller)
 }

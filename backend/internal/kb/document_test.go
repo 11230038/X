@@ -65,7 +65,7 @@ func TestAddDocumentParsesAFileOnce(t *testing.T) {
 	base := h.base(t, "kb")
 
 	first := h.addDocument(t, base.ID, "lib_one", sampleText)
-	second, err := h.service.AddDocument(context.Background(), "lib_one", base.ID)
+	second, err := h.service.AddDocument(context.Background(), "lib_one", base.ID, testCaller())
 	if err != nil {
 		t.Fatalf("the second AddDocument() error = %v", err)
 	}
@@ -89,11 +89,11 @@ func TestAddDocumentKeepsAnAttachmentApartFromTheCollection(t *testing.T) {
 	base := h.base(t, "kb")
 	h.addFile("lib_one", "one.md", sampleText)
 
-	attachment, err := h.service.AddDocument(context.Background(), "lib_one", "")
+	attachment, err := h.service.AddDocument(context.Background(), "lib_one", "", testCaller())
 	if err != nil {
 		t.Fatalf("AddDocument(as an attachment) error = %v", err)
 	}
-	collected, err := h.service.AddDocument(context.Background(), "lib_one", base.ID)
+	collected, err := h.service.AddDocument(context.Background(), "lib_one", base.ID, testCaller())
 	if err != nil {
 		t.Fatalf("AddDocument(into a collection) error = %v", err)
 	}
@@ -135,7 +135,7 @@ func TestAddDocumentReportsACategoryNoEngineReads(t *testing.T) {
 	base := h.base(t, "kb")
 	h.files.files["lib_img"] = stubFile{Filename: "photo.png", MIMEType: "image/png", Category: "images"}
 
-	_, err := h.service.AddDocument(context.Background(), "lib_img", base.ID)
+	_, err := h.service.AddDocument(context.Background(), "lib_img", base.ID, testCaller())
 
 	if parse.CodeOf(err) != parse.CodeUnsupportedFormat {
 		t.Fatalf("error = %v, want an unsupported_format parse error", err)
@@ -149,7 +149,7 @@ func TestAddDocumentRefusesAnUnknownCollection(t *testing.T) {
 	h := newHarness(t)
 	h.addFile("lib_one", "one.md", sampleText)
 
-	_, err := h.service.AddDocument(context.Background(), "lib_one", "kb_missing")
+	_, err := h.service.AddDocument(context.Background(), "lib_one", "kb_missing", testCaller())
 
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("error = %v, want ErrNotFound", err)
@@ -161,7 +161,7 @@ func TestAddDocumentRefusesAnUnknownCollection(t *testing.T) {
 
 func TestAddDocumentNeedsAFile(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.service.AddDocument(context.Background(), "   ", ""); !errors.Is(err, ErrInvalidInput) {
+	if _, err := h.service.AddDocument(context.Background(), "   ", "", testCaller()); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("error = %v, want ErrInvalidInput", err)
 	}
 }
@@ -172,7 +172,7 @@ func TestRebuildMovesTheDocumentOntoItsNextRevision(t *testing.T) {
 	document := h.addDocument(t, base.ID, "lib_one", sampleText)
 	before := h.repo.activeChunks(document.ID)
 
-	rebuilt, err := h.service.RebuildDocument(context.Background(), document.ID)
+	rebuilt, err := h.service.RebuildDocument(context.Background(), document.ID, testCaller())
 	if err != nil {
 		t.Fatalf("RebuildDocument() error = %v", err)
 	}
@@ -215,11 +215,11 @@ func TestRebuildLeavesTheCurrentRevisionWhenItCannotParse(t *testing.T) {
 	before := h.repo.activeChunks(document.ID)
 
 	h.files.files["lib_one"] = stubFile{Filename: "one.md", Category: parse.CategoryMarkdown, Content: "not valid \xff utf-8"}
-	if _, err := h.service.RebuildDocument(context.Background(), document.ID); parse.CodeOf(err) == "" {
+	if _, err := h.service.RebuildDocument(context.Background(), document.ID, testCaller()); parse.CodeOf(err) == "" {
 		t.Fatalf("error = %v, want a parse failure", err)
 	}
 
-	stored, err := h.service.Document(context.Background(), document.ID)
+	stored, err := h.service.Document(context.Background(), document.ID, testCaller())
 	if err != nil {
 		t.Fatalf("Document() error = %v", err)
 	}
@@ -239,13 +239,13 @@ func TestRemoveDocumentTakesItsChunksWithIt(t *testing.T) {
 	base := h.base(t, "kb")
 	document := h.addDocument(t, base.ID, "lib_one", sampleText)
 
-	if err := h.service.RemoveDocument(context.Background(), document.ID); err != nil {
+	if err := h.service.RemoveDocument(context.Background(), document.ID, testCaller()); err != nil {
 		t.Fatalf("RemoveDocument() error = %v", err)
 	}
-	if _, err := h.service.Document(context.Background(), document.ID); !errors.Is(err, ErrNotFound) {
+	if _, err := h.service.Document(context.Background(), document.ID, testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("the document is still there: %v", err)
 	}
-	if _, err := h.service.AddDocument(context.Background(), "lib_one", base.ID); err != nil {
+	if _, err := h.service.AddDocument(context.Background(), "lib_one", base.ID, testCaller()); err != nil {
 		t.Errorf("the file cannot be added again after removal: %v", err)
 	}
 }
@@ -258,7 +258,7 @@ func TestRemoveDocumentTakesItsChunksWithIt(t *testing.T) {
 func TestDocumentOfFileNeedsAFile(t *testing.T) {
 	h := newHarness(t)
 
-	if _, err := h.service.DocumentOfFile(context.Background(), "  "); !errors.Is(err, ErrInvalidInput) {
+	if _, err := h.service.DocumentOfFile(context.Background(), "  ", testCaller()); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("error = %v, want ErrInvalidInput", err)
 	}
 }
@@ -268,7 +268,7 @@ func TestDocumentOfFilePassesAStorageFailureThrough(t *testing.T) {
 	failure := errors.New("connection reset")
 	h.repo.setError("DocumentOfFile", failure)
 
-	if _, err := h.service.DocumentOfFile(context.Background(), "lib_one"); !errors.Is(err, failure) {
+	if _, err := h.service.DocumentOfFile(context.Background(), "lib_one", testCaller()); !errors.Is(err, failure) {
 		t.Fatalf("error = %v, want the storage failure", err)
 	}
 }
@@ -282,7 +282,7 @@ func TestChunkSpansAreTheActiveRevisionsBoundaries(t *testing.T) {
 	base := h.base(t, "kb")
 	document := h.addDocument(t, base.ID, "lib_one", sampleText)
 
-	spans, err := h.service.ChunkSpans(context.Background(), document.ID)
+	spans, err := h.service.ChunkSpans(context.Background(), document.ID, testCaller())
 	if err != nil {
 		t.Fatalf("ChunkSpans() error = %v", err)
 	}
@@ -300,10 +300,10 @@ func TestChunkSpansAreTheActiveRevisionsBoundaries(t *testing.T) {
 		}
 	}
 
-	if _, err := h.service.RebuildDocument(context.Background(), document.ID); err != nil {
+	if _, err := h.service.RebuildDocument(context.Background(), document.ID, testCaller()); err != nil {
 		t.Fatalf("RebuildDocument() error = %v", err)
 	}
-	after, err := h.service.ChunkSpans(context.Background(), document.ID)
+	after, err := h.service.ChunkSpans(context.Background(), document.ID, testCaller())
 	if err != nil {
 		t.Fatalf("ChunkSpans() after the rebuild error = %v", err)
 	}
@@ -318,7 +318,7 @@ func TestChunkSpansAreTheActiveRevisionsBoundaries(t *testing.T) {
 func TestChunkSpansOfAnUnknownDocumentAreNotFound(t *testing.T) {
 	h := newHarness(t)
 
-	if _, err := h.service.ChunkSpans(context.Background(), "doc_missing"); !errors.Is(err, ErrNotFound) {
+	if _, err := h.service.ChunkSpans(context.Background(), "doc_missing", testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("error = %v, want ErrNotFound", err)
 	}
 }

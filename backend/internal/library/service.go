@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"backend/internal/authz"
 )
 
 const (
@@ -96,7 +98,8 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (UploadResult, 
 	now := time.Now().UTC()
 	record := FileRecord{
 		ID: id, SHA256: digest, Filename: filename, MIMEType: classification.MIMEType,
-		SizeBytes: size, LibraryPath: relativePath, CreatedAt: now, UpdatedAt: now,
+		SizeBytes: size, LibraryPath: relativePath, OwnerID: input.OwnerID,
+		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.repository.Create(ctx, record); err != nil {
 		if removeErr := os.Remove(finalPath); removeErr != nil {
@@ -116,12 +119,12 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (UploadResult, 
 // read at a different time: a client that stored a file and one that comes back
 // for it later are reading one resource, and two shapes for it would be two
 // things to keep in step.
-func (s *Service) Find(ctx context.Context, id string) (UploadResult, error) {
+func (s *Service) Find(ctx context.Context, id string, caller authz.Caller) (UploadResult, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return UploadResult{}, ErrInvalidFile
 	}
-	record, err := s.repository.Find(ctx, id)
+	record, err := s.repository.Find(ctx, id, caller)
 	if err != nil {
 		return UploadResult{}, err
 	}
@@ -145,12 +148,12 @@ func (s *Service) Find(ctx context.Context, id string) (UploadResult, error) {
 // the file was stored — the metadata's relative path joined to the root, then
 // checked to be inside it — so that a row that says something else cannot be
 // used to read outside the library.
-func (s *Service) Open(ctx context.Context, id string) (StoredFile, error) {
+func (s *Service) Open(ctx context.Context, id string, caller authz.Caller) (StoredFile, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return StoredFile{}, ErrInvalidFile
 	}
-	record, err := s.repository.Find(ctx, id)
+	record, err := s.repository.Find(ctx, id, caller)
 	if err != nil {
 		return StoredFile{}, err
 	}

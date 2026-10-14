@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"backend/internal/auth"
+	"backend/internal/authz"
 	"backend/internal/event"
 	"backend/internal/middleware"
 	"backend/internal/session"
@@ -21,6 +22,11 @@ import (
 )
 
 const testToken = "test-token"
+
+// testCaller is the account the connection cases are opened for. What those
+// cases are about is the wire, so there is one of these and none of them varies
+// it.
+var testCaller = authz.Caller{UserID: 1, Role: authz.RoleUser}
 
 // testLogger logs nowhere. What these tests assert on is the wire, so a logger
 // that writes to the test output would only add noise.

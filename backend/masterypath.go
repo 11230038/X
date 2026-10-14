@@ -61,12 +61,17 @@ func (m masteryPath) Claim(ctx context.Context, request turn.ClaimRequest) (turn
 		return turn.Claimed{Context: ctx}, nil
 	}
 	actor := mastery.Actor{SessionID: request.SessionID, TurnID: request.TurnID}
-	arrival, err := m.service.Arrive(ctx, mastery.ArriveRequest{Actor: actor, Goal: request.Goal})
+	// The account travels into the domain with the rest of the turn: it is what
+	// every read and write the tools make is scoped to, and what a path this turn
+	// creates is owned by. It reaches the tools the same way the path does — it is
+	// carried on the TurnPath that is put on the context — because they call the
+	// domain themselves and none of them has another way to know who is asking.
+	arrival, err := m.service.Arrive(ctx, mastery.ArriveRequest{Actor: actor, Goal: request.Goal}, request.Caller)
 	if err != nil {
 		return turn.Claimed{}, err
 	}
 	path := masterypath.NewTurnPath(m.service, m.bank, m.reader, m.judge,
-		arrival.Path.ID, actor, arrival.Path.Version, arrival.Ours, arrival.Lease)
+		arrival.Path.ID, actor, request.Caller, arrival.Path.Version, arrival.Ours, arrival.Lease)
 	return turn.Claimed{
 		Context: tool.WithMasteryPath(ctx, path),
 		Lease:   arrival.Metadata(),

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/notebook"
 	"github.com/gin-gonic/gin"
 )
@@ -57,7 +58,7 @@ type importCall struct {
 	dryRun bool
 }
 
-func (s *questionStub) Get(_ context.Context, questionID string) (notebook.Entry, error) {
+func (s *questionStub) Get(_ context.Context, questionID string, _ authz.Caller) (notebook.Entry, error) {
 	s.read = append(s.read, questionID)
 	return s.entry, s.err
 }
@@ -67,21 +68,21 @@ func (s *questionStub) List(_ context.Context, filter notebook.Filter) ([]notebo
 	return s.listed, s.err
 }
 
-func (s *questionStub) Mark(_ context.Context, questionID string, change notebook.Change) error {
+func (s *questionStub) Mark(_ context.Context, questionID string, change notebook.Change, _ authz.Caller) error {
 	s.marks = append(s.marks, markCall{questionID: questionID, change: change})
 	return s.err
 }
 
-func (s *questionStub) SetCategories(_ context.Context, questionID string, names []string) error {
+func (s *questionStub) SetCategories(_ context.Context, questionID string, names []string, _ authz.Caller) error {
 	s.files = append(s.files, fileCall{questionID: questionID, names: names})
 	return s.err
 }
 
-func (s *questionStub) Categories(context.Context) ([]notebook.Category, error) {
+func (s *questionStub) Categories(_ context.Context, _ authz.Caller) ([]notebook.Category, error) {
 	return s.categories, s.err
 }
 
-func (s *questionStub) Import(_ context.Context, file string, dryRun bool) (notebook.ImportReport, error) {
+func (s *questionStub) Import(_ context.Context, file string, dryRun bool, _ authz.Caller) (notebook.ImportReport, error) {
 	s.imports = append(s.imports, importCall{file: file, dryRun: dryRun})
 	if s.err != nil {
 		return notebook.ImportReport{}, s.err
@@ -124,16 +125,19 @@ func sampleEntry() notebook.Entry {
 	}
 }
 
-// newQuestionRouter mounts the question bank routes the way the server does.
+// newQuestionRouter mounts the question bank routes the way the server does:
+// behind the bearer middleware, because the handlers read the account out of the
+// context it fills in and a route without it would answer 401 to every request
+// rather than exercise the handler.
 func newQuestionRouter(questions Questions) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	handler := NewQuestionHandler(questions, testHandlerLogger())
 	router := gin.New()
-	router.GET("/api/v1/questions", handler.List)
-	router.POST("/api/v1/questions/import", handler.Import)
-	router.GET("/api/v1/questions/:questionID", handler.Get)
-	router.PATCH("/api/v1/questions/:questionID", handler.Patch)
-	router.GET("/api/v1/question-categories", handler.Categories)
+	router.GET("/api/v1/questions", guard(), handler.List)
+	router.POST("/api/v1/questions/import", guard(), handler.Import)
+	router.GET("/api/v1/questions/:questionID", guard(), handler.Get)
+	router.PATCH("/api/v1/questions/:questionID", guard(), handler.Patch)
+	router.GET("/api/v1/question-categories", guard(), handler.Categories)
 	return router
 }
 
@@ -146,23 +150,24 @@ func TestQuestionHandlerListTurnsTheQueryIntoAFilter(t *testing.T) {
 		query string
 		want  notebook.Filter
 	}{
-		{name: "nothing asked", query: "", want: notebook.Filter{}},
+		{name: "nothing asked", query: "", want: notebook.Filter{Caller: handlerCaller()}},
 		{
 			name:  "every text filter at once",
 			query: "?source=knowledge_base&material_id=doc_1&difficulty=medium&q=闭包",
 			want: notebook.Filter{
+				Caller: handlerCaller(),
 				Source: "knowledge_base", MaterialID: "doc_1", Difficulty: "medium", Query: "闭包",
 			},
 		},
-		{name: "by question type", query: "?question_type=choice", want: notebook.Filter{Type: notebook.QuestionChoice}},
-		{name: "by resolution", query: "?resolved=done", want: notebook.Filter{Resolution: notebook.ResolutionDone}},
-		{name: "by category", query: "?category=数学", want: notebook.Filter{Category: "数学"}},
-		{name: "paging", query: "?limit=20&offset=40", want: notebook.Filter{Limit: 20, Offset: 40}},
+		{name: "by question type", query: "?question_type=choice", want: notebook.Filter{Caller: handlerCaller(), Type: notebook.QuestionChoice}},
+		{name: "by resolution", query: "?resolved=done", want: notebook.Filter{Caller: handlerCaller(), Resolution: notebook.ResolutionDone}},
+		{name: "by category", query: "?category=数学", want: notebook.Filter{Caller: handlerCaller(), Category: "数学"}},
+		{name: "paging", query: "?limit=20&offset=40", want: notebook.Filter{Caller: handlerCaller(), Limit: 20, Offset: 40}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			stub := &questionStub{listed: []notebook.Entry{sampleEntry()}}
-			recorder := call(t, newQuestionRouter(stub), http.MethodGet, "/api/v1/questions"+test.query, "")
+			recorder := callAs(t, newQuestionRouter(stub), http.MethodGet, "/api/v1/questions"+test.query, "")
 
 			if recorder.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -194,7 +199,7 @@ func TestQuestionHandlerListAsksForTheMarkedQuestionsOrTheRest(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			stub := &questionStub{}
-			recorder := call(t, newQuestionRouter(stub), http.MethodGet, "/api/v1/questions"+test.query, "")
+			recorder := callAs(t, newQuestionRouter(stub), http.MethodGet, "/api/v1/questions"+test.query, "")
 			if recorder.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
 			}
@@ -227,7 +232,7 @@ func TestQuestionHandlerRefusesAFilterItCannotActOn(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			stub := &questionStub{}
-			recorder := call(t, newQuestionRouter(stub), http.MethodGet, "/api/v1/questions"+test.query, "")
+			recorder := callAs(t, newQuestionRouter(stub), http.MethodGet, "/api/v1/questions"+test.query, "")
 
 			if recorder.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400; body=%s", recorder.Code, recorder.Body.String())
@@ -256,7 +261,7 @@ func TestQuestionHandlerRefusesAFilterItCannotActOn(t *testing.T) {
 // family follows: a filter that matched nothing is an empty list, and never a
 // null and never a missing resource.
 func TestQuestionHandlerListsAnEmptyBankAsAnEmptyList(t *testing.T) {
-	recorder := call(t, newQuestionRouter(&questionStub{}), http.MethodGet, "/api/v1/questions", "")
+	recorder := callAs(t, newQuestionRouter(&questionStub{}), http.MethodGet, "/api/v1/questions", "")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -266,7 +271,7 @@ func TestQuestionHandlerListsAnEmptyBankAsAnEmptyList(t *testing.T) {
 }
 
 func TestQuestionHandlerGetReportsBothFacesOfAQuestion(t *testing.T) {
-	recorder := call(t, newQuestionRouter(&questionStub{entry: sampleEntry()}),
+	recorder := callAs(t, newQuestionRouter(&questionStub{entry: sampleEntry()}),
 		http.MethodGet, "/api/v1/questions/qn_1", "")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -305,7 +310,7 @@ func TestQuestionHandlerGetSaysNothingItDoesNotKnow(t *testing.T) {
 		Categories: []string{},
 		CreatedAt:  handlerQuestionTime,
 	}
-	recorder := call(t, newQuestionRouter(&questionStub{entry: fresh}),
+	recorder := callAs(t, newQuestionRouter(&questionStub{entry: fresh}),
 		http.MethodGet, "/api/v1/questions/qn_1", "")
 	if body := recorder.Body.String(); !containsJSON(body, `"is_correct":null`) ||
 		!containsJSON(body, `"resolved":null`) {
@@ -315,7 +320,7 @@ func TestQuestionHandlerGetSaysNothingItDoesNotKnow(t *testing.T) {
 
 func TestQuestionHandlerGetReportsAQuestionThatIsNotThere(t *testing.T) {
 	stub := &questionStub{err: notebook.ErrNotFound}
-	recorder := call(t, newQuestionRouter(stub), http.MethodGet, "/api/v1/questions/qn_missing", "")
+	recorder := callAs(t, newQuestionRouter(stub), http.MethodGet, "/api/v1/questions/qn_missing", "")
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404; body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -323,7 +328,7 @@ func TestQuestionHandlerGetReportsAQuestionThatIsNotThere(t *testing.T) {
 
 func TestQuestionHandlerPatchSetsTheMarksItWasGiven(t *testing.T) {
 	stub := &questionStub{entry: sampleEntry()}
-	recorder := call(t, newQuestionRouter(stub), http.MethodPatch, "/api/v1/questions/qn_1",
+	recorder := callAs(t, newQuestionRouter(stub), http.MethodPatch, "/api/v1/questions/qn_1",
 		`{"bookmarked":true,"resolved":false}`)
 
 	if recorder.Code != http.StatusOK {
@@ -359,7 +364,7 @@ func TestQuestionHandlerPatchSetsTheMarksItWasGiven(t *testing.T) {
 func TestQuestionHandlerPatchKeepsAnAbsentFieldAbsent(t *testing.T) {
 	t.Run("a body about labels says nothing about marks", func(t *testing.T) {
 		stub := &questionStub{entry: sampleEntry()}
-		recorder := call(t, newQuestionRouter(stub), http.MethodPatch, "/api/v1/questions/qn_1",
+		recorder := callAs(t, newQuestionRouter(stub), http.MethodPatch, "/api/v1/questions/qn_1",
 			`{"categories":["数学"]}`)
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -374,7 +379,7 @@ func TestQuestionHandlerPatchKeepsAnAbsentFieldAbsent(t *testing.T) {
 
 	t.Run("a mark of false is a mark", func(t *testing.T) {
 		stub := &questionStub{entry: sampleEntry()}
-		recorder := call(t, newQuestionRouter(stub), http.MethodPatch, "/api/v1/questions/qn_1",
+		recorder := callAs(t, newQuestionRouter(stub), http.MethodPatch, "/api/v1/questions/qn_1",
 			`{"bookmarked":false}`)
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -397,7 +402,7 @@ func TestQuestionHandlerPatchKeepsAnAbsentFieldAbsent(t *testing.T) {
 // request to leave the question unfiled.
 func TestQuestionHandlerPatchReplacesTheLabels(t *testing.T) {
 	stub := &questionStub{entry: sampleEntry()}
-	recorder := call(t, newQuestionRouter(stub), http.MethodPatch, "/api/v1/questions/qn_1",
+	recorder := callAs(t, newQuestionRouter(stub), http.MethodPatch, "/api/v1/questions/qn_1",
 		`{"categories":[]}`)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -413,7 +418,7 @@ func TestQuestionHandlerPatchReplacesTheLabels(t *testing.T) {
 func TestQuestionHandlerPatchRefusesARequestThatNamesNothing(t *testing.T) {
 	stub := &questionStub{entry: sampleEntry()}
 	for _, body := range []string{`{}`, `{"bookmarked":null}`, ` `} {
-		recorder := call(t, newQuestionRouter(stub), http.MethodPatch, "/api/v1/questions/qn_1", body)
+		recorder := callAs(t, newQuestionRouter(stub), http.MethodPatch, "/api/v1/questions/qn_1", body)
 		if recorder.Code != http.StatusBadRequest {
 			t.Fatalf("body %q gave status %d, want 400; body=%s",
 				body, recorder.Code, recorder.Body.String())
@@ -426,7 +431,7 @@ func TestQuestionHandlerPatchRefusesARequestThatNamesNothing(t *testing.T) {
 
 func TestQuestionHandlerPatchReportsAQuestionThatIsNotThere(t *testing.T) {
 	stub := &questionStub{err: notebook.ErrNotFound}
-	recorder := call(t, newQuestionRouter(stub), http.MethodPatch, "/api/v1/questions/qn_missing",
+	recorder := callAs(t, newQuestionRouter(stub), http.MethodPatch, "/api/v1/questions/qn_missing",
 		`{"bookmarked":true}`)
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404; body=%s", recorder.Code, recorder.Body.String())
@@ -443,7 +448,7 @@ func TestQuestionHandlerCategoriesCountsWhatIsFiled(t *testing.T) {
 		stub := &questionStub{categories: []notebook.Category{
 			{Name: "数学", Count: 3}, {Name: "编程", Count: 1},
 		}}
-		recorder := call(t, newQuestionRouter(stub), http.MethodGet, "/api/v1/question-categories", "")
+		recorder := callAs(t, newQuestionRouter(stub), http.MethodGet, "/api/v1/question-categories", "")
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
 		}
@@ -460,7 +465,7 @@ func TestQuestionHandlerCategoriesCountsWhatIsFiled(t *testing.T) {
 	})
 
 	t.Run("with none", func(t *testing.T) {
-		recorder := call(t, newQuestionRouter(&questionStub{}),
+		recorder := callAs(t, newQuestionRouter(&questionStub{}),
 			http.MethodGet, "/api/v1/question-categories", "")
 		if body := recorder.Body.String(); !containsJSON(body, `"categories":[]`) {
 			t.Errorf("a bank filed under nothing reads %s", body)
@@ -473,7 +478,7 @@ func TestQuestionHandlerCategoriesCountsWhatIsFiled(t *testing.T) {
 // that says why is in the log rather than in the response.
 func TestQuestionHandlerDoesNotReportStorageToTheClient(t *testing.T) {
 	stub := &questionStub{err: errors.New("private database details")}
-	recorder := call(t, newQuestionRouter(stub), http.MethodGet, "/api/v1/questions", "")
+	recorder := callAs(t, newQuestionRouter(stub), http.MethodGet, "/api/v1/questions", "")
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500; body=%s", recorder.Code, recorder.Body.String())
 	}

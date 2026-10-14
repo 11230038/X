@@ -27,7 +27,7 @@ func TestDBAPathCarriesOneOpenQuestionAtATime(t *testing.T) {
 
 	asked, err := h.service.Ask(ctx, AskRequest{
 		PathID: "mp_1", Actor: actor, KnowledgePointID: "kp_capture", QuestionID: "qn_1",
-	})
+	}, h.caller)
 	if err != nil {
 		t.Fatalf("ask a question: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestDBAPathCarriesOneOpenQuestionAtATime(t *testing.T) {
 	// can pick it back up, while one told "conflict" can only start over.
 	_, err = h.service.Ask(ctx, AskRequest{
 		PathID: "mp_1", Actor: actor, KnowledgePointID: "kp_loop", QuestionID: "qn_2",
-	})
+	}, h.caller)
 	if !errors.Is(err, ErrOpenInteraction) {
 		t.Fatalf("asking twice: %v, want %v", err, ErrOpenInteraction)
 	}
@@ -75,7 +75,7 @@ func TestDBAPathCarriesOneOpenQuestionAtATime(t *testing.T) {
 	// is the only place it can be checked at all.
 	if _, err := h.service.Ask(ctx, AskRequest{
 		PathID: "mp_1", Actor: actor, KnowledgePointID: "kp_nobody", QuestionID: "qn_3",
-	}); !errors.Is(err, ErrNotFound) {
+	}, h.caller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("asking about a knowledge point the path does not have: %v, want %v", err, ErrNotFound)
 	}
 }
@@ -88,14 +88,14 @@ func TestDBClosingAQuestionRecordsTheVerdictAgainstItsCoordinate(t *testing.T) {
 
 	asked, err := h.service.Ask(ctx, AskRequest{
 		PathID: "mp_1", Actor: actor, KnowledgePointID: "kp_capture", QuestionID: "qn_1",
-	})
+	}, h.caller)
 	if err != nil {
 		t.Fatalf("ask: %v", err)
 	}
 	graded, err := h.service.Grade(ctx, GradeRequest{
 		PathID: "mp_1", Actor: actor, QuestionID: "qn_1", UserAnswer: "捕获的是变量",
 		Result: ResultCorrect, AssessmentType: "comparison", Detail: []byte(`{"matched":"变量"}`),
-	})
+	}, h.caller)
 	if err != nil {
 		t.Fatalf("grade: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestDBClosingAQuestionRecordsTheVerdictAgainstItsCoordinate(t *testing.T) {
 	// The observation is filed against the coordinate the interaction carried, which
 	// is what the coordinate is stored for: without it a verdict would be an
 	// observation about nothing in particular.
-	evidences, err := h.repository.Evidences(ctx, "mp_1")
+	evidences, err := h.repository.Evidences(ctx, "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the evidence: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestDBClosingAQuestionRecordsTheVerdictAgainstItsCoordinate(t *testing.T) {
 	// And the path is free: the next question can be asked.
 	if _, err := h.service.Ask(ctx, AskRequest{
 		PathID: "mp_1", Actor: actor, KnowledgePointID: "kp_loop", QuestionID: "qn_2",
-	}); err != nil {
+	}, h.caller); err != nil {
 		t.Errorf("asking after the first question was answered: %v", err)
 	}
 
@@ -169,7 +169,7 @@ func TestDBClosingAQuestionRecordsTheVerdictAgainstItsCoordinate(t *testing.T) {
 	// coordinate with nothing to show it had.
 	if _, err := h.service.Grade(ctx, GradeRequest{
 		PathID: "mp_1", Actor: actor, QuestionID: "qn_1", Result: ResultCorrect,
-	}); !errors.Is(err, ErrNotFound) {
+	}, h.caller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("grading a question that is not the open one: %v, want %v", err, ErrNotFound)
 	}
 	if got := h.countRows(t, "mastery_learning_evidences"); got != 1 {
@@ -185,7 +185,7 @@ func TestDBAVerdictThatLosesTheCloseRaceIsNotASecondObservation(t *testing.T) {
 
 	asked, err := h.service.Ask(ctx, AskRequest{
 		PathID: "mp_1", Actor: actor, KnowledgePointID: "kp_capture", QuestionID: "qn_1",
-	})
+	}, h.caller)
 	if err != nil {
 		t.Fatalf("ask: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestDBAVerdictThatLosesTheCloseRaceIsNotASecondObservation(t *testing.T) {
 	// loser gets a false rather than an error, because the row it wanted is in the
 	// state it wanted it in.
 	first, err := h.repository.CloseInteraction(ctx, asked.ID, "捕获的是变量",
-		[]byte(`{"result":"correct"}`), atTen)
+		[]byte(`{"result":"correct"}`), atTen, h.caller)
 	if err != nil {
 		t.Fatalf("close: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestDBAVerdictThatLosesTheCloseRaceIsNotASecondObservation(t *testing.T) {
 		t.Fatal("the first close reported closing nothing")
 	}
 	second, err := h.repository.CloseInteraction(ctx, asked.ID, "另一个答案",
-		[]byte(`{"result":"incorrect"}`), atEleven)
+		[]byte(`{"result":"incorrect"}`), atEleven, h.caller)
 	if err != nil {
 		t.Fatalf("close again: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestDBAVerdictThatLosesTheCloseRaceIsNotASecondObservation(t *testing.T) {
 	// attach to and says so rather than inventing one.
 	if _, err := h.service.Grade(ctx, GradeRequest{
 		PathID: "mp_1", Actor: actor, QuestionID: "qn_1", Result: ResultCorrect,
-	}); !errors.Is(err, ErrNotFound) {
+	}, h.caller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("grading with nothing open: %v, want %v", err, ErrNotFound)
 	}
 }
@@ -239,13 +239,13 @@ func TestDBASkipEndsTheQuestionAndWritesNoObservation(t *testing.T) {
 
 	asked, err := h.service.Ask(ctx, AskRequest{
 		PathID: "mp_1", Actor: actor, KnowledgePointID: "kp_capture", QuestionID: "qn_1",
-	})
+	}, h.caller)
 	if err != nil {
 		t.Fatalf("ask: %v", err)
 	}
 	if err := h.service.Skip(ctx, SkipRequest{
 		PathID: "mp_1", Actor: actor, KnowledgePointID: "kp_capture", Reason: "先放着",
-	}); err != nil {
+	}, h.caller); err != nil {
 		t.Fatalf("skip: %v", err)
 	}
 
@@ -257,7 +257,7 @@ func TestDBASkipEndsTheQuestionAndWritesNoObservation(t *testing.T) {
 	}
 	// And the knowledge point is still unknown rather than weak, which is the same
 	// rule seen from the reading end.
-	insight, err := h.service.Insight(ctx, "mp_1")
+	insight, err := h.service.Insight(ctx, "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the insight: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestDBASkipEndsTheQuestionAndWritesNoObservation(t *testing.T) {
 	// The history names the interaction this skip ended, so that "this moved past a
 	// knowledge point" and "this ended the question that was open" are not two
 	// readings of the same line.
-	events, err := h.repository.Events(ctx, "mp_1")
+	events, err := h.repository.Events(ctx, "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the history: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestDBASkipEndsTheQuestionAndWritesNoObservation(t *testing.T) {
 	// no interaction, and the payload says so by naming none.
 	if err := h.service.Skip(ctx, SkipRequest{
 		PathID: "mp_1", Actor: actor, KnowledgePointID: "kp_loop",
-	}); err != nil {
+	}, h.caller); err != nil {
 		t.Fatalf("skip with nothing open: %v", err)
 	}
 	if got := h.countRows(t, "mastery_learning_evidences"); got != 0 {
@@ -341,7 +341,7 @@ func TestDBAQuestionRowThatSaysNothingAboutWhatWasAskedIsRefused(t *testing.T) {
 		"VALUES ('min_blank', 'mp_1', 't_1', 's_1', NULL, ?)", atNine).Error; err != nil {
 		t.Fatalf("write an interaction with no question: %v", err)
 	}
-	if _, err := h.repository.ActiveInteraction(context.Background(), "mp_1"); !errors.Is(err, ErrInvalidRequest) {
+	if _, err := h.repository.ActiveInteraction(context.Background(), "mp_1", h.caller); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("reading an interaction that records no question: %v, want %v", err, ErrInvalidRequest)
 	}
 
@@ -350,7 +350,7 @@ func TestDBAQuestionRowThatSaysNothingAboutWhatWasAskedIsRefused(t *testing.T) {
 	if err := h.resource.GORM().Exec("DELETE FROM mastery_interactions").Error; err != nil {
 		t.Fatalf("clear the interactions: %v", err)
 	}
-	if _, err := h.repository.ActiveInteraction(context.Background(), "mp_1"); !errors.Is(err, ErrNotFound) {
+	if _, err := h.repository.ActiveInteraction(context.Background(), "mp_1", h.caller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("reading the open question of a path that has none: %v, want %v", err, ErrNotFound)
 	}
 }

@@ -11,6 +11,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"backend/internal/authz"
 )
 
 var (
@@ -52,6 +54,11 @@ func (r Role) Valid() bool {
 type Session struct {
 	ID    string
 	Title string
+	// OwnerID is the account the conversation belongs to, or zero for a row
+	// written before V5 (migration 00014 left every earlier row NULL). Zero is a
+	// state rather than a missing value: such a session belongs to nobody, is
+	// visible to the administrator and to nobody else, and is claimed explicitly.
+	OwnerID int64
 	// CreatedAt and UpdatedAt are when the session was made and when anything
 	// last happened in it. The list is ordered by the latter, so appending a
 	// message moves a session to the top.
@@ -89,6 +96,10 @@ type NewMessage struct {
 
 // ListOptions select which sessions a listing returns.
 type ListOptions struct {
+	// Caller narrows the listing to one account. A list with no caller is not a
+	// list of everything: before V5 these routes answered every session in the
+	// database, which was right only because the database held one person's work.
+	Caller authz.Caller
 	// Deleted lists the recycle bin instead of the live sessions. The two are
 	// never listed together: a client showing both would have to filter every
 	// row to know which actions it may offer.
@@ -104,22 +115,40 @@ type ListOptions struct {
 // Repository is the storage seam. It reports what storage holds and lets the
 // service decide what that means: whether a session is live or in the bin, and
 // which operations each state allows, are rules that belong above it.
+//
+// Every read here takes a caller and narrows itself to that account's rows.
+// Ownership is a filter rather than a check: a session belonging to somebody
+// else is not refused, it is absent, which is why a request for it is answered
+// exactly as a request for an id that was never issued (AUTH-06).
 type Repository interface {
 	Create(ctx context.Context, record Session) error
 	// Session returns the session whatever state it is in, so the service can
-	// apply that state's rules itself.
-	Session(ctx context.Context, sessionID string) (Session, error)
+	// apply that state's rules itself. "Whatever state" is about the recycle bin
+	// and not about ownership: a row another account owns is not returned at all.
+	Session(ctx context.Context, sessionID string, caller authz.Caller) (Session, error)
 	List(ctx context.Context, options ListOptions) ([]Session, error)
 	// Rename and SetDeleted report ErrNotFound when the session is not there,
 	// so a caller cannot believe it changed a row that does not exist.
-	Rename(ctx context.Context, sessionID, title string, now time.Time) error
-	SetDeleted(ctx context.Context, sessionID string, deleted bool, now time.Time) error
-	Delete(ctx context.Context, sessionID string) error
+	Rename(ctx context.Context, sessionID, title string, now time.Time, caller authz.Caller) error
+	SetDeleted(ctx context.Context, sessionID string, deleted bool, now time.Time, caller authz.Caller) error
+	Delete(ctx context.Context, sessionID string, caller authz.Caller) error
+	// Claim gives a session that belongs to no account to the caller. It is the
+	// exit from the NULL state §2.5 defines: every row written before V5 belongs
+	// to nobody, only the administrator can see one, and without this there would
+	// be no way to hand one out short of writing SQL.
+	//
+	// Only a session with no owner can be claimed. A session that already has one
+	// is not something a second account takes over — that would be the
+	// cross-account write this whole version exists to stop — and the caller
+	// cannot see one anyway. Whether the claim happened is answered by the state
+	// afterwards rather than by an error: claiming a session that is already the
+	// caller's is the same outcome, so it succeeds and does nothing.
+	Claim(ctx context.Context, sessionID string, caller authz.Caller) error
 	// AppendMessage stores a message and marks the session as having activity,
 	// in one transaction: a message nobody can find the session for would be
 	// invisible, and a session marked active with nothing added would be a lie.
-	AppendMessage(ctx context.Context, record Message) error
-	Messages(ctx context.Context, sessionID string) ([]Message, error)
+	AppendMessage(ctx context.Context, record Message, caller authz.Caller) error
+	Messages(ctx context.Context, sessionID string, caller authz.Caller) ([]Message, error)
 }
 
 // List defaults. A listing with no bound is a listing that grows without one.

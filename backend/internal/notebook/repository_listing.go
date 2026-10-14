@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"backend/internal/data"
 	"backend/internal/data/models"
 	"gorm.io/gorm"
 )
@@ -53,9 +54,18 @@ func (r *GORMRepository) List(ctx context.Context, filter Filter) ([]Entry, erro
 	return entries, nil
 }
 
-// applyFilter narrows a query to the questions a filter selects. Every field is
-// optional, and a zero Filter adds no condition at all.
+// applyFilter narrows a query to the questions a filter selects. Every field of
+// the filter but the caller is optional; the caller is not, and it is applied
+// first.
+//
+// It is first so that it is the condition the rest are read against, and it is
+// unconditional because there is no listing this version serves that spans two
+// accounts: a filter that named every field to match somebody else's question
+// still returns nothing, because the scope has already excluded it. That is the
+// shape §2.3 asks for — ownership is a filter, and a filter that matched nothing
+// is an empty list, never a refusal.
 func applyFilter(query *gorm.DB, filter Filter) *gorm.DB {
+	query = data.OwnerScope(query, filter.Caller.UserID, filter.Caller.IsAdmin(), "owner_id")
 	if filter.Source != "" {
 		query = query.Where("source = ?", filter.Source)
 	}

@@ -75,7 +75,7 @@ func TestDBDocumentOfFilePrefersTheAttachment(t *testing.T) {
 		CreatedAt: atSecond(2), Text: "an attachment", Chunks: []string{"an attachment"},
 	})
 
-	document, err := repo.DocumentOfFile(context.Background(), fileID)
+	document, err := repo.DocumentOfFile(context.Background(), fileID, testCaller())
 	if err != nil {
 		t.Fatalf("document of file: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestDBDocumentOfFilePrefersTheAttachment(t *testing.T) {
 	// rather than that it does not exist.
 	unread := libraryFileID(2)
 	addLibraryFile(t, resource, unread)
-	if _, err := repo.DocumentOfFile(context.Background(), unread); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.DocumentOfFile(context.Background(), unread, testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a file nothing has read: %v, want %v", err, ErrNotFound)
 	}
 }
@@ -131,7 +131,7 @@ func TestDBDocumentOfFileTakesTheOldestThenTheLowestID(t *testing.T) {
 		{fileID: oldest, want: "doc_z"},
 		{fileID: tied, want: "doc_a2"},
 	} {
-		document, err := repo.DocumentOfFile(context.Background(), scenario.fileID)
+		document, err := repo.DocumentOfFile(context.Background(), scenario.fileID, testCaller())
 		if err != nil {
 			t.Fatalf("document of file %s: %v", scenario.fileID, err)
 		}
@@ -175,7 +175,7 @@ func TestDBAListingIsOneBaseOrTheAttachments(t *testing.T) {
 
 	// A base lists its own documents in the order they were added, and the same
 	// second is broken by id.
-	documents, err := repo.Documents(context.Background(), "kb_a")
+	documents, err := repo.Documents(context.Background(), "kb_a", testCaller())
 	if err != nil {
 		t.Fatalf("documents of kb_a: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestDBAListingIsOneBaseOrTheAttachments(t *testing.T) {
 
 	// An empty id asks for the attachments, which is a different question from
 	// the documents of a base named "".
-	attachments, err := repo.Documents(context.Background(), "")
+	attachments, err := repo.Documents(context.Background(), "", testCaller())
 	if err != nil {
 		t.Fatalf("documents without a base: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestDBDocumentForFileTellsAnAttachmentFromABaseEntry(t *testing.T) {
 	// An empty base means the attachment, and it has to reach a row whose kb_id
 	// is NULL: `= NULL` matches nothing at all, which is what the null-safe
 	// comparison in the query is there for.
-	attachment, err := repo.DocumentForFile(context.Background(), fileID, "")
+	attachment, err := repo.DocumentForFile(context.Background(), fileID, "", testCaller())
 	if err != nil {
 		t.Fatalf("the attachment of the file: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestDBDocumentForFileTellsAnAttachmentFromABaseEntry(t *testing.T) {
 		t.Errorf("an empty base resolves to %s, want the attachment", attachment.ID)
 	}
 
-	inBase, err := repo.DocumentForFile(context.Background(), fileID, "kb_a")
+	inBase, err := repo.DocumentForFile(context.Background(), fileID, "kb_a", testCaller())
 	if err != nil {
 		t.Fatalf("the file inside kb_a: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestDBDocumentForFileTellsAnAttachmentFromABaseEntry(t *testing.T) {
 
 	// A file that was parsed for one base is not parsed for another, and that
 	// is not an error the caller has to guess at.
-	if _, err := repo.DocumentForFile(context.Background(), fileID, "kb_nowhere"); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.DocumentForFile(context.Background(), fileID, "kb_nowhere", testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a file in an unknown base: %v, want %v", err, ErrNotFound)
 	}
 }
@@ -311,11 +311,11 @@ func TestDBOneDocumentPerFilePerPlace(t *testing.T) {
 
 	// Which leaves the file with one document in each of the three places it
 	// was put, and the read paths resolving each of them.
-	stored, err := repo.DocumentForFile(context.Background(), fileID, "kb_a")
+	stored, err := repo.DocumentForFile(context.Background(), fileID, "kb_a", testCaller())
 	if err != nil || stored.ID != first.ID {
 		t.Errorf("kb_a resolves to %+v (err %v), want %s", stored, err, first.ID)
 	}
-	stored, err = repo.DocumentForFile(context.Background(), fileID, "")
+	stored, err = repo.DocumentForFile(context.Background(), fileID, "", testCaller())
 	if err != nil || stored.ID != attachment.ID {
 		t.Errorf("the attachment resolves to %+v (err %v), want %s", stored, err, attachment.ID)
 	}

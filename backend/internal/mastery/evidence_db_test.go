@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"backend/internal/authz"
 )
 
 // refusingSave is the real repository with one failure injected: SaveTree refuses
@@ -37,12 +39,12 @@ type refusingSave struct {
 }
 
 func (r *refusingSave) SaveTree(
-	ctx context.Context, pathID string, expected int64, tree Tree, now time.Time,
+	ctx context.Context, pathID string, expected int64, tree Tree, now time.Time, caller authz.Caller,
 ) (int64, error) {
 	if r.refuse {
 		return 0, fmt.Errorf("%w: path %s was written by another turn", ErrStaleState, pathID)
 	}
-	return r.Repository.SaveTree(ctx, pathID, expected, tree, now)
+	return r.Repository.SaveTree(ctx, pathID, expected, tree, now, caller)
 }
 
 func (r *refusingSave) Within(ctx context.Context, work func(Repository) error) error {
@@ -89,7 +91,7 @@ func TestDBAnObservationSurvivesTheVersionGuardLosing(t *testing.T) {
 	recorded, err := late.RecordEvidence(ctx, Evidence{
 		ID: "mle_late", PathID: "mp_1", KnowledgePoint: "kp_capture", Result: ResultCorrect,
 		Source: SourceAssessment, Actor: actor, CreatedAt: atTen,
-	})
+	}, h.caller)
 	if err != nil {
 		t.Fatalf("record an observation whose state write loses: %v", err)
 	}
@@ -115,7 +117,7 @@ func TestDBAnObservationSurvivesTheVersionGuardLosing(t *testing.T) {
 	// And the event says which of the two versions it is about, because the version
 	// it names is the only thing that tells a reader whether this observation
 	// reached the state or only the history.
-	events, err := h.repository.Events(ctx, "mp_1")
+	events, err := h.repository.Events(ctx, "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the history: %v", err)
 	}
@@ -139,13 +141,13 @@ func TestDBAnObservationSurvivesTheVersionGuardLosing(t *testing.T) {
 	if _, err := next.RecordEvidence(ctx, Evidence{
 		ID: "mle_next", PathID: "mp_1", KnowledgePoint: "kp_capture", Result: ResultCorrect,
 		Source: SourceAssessment, Actor: actor, CreatedAt: atEleven,
-	}); err != nil {
+	}, h.caller); err != nil {
 		t.Fatalf("record the next observation: %v", err)
 	}
 	if stored := h.storedPath(t, "mp_1"); stored.Version == nil || *stored.Version != 2 {
 		t.Errorf("the path is at version %v, want the recovered writer's 2", stored.Version)
 	}
-	path, err := h.repository.Path(ctx, "mp_1")
+	path, err := h.repository.Path(ctx, "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the path: %v", err)
 	}
@@ -171,7 +173,7 @@ func TestDBAnObservationAboutACoordinateThatIsNotInTheTreeIsRefused(t *testing.T
 	if _, err := h.service.RecordEvidence(ctx, Evidence{
 		PathID: "mp_1", KnowledgePoint: "kp_nobody", Result: ResultCorrect,
 		Source: SourceAssessment, Actor: actor,
-	}); !errors.Is(err, ErrNotFound) {
+	}, h.caller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("an observation about a knowledge point that is not in the tree: %v, want %v",
 			err, ErrNotFound)
 	}
@@ -186,7 +188,7 @@ func TestDBAnObservationAboutACoordinateThatIsNotInTheTreeIsRefused(t *testing.T
 	stored, err := h.service.RecordEvidence(ctx, Evidence{
 		ID: "mle_mine", PathID: "mp_1", KnowledgePoint: "kp_loop", Result: ResultCorrect,
 		Source: SourceAssessment, Actor: actor,
-	})
+	}, h.caller)
 	if err != nil {
 		t.Fatalf("record an observation with an id of the caller's own: %v", err)
 	}
@@ -208,7 +210,7 @@ func TestDBTheInsightTellsUnknownApartFromWeak(t *testing.T) {
 	h.storeEvidence(t, "mle_a", "mp_1", "kp_capture", ResultCorrect, actor, atNine)
 	h.storeEvidence(t, "mle_b", "mp_1", "kp_capture", ResultIncorrect, actor, atTen)
 
-	insight, err := h.service.Insight(ctx, "mp_1")
+	insight, err := h.service.Insight(ctx, "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the insight: %v", err)
 	}
@@ -273,11 +275,11 @@ func TestDBTheInsightDropsAnObservationWhoseCoordinateLeftTheTree(t *testing.T) 
 	h.storeEvidence(t, "mle_b", "mp_1", "kp_capture", ResultIncorrect, actor, atTen)
 	if _, err := h.service.RemoveKnowledgePoint(ctx, RemoveKnowledgePointRequest{
 		Change: Change{PathID: "mp_1", Actor: actor}, ID: "kp_capture",
-	}); err != nil {
+	}, h.caller); err != nil {
 		t.Fatalf("remove the knowledge point: %v", err)
 	}
 
-	insight, err := h.service.Insight(ctx, "mp_1")
+	insight, err := h.service.Insight(ctx, "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the insight: %v", err)
 	}
@@ -318,7 +320,7 @@ func TestDBTheNextStepMovesFromLearningToReviewingOnItsOwn(t *testing.T) {
 	for _, id := range []string{"mle_a", "mle_b", "mle_c"} {
 		h.storeEvidence(t, id, "mp_1", "kp_capture", ResultCorrect, actor, atNine)
 	}
-	insight, err := h.service.Insight(ctx, "mp_1")
+	insight, err := h.service.Insight(ctx, "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the insight: %v", err)
 	}
@@ -329,7 +331,7 @@ func TestDBTheNextStepMovesFromLearningToReviewingOnItsOwn(t *testing.T) {
 	// A week and a day later the same path answers differently with no write in
 	// between: the step is computed, not stored, and it moves because the clock did.
 	h.clock.advance(8 * 24 * time.Hour)
-	insight, err = h.service.Insight(ctx, "mp_1")
+	insight, err = h.service.Insight(ctx, "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the insight again: %v", err)
 	}
@@ -358,13 +360,13 @@ func TestDBReleasingAPathIsTheEndpointsActAndSaysWhoHeldIt(t *testing.T) {
 	second := h.turn(t, "t_2", "s_1")
 	ctx := context.Background()
 
-	if _, err := h.service.Acquire(ctx, "mp_1", first); err != nil {
+	if _, err := h.service.Acquire(ctx, "mp_1", first, h.caller); err != nil {
 		t.Fatalf("take the lease: %v", err)
 	}
 	// The endpoint's act: a person saying "nobody is writing this any more" about a
 	// claim a crashed turn left behind, which is why it names no holder and reports
 	// the one it dropped.
-	held, released, err := h.service.ReleaseAny(ctx, "mp_1")
+	held, released, err := h.service.ReleaseAny(ctx, "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("release whatever holds the path: %v", err)
 	}
@@ -377,16 +379,16 @@ func TestDBReleasingAPathIsTheEndpointsActAndSaysWhoHeldIt(t *testing.T) {
 	// Asking again is not a failure: the state it asked for is the state it is in,
 	// and a second release — or one after the lease expired — is an ordinary thing
 	// for a surface to send.
-	if _, released, err := h.service.ReleaseAny(ctx, "mp_1"); err != nil || released {
+	if _, released, err := h.service.ReleaseAny(ctx, "mp_1", h.caller); err != nil || released {
 		t.Errorf("releasing a path nobody holds: released=%v err=%v", released, err)
 	}
 	// It names no holder, so it is not a way for a turn to drop somebody else's
 	// claim without saying so — but it is also the only lease operation a turn
 	// cannot reach by guessing, because it is reached by an endpoint and not a tool.
-	if _, err := h.service.Acquire(ctx, "mp_1", second); err != nil {
+	if _, err := h.service.Acquire(ctx, "mp_1", second, h.caller); err != nil {
 		t.Errorf("the path was not free after the release: %v", err)
 	}
-	if _, _, err := h.service.ReleaseAny(ctx, "  "); !errors.Is(err, ErrInvalidRequest) {
+	if _, _, err := h.service.ReleaseAny(ctx, "  ", h.caller); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("releasing a blank path: %v, want %v", err, ErrInvalidRequest)
 	}
 }

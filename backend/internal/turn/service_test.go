@@ -1,6 +1,7 @@
 package turn
 
 import (
+	"backend/internal/authz"
 	"context"
 	"errors"
 	"log/slog"
@@ -134,7 +135,7 @@ func TestTheAnswerBecomesPartOfTheConversation(t *testing.T) {
 	started := fixture.start(t, StartRequest{Content: "在吗"})
 	fixture.repository.awaitStatus(t, started.Turn.ID, StatusCompleted)
 
-	messages, err := fixture.sessions.Messages(context.Background(), started.Session.ID)
+	messages, err := fixture.sessions.Messages(context.Background(), started.Session.ID, authz.Caller{})
 	if err != nil {
 		t.Fatalf("Messages() error = %v", err)
 	}
@@ -163,7 +164,7 @@ func TestASessionIsNamedFromItsFirstTurn(t *testing.T) {
 	if got := only(t, seen, event.TypeSessionMeta).Content; got != "在不在" {
 		t.Errorf("session_meta = %q, want the generated name", got)
 	}
-	renamed, err := fixture.sessions.Get(context.Background(), started.Session.ID)
+	renamed, err := fixture.sessions.Get(context.Background(), started.Session.ID, authz.Caller{})
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}

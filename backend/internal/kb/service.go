@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"backend/internal/authz"
 	"backend/internal/embed"
 	"backend/internal/event"
 	"backend/internal/parse"
@@ -67,7 +68,7 @@ func NewService(options Options, repository Repository, parsers *parse.Registry,
 // one this process embeds with: KB-02 binds both at creation, so that a base
 // created under one model still says so after the configuration moves on — and
 // the startup check has something to disagree with.
-func (s *Service) CreateKnowledgeBase(ctx context.Context, name, description string) (KnowledgeBase, error) {
+func (s *Service) CreateKnowledgeBase(ctx context.Context, name, description string, caller authz.Caller) (KnowledgeBase, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return KnowledgeBase{}, fmt.Errorf("%w: a knowledge base needs a name", ErrInvalidInput)
@@ -83,25 +84,28 @@ func (s *Service) CreateKnowledgeBase(ctx context.Context, name, description str
 	record := KnowledgeBase{
 		ID: id, Name: name, Description: strings.TrimSpace(description),
 		Provider: ProviderNative, EmbeddingModel: s.options.EmbeddingModel,
-		CreatedAt: now, UpdatedAt: now,
+		OwnerID: caller.UserID, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.repository.CreateKnowledgeBase(ctx, record); err != nil {
 		return KnowledgeBase{}, err
 	}
 	// Read back rather than return what was sent: whether this base is the
 	// default one is decided in storage, together with the lock that keeps it
-	// the only one.
-	return s.repository.KnowledgeBase(ctx, id)
+	// the only one. The read-back is scoped, so a base stored with no owner —
+	// which only happens for an unauthenticated caller, who cannot reach this —
+	// would come back as not found rather than as a collection nobody can list.
+	return s.repository.KnowledgeBase(ctx, id, caller)
 }
 
-// KnowledgeBases lists every collection, the default one first.
-func (s *Service) KnowledgeBases(ctx context.Context) ([]KnowledgeBase, error) {
-	return s.repository.KnowledgeBases(ctx)
+// KnowledgeBases lists the caller's own collections, the default one first.
+func (s *Service) KnowledgeBases(ctx context.Context, caller authz.Caller) ([]KnowledgeBase, error) {
+	return s.repository.KnowledgeBases(ctx, caller)
 }
 
-// KnowledgeBase returns one collection.
-func (s *Service) KnowledgeBase(ctx context.Context, kbID string) (KnowledgeBase, error) {
-	return s.repository.KnowledgeBase(ctx, strings.TrimSpace(kbID))
+// KnowledgeBase returns one collection. A collection belonging to another
+// account is ErrNotFound, not a refusal: the id might as well not exist.
+func (s *Service) KnowledgeBase(ctx context.Context, kbID string, caller authz.Caller) (KnowledgeBase, error) {
+	return s.repository.KnowledgeBase(ctx, strings.TrimSpace(kbID), caller)
 }
 
 // SetDefaultKnowledgeBase moves the default mark.
@@ -110,40 +114,40 @@ func (s *Service) KnowledgeBase(ctx context.Context, kbID string) (KnowledgeBase
 // searched — and it is not a fallback for a scope that lost a base: KB-07's
 // "report it, do not substitute" is about what a turn reads, not about which
 // base is starred in a list.
-func (s *Service) SetDefaultKnowledgeBase(ctx context.Context, kbID string) error {
-	return s.repository.SetDefaultKnowledgeBase(ctx, strings.TrimSpace(kbID))
+func (s *Service) SetDefaultKnowledgeBase(ctx context.Context, kbID string, caller authz.Caller) error {
+	return s.repository.SetDefaultKnowledgeBase(ctx, strings.TrimSpace(kbID), caller)
 }
 
 // DeleteKnowledgeBase removes a collection and its documents.
-func (s *Service) DeleteKnowledgeBase(ctx context.Context, kbID string) error {
-	return s.repository.DeleteKnowledgeBase(ctx, strings.TrimSpace(kbID))
+func (s *Service) DeleteKnowledgeBase(ctx context.Context, kbID string, caller authz.Caller) error {
+	return s.repository.DeleteKnowledgeBase(ctx, strings.TrimSpace(kbID), caller)
 }
 
 // Documents lists a collection's documents.
-func (s *Service) Documents(ctx context.Context, kbID string) ([]Document, error) {
-	return s.repository.Documents(ctx, strings.TrimSpace(kbID))
+func (s *Service) Documents(ctx context.Context, kbID string, caller authz.Caller) ([]Document, error) {
+	return s.repository.Documents(ctx, strings.TrimSpace(kbID), caller)
 }
 
 // Document returns one document.
-func (s *Service) Document(ctx context.Context, documentID string) (Document, error) {
-	return s.repository.Document(ctx, strings.TrimSpace(documentID))
+func (s *Service) Document(ctx context.Context, documentID string, caller authz.Caller) (Document, error) {
+	return s.repository.Document(ctx, strings.TrimSpace(documentID), caller)
 }
 
 // DocumentOfFile returns a document parsed from one file, for a caller that
 // knows the file rather than the place it is used (ATT-02's preview).
-func (s *Service) DocumentOfFile(ctx context.Context, fileID string) (Document, error) {
+func (s *Service) DocumentOfFile(ctx context.Context, fileID string, caller authz.Caller) (Document, error) {
 	fileID = strings.TrimSpace(fileID)
 	if fileID == "" {
 		return Document{}, fmt.Errorf("%w: a document is read by the file it came from", ErrInvalidInput)
 	}
-	return s.repository.DocumentOfFile(ctx, fileID)
+	return s.repository.DocumentOfFile(ctx, fileID, caller)
 }
 
 // ChunkSpans returns where the chunk boundaries of a document's active revision
 // fall, which is what a preview of the text marks and what a citation's
 // character span refers to.
-func (s *Service) ChunkSpans(ctx context.Context, documentID string) ([]ChunkSpan, error) {
-	document, err := s.repository.Document(ctx, strings.TrimSpace(documentID))
+func (s *Service) ChunkSpans(ctx context.Context, documentID string, caller authz.Caller) ([]ChunkSpan, error) {
+	document, err := s.repository.Document(ctx, strings.TrimSpace(documentID), caller)
 	if err != nil {
 		return nil, err
 	}
@@ -151,8 +155,8 @@ func (s *Service) ChunkSpans(ctx context.Context, documentID string) ([]ChunkSpa
 }
 
 // RemoveDocument removes one document.
-func (s *Service) RemoveDocument(ctx context.Context, documentID string) error {
-	return s.repository.DeleteDocument(ctx, strings.TrimSpace(documentID))
+func (s *Service) RemoveDocument(ctx context.Context, documentID string, caller authz.Caller) error {
+	return s.repository.DeleteDocument(ctx, strings.TrimSpace(documentID), caller)
 }
 
 // AddDocument parses a stored file into a knowledge base and chunks it.
@@ -166,20 +170,20 @@ func (s *Service) RemoveDocument(ctx context.Context, documentID string) error {
 //
 // An empty kbID makes the document an attachment: the same parse, kept for the
 // turns that carried the file and retrievable by nobody.
-func (s *Service) AddDocument(ctx context.Context, fileID, kbID string) (Document, error) {
+func (s *Service) AddDocument(ctx context.Context, fileID, kbID string, caller authz.Caller) (Document, error) {
 	fileID, kbID = strings.TrimSpace(fileID), strings.TrimSpace(kbID)
 	if fileID == "" {
 		return Document{}, fmt.Errorf("%w: a document needs a file", ErrInvalidInput)
 	}
 	if kbID != "" {
-		if _, err := s.repository.KnowledgeBase(ctx, kbID); err != nil {
+		if _, err := s.repository.KnowledgeBase(ctx, kbID, caller); err != nil {
 			return Document{}, err
 		}
 	}
 	// The same file in the same base is the same document, parsed once. Two
 	// turns carrying one attachment must not each pay for a parse, and a base
 	// holding one file twice would return the same text as two sources.
-	existing, err := s.repository.DocumentForFile(ctx, fileID, kbID)
+	existing, err := s.repository.DocumentForFile(ctx, fileID, kbID, caller)
 	if err == nil {
 		return existing, nil
 	}
@@ -191,10 +195,14 @@ func (s *Service) AddDocument(ctx context.Context, fileID, kbID string) (Documen
 	if err != nil {
 		return Document{}, fmt.Errorf("generate document id: %w", err)
 	}
-	write, err := s.extract(ctx, fileID, kbID, documentID, 1)
+	write, err := s.extract(ctx, fileID, kbID, documentID, 1, caller)
 	if err != nil {
 		return Document{}, err
 	}
+	// CreateDocument is the one write in this package that takes no caller. The
+	// two things it attaches to have both just been read as the caller's — the
+	// base above, the file inside extract — so there is no earlier row left for
+	// a caller to smuggle past.
 	if err := s.repository.CreateDocument(ctx, write); err != nil {
 		// Two callers added the same file at once. The loser's work is thrown
 		// away and the winner's document returned: the request was "make sure
@@ -204,7 +212,7 @@ func (s *Service) AddDocument(ctx context.Context, fileID, kbID string) (Documen
 		// on (file_id, file_scope) refuses the second write (migration 00008).
 		// Without it both writes succeeded and the base held the file twice.
 		if errors.Is(err, ErrConflict) {
-			return s.repository.DocumentForFile(ctx, fileID, kbID)
+			return s.repository.DocumentForFile(ctx, fileID, kbID, caller)
 		}
 		return Document{}, err
 	}
@@ -220,18 +228,18 @@ func (s *Service) AddDocument(ctx context.Context, fileID, kbID string) (Documen
 // The parse happens before the switch, and the switch is one transaction, so a
 // rebuild that fails leaves the document's current revision serving retrieval
 // exactly as it was.
-func (s *Service) RebuildDocument(ctx context.Context, documentID string) (Document, error) {
+func (s *Service) RebuildDocument(ctx context.Context, documentID string, caller authz.Caller) (Document, error) {
 	documentID = strings.TrimSpace(documentID)
-	document, err := s.repository.Document(ctx, documentID)
+	document, err := s.repository.Document(ctx, documentID, caller)
 	if err != nil {
 		return Document{}, err
 	}
 	revision := document.ActiveRevision + 1
-	write, err := s.extract(ctx, document.FileID, document.KBID, documentID, revision)
+	write, err := s.extract(ctx, document.FileID, document.KBID, documentID, revision, caller)
 	if err != nil {
 		return Document{}, err
 	}
-	if err := s.repository.ReplaceRevision(ctx, write, document.ActiveRevision); err != nil {
+	if err := s.repository.ReplaceRevision(ctx, write, document.ActiveRevision, caller); err != nil {
 		return Document{}, err
 	}
 	return write.Document, nil
@@ -239,8 +247,14 @@ func (s *Service) RebuildDocument(ctx context.Context, documentID string) (Docum
 
 // extract reads a file and splits what came back, returning the row and the
 // chunks of one revision without writing either.
-func (s *Service) extract(ctx context.Context, fileID, kbID, documentID string, revision int) (DocumentWrite, error) {
-	file, err := s.files.Open(ctx, fileID)
+//
+// The caller reaches the file library through here as well as through the base:
+// opening bytes is what turns "parse this file id into my collection" into a
+// read of somebody else's upload, so the account travels with the request all
+// the way down to the port rather than being re-derived from the base, which an
+// attachment does not have.
+func (s *Service) extract(ctx context.Context, fileID, kbID, documentID string, revision int, caller authz.Caller) (DocumentWrite, error) {
+	file, err := s.files.Open(ctx, fileID, caller)
 	if err != nil {
 		return DocumentWrite{}, err
 	}
@@ -321,7 +335,7 @@ func (s *Service) Retrieve(ctx context.Context, input RetrieveInput) (Retrieval,
 		topK = s.options.RetrievalTopK
 	}
 
-	live, unavailable, err := s.liveScope(ctx, input.KBIDs)
+	live, unavailable, err := s.liveScope(ctx, input.KBIDs, input.Caller)
 	if err != nil {
 		return Retrieval{}, err
 	}
@@ -414,7 +428,7 @@ func (s *Service) queryVector(ctx context.Context, supplied embed.Vector, query 
 // liveScope splits the requested bases into the ones that exist and the ones
 // that no longer do. Both lists matter: the first is what may be searched, and
 // the second is what the model and the user have to be told about (KB-07).
-func (s *Service) liveScope(ctx context.Context, kbIDs []string) (live, unavailable []string, err error) {
+func (s *Service) liveScope(ctx context.Context, kbIDs []string, caller authz.Caller) (live, unavailable []string, err error) {
 	seen := make(map[string]bool, len(kbIDs))
 	for _, kbID := range kbIDs {
 		kbID = strings.TrimSpace(kbID)
@@ -422,7 +436,13 @@ func (s *Service) liveScope(ctx context.Context, kbIDs []string) (live, unavaila
 			continue
 		}
 		seen[kbID] = true
-		if _, err := s.repository.KnowledgeBase(ctx, kbID); err != nil {
+		// A base another account owns lands in unavailable with the ones that are
+		// gone, which is the right shape for this rule and worth being explicit
+		// about: KB-07 says a scope that lost a base is reported, not quietly
+		// substituted, and from where this caller stands a base they may not read
+		// is one they do not have. Searching it would be the substitution KB-07
+		// forbids, only worse.
+		if _, err := s.repository.KnowledgeBase(ctx, kbID, caller); err != nil {
 			if errors.Is(err, ErrNotFound) {
 				unavailable = append(unavailable, kbID)
 				continue
@@ -442,8 +462,8 @@ func (s *Service) liveScope(ctx context.Context, kbIDs []string) (live, unavaila
 // opening a citation at character 6144 must not cost that. The offsets are
 // characters, like every other offset here, so a window and a citation's
 // char_start describe the same thing.
-func (s *Service) ReadWindow(ctx context.Context, documentID string, offset, limit int64) (Window, error) {
-	document, err := s.repository.Document(ctx, strings.TrimSpace(documentID))
+func (s *Service) ReadWindow(ctx context.Context, documentID string, offset, limit int64, caller authz.Caller) (Window, error) {
+	document, err := s.repository.Document(ctx, strings.TrimSpace(documentID), caller)
 	if err != nil {
 		return Window{}, err
 	}

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"backend/internal/authz"
 )
 
 const (
@@ -61,8 +63,8 @@ func NewService(repository Repository, documents Documents, options Options) (*S
 // back with the tab state of that workspace or with none. A read outside a
 // workspace is not a different kind of read: it is the same catalogue seen by
 // somebody who has no tabs open.
-func (s *Service) Materials(ctx context.Context, workspaceID string) ([]Material, error) {
-	return s.repository.Materials(ctx, strings.TrimSpace(workspaceID))
+func (s *Service) Materials(ctx context.Context, workspaceID string, caller authz.Caller) ([]Material, error) {
+	return s.repository.Materials(ctx, strings.TrimSpace(workspaceID), caller)
 }
 
 // Material reads one row of the catalogue.
@@ -71,8 +73,8 @@ func (s *Service) Materials(ctx context.Context, workspaceID string) ([]Material
 // its text — the extension catalogue is the one that asks — and it exists so
 // those can answer "no such material" rather than describing a book that is not
 // there.
-func (s *Service) Material(ctx context.Context, materialID string) (Material, error) {
-	return s.repository.Material(ctx, strings.TrimSpace(materialID))
+func (s *Service) Material(ctx context.Context, materialID string, caller authz.Caller) (Material, error) {
+	return s.repository.Material(ctx, strings.TrimSpace(materialID), caller)
 }
 
 // Outline returns one material and what it is made of.
@@ -81,19 +83,19 @@ func (s *Service) Material(ctx context.Context, materialID string) (Material, er
 // units rather than as an error. The row exists and the catalogue should list
 // it; what it lacks is a text to be a coordinate into, and saying so with an
 // empty outline is truer than refusing to describe a row that is there.
-func (s *Service) Outline(ctx context.Context, materialID string) (Outline, error) {
-	material, err := s.repository.Material(ctx, strings.TrimSpace(materialID))
+func (s *Service) Outline(ctx context.Context, materialID string, caller authz.Caller) (Outline, error) {
+	material, err := s.repository.Material(ctx, strings.TrimSpace(materialID), caller)
 	if err != nil {
 		return Outline{}, err
 	}
 	if material.ContentID == "" {
 		return Outline{Material: material, Units: []Unit{}}, nil
 	}
-	document, err := s.documents.Document(ctx, material.ContentID)
+	document, err := s.documents.Document(ctx, material.ContentID, caller)
 	if err != nil {
 		return Outline{}, err
 	}
-	spans, err := s.documents.ChunkSpans(ctx, material.ContentID)
+	spans, err := s.documents.ChunkSpans(ctx, material.ContentID, caller)
 	if err != nil {
 		return Outline{}, err
 	}
@@ -113,16 +115,16 @@ func (s *Service) Outline(ctx context.Context, materialID string) (Outline, erro
 // a lock — content_id carries no unique index (migration 00012) — so this is
 // idempotent in the ordinary case and not under a race; that limit is recorded
 // in the design's deviation list rather than papered over here.
-func (s *Service) Create(ctx context.Context, fileID, sourceType string) (Material, error) {
+func (s *Service) Create(ctx context.Context, fileID, sourceType string, caller authz.Caller) (Material, error) {
 	fileID = strings.TrimSpace(fileID)
 	if fileID == "" {
 		return Material{}, fmt.Errorf("%w: no file was named", ErrInvalidRequest)
 	}
-	document, err := s.documents.DocumentOfFile(ctx, fileID)
+	document, err := s.documents.DocumentOfFile(ctx, fileID, caller)
 	if err != nil {
 		return Material{}, err
 	}
-	existing, err := s.repository.MaterialOfContent(ctx, document.ID)
+	existing, err := s.repository.MaterialOfContent(ctx, document.ID, caller)
 	if err == nil {
 		return existing, nil
 	}
@@ -139,8 +141,14 @@ func (s *Service) Create(ctx context.Context, fileID, sourceType string) (Materi
 		ContentID:  document.ID,
 		Filename:   document.Filename,
 		SourceType: strings.TrimSpace(sourceType),
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		// The owner is the caller's account, and it travels in the record because
+		// this is the moment a material comes into being: there is no existing row
+		// to narrow against, so what the repository needs is the owner value, not a
+		// scope. Zero here would mean "belongs to nobody", which is the state the
+		// reader is leaving, not the one it is entering.
+		OwnerID:   caller.UserID,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	if err := s.repository.CreateMaterial(ctx, material); err != nil {
 		return Material{}, err
@@ -150,11 +158,11 @@ func (s *Service) Create(ctx context.Context, fileID, sourceType string) (Materi
 
 // Position reads where a reader stopped. The second return value is false when
 // nothing has been saved, which is an answer and not a missing resource.
-func (s *Service) Position(ctx context.Context, materialID, sessionID string) (Position, bool, error) {
-	if _, err := s.repository.Material(ctx, strings.TrimSpace(materialID)); err != nil {
+func (s *Service) Position(ctx context.Context, materialID, sessionID string, caller authz.Caller) (Position, bool, error) {
+	if _, err := s.repository.Material(ctx, strings.TrimSpace(materialID), caller); err != nil {
 		return Position{}, false, err
 	}
-	position, err := s.repository.Position(ctx, strings.TrimSpace(materialID), strings.TrimSpace(sessionID))
+	position, err := s.repository.Position(ctx, strings.TrimSpace(materialID), strings.TrimSpace(sessionID), caller)
 	if errors.Is(err, ErrNotFound) {
 		return Position{}, false, nil
 	}
@@ -171,11 +179,11 @@ func (s *Service) Position(ctx context.Context, materialID, sessionID string) (P
 // that read a revision somebody has since moved gets ErrStalePosition and reads
 // the row again, which is the third appearance of the same shape in this
 // version — the review state, the path state, and this.
-func (s *Service) SavePosition(ctx context.Context, request SavePositionRequest) (Position, error) {
+func (s *Service) SavePosition(ctx context.Context, request SavePositionRequest, caller authz.Caller) (Position, error) {
 	if err := request.Validate(); err != nil {
 		return Position{}, err
 	}
-	if _, err := s.repository.Material(ctx, request.MaterialID); err != nil {
+	if _, err := s.repository.Material(ctx, request.MaterialID, caller); err != nil {
 		return Position{}, err
 	}
 	now := time.Now().UTC()
@@ -188,7 +196,7 @@ func (s *Service) SavePosition(ctx context.Context, request SavePositionRequest)
 			CreatedAt:  now,
 			UpdatedAt:  now,
 		}
-		err := s.repository.CreatePosition(ctx, position)
+		err := s.repository.CreatePosition(ctx, position, caller)
 		if errors.Is(err, ErrDuplicate) {
 			return Position{}, fmt.Errorf("%w: another tab saved a position first", ErrStalePosition)
 		}
@@ -197,7 +205,7 @@ func (s *Service) SavePosition(ctx context.Context, request SavePositionRequest)
 		}
 		return position, nil
 	}
-	moved, err := s.repository.SavePosition(ctx, request.MaterialID, request.SessionID, request.Revision, request.Locator, now)
+	moved, err := s.repository.SavePosition(ctx, request.MaterialID, request.SessionID, request.Revision, request.Locator, now, caller)
 	if err != nil {
 		return Position{}, err
 	}
@@ -206,20 +214,20 @@ func (s *Service) SavePosition(ctx context.Context, request SavePositionRequest)
 		// row was removed, or it has moved on. Reading it tells the two apart, and
 		// the caller is told which — "your position is gone" and "your position has
 		// moved" invite different next steps.
-		if _, err := s.repository.Position(ctx, request.MaterialID, request.SessionID); errors.Is(err, ErrNotFound) {
+		if _, err := s.repository.Position(ctx, request.MaterialID, request.SessionID, caller); errors.Is(err, ErrNotFound) {
 			return Position{}, fmt.Errorf("%w: the position is gone", ErrStalePosition)
 		}
 		return Position{}, fmt.Errorf("%w: revision %d is no longer current", ErrStalePosition, request.Revision)
 	}
-	return s.repository.Position(ctx, request.MaterialID, request.SessionID)
+	return s.repository.Position(ctx, request.MaterialID, request.SessionID, caller)
 }
 
 // Marks lists the marks on one material.
-func (s *Service) Marks(ctx context.Context, materialID string) ([]Mark, error) {
-	if _, err := s.repository.Material(ctx, strings.TrimSpace(materialID)); err != nil {
+func (s *Service) Marks(ctx context.Context, materialID string, caller authz.Caller) ([]Mark, error) {
+	if _, err := s.repository.Material(ctx, strings.TrimSpace(materialID), caller); err != nil {
 		return nil, err
 	}
-	return s.repository.Marks(ctx, strings.TrimSpace(materialID))
+	return s.repository.Marks(ctx, strings.TrimSpace(materialID), caller)
 }
 
 // AddMark writes one bookmark, highlight or note.
@@ -228,11 +236,11 @@ func (s *Service) Marks(ctx context.Context, materialID string) ([]Mark, error) 
 // reader put on the text, and editing it is a later version's business. What the
 // revision column is for is the same thing it is for everywhere else — being
 // able to say whether the row moved — and it starts at the first version.
-func (s *Service) AddMark(ctx context.Context, request MarkRequest) (Mark, error) {
+func (s *Service) AddMark(ctx context.Context, request MarkRequest, caller authz.Caller) (Mark, error) {
 	if err := request.Validate(); err != nil {
 		return Mark{}, err
 	}
-	if _, err := s.repository.Material(ctx, request.MaterialID); err != nil {
+	if _, err := s.repository.Material(ctx, request.MaterialID, caller); err != nil {
 		return Mark{}, err
 	}
 	markID, err := newID(markIDPrefix)
@@ -251,15 +259,15 @@ func (s *Service) AddMark(ctx context.Context, request MarkRequest) (Mark, error
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}
-	if err := s.repository.CreateMark(ctx, mark); err != nil {
+	if err := s.repository.CreateMark(ctx, mark, caller); err != nil {
 		return Mark{}, err
 	}
 	return mark, nil
 }
 
 // RemoveMark takes one mark off the material.
-func (s *Service) RemoveMark(ctx context.Context, markID string) error {
-	return s.repository.DeleteMark(ctx, strings.TrimSpace(markID))
+func (s *Service) RemoveMark(ctx context.Context, markID string, caller authz.Caller) error {
+	return s.repository.DeleteMark(ctx, strings.TrimSpace(markID), caller)
 }
 
 // newID returns a readable row id with the given prefix.

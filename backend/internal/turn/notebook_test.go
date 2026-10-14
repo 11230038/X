@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"testing"
 
+	"backend/internal/authz"
 	"backend/internal/notebook"
 	"backend/internal/session"
 	"backend/internal/tool"
@@ -30,7 +31,7 @@ func newStubQuestions() *stubQuestions {
 	return &stubQuestions{rows: make(map[string]string)}
 }
 
-func (q *stubQuestions) Save(_ context.Context, question notebook.Question) (notebook.Upserted, error) {
+func (q *stubQuestions) Save(_ context.Context, question notebook.Question, _ authz.Caller) (notebook.Upserted, error) {
 	if q.err != nil {
 		return notebook.Upserted{}, q.err
 	}

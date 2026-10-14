@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/event"
 	"backend/internal/kb"
 	"backend/internal/middleware"
@@ -35,50 +36,50 @@ type kbStub struct {
 	searched           kb.RetrieveInput
 }
 
-func (s *kbStub) CreateKnowledgeBase(_ context.Context, name, description string) (kb.KnowledgeBase, error) {
+func (s *kbStub) CreateKnowledgeBase(_ context.Context, name, description string, caller authz.Caller) (kb.KnowledgeBase, error) {
 	s.createdName, s.createdDescription = name, description
 	return s.base, s.err
 }
 
-func (s *kbStub) KnowledgeBases(context.Context) ([]kb.KnowledgeBase, error) {
+func (s *kbStub) KnowledgeBases(_ context.Context, caller authz.Caller) ([]kb.KnowledgeBase, error) {
 	return s.bases, s.err
 }
 
-func (s *kbStub) KnowledgeBase(_ context.Context, kbID string) (kb.KnowledgeBase, error) {
+func (s *kbStub) KnowledgeBase(_ context.Context, kbID string, caller authz.Caller) (kb.KnowledgeBase, error) {
 	s.askedKBID = kbID
 	return s.base, s.err
 }
 
-func (s *kbStub) SetDefaultKnowledgeBase(_ context.Context, kbID string) error {
+func (s *kbStub) SetDefaultKnowledgeBase(_ context.Context, kbID string, caller authz.Caller) error {
 	s.askedKBID = kbID
 	return s.err
 }
 
-func (s *kbStub) DeleteKnowledgeBase(_ context.Context, kbID string) error {
+func (s *kbStub) DeleteKnowledgeBase(_ context.Context, kbID string, caller authz.Caller) error {
 	s.askedKBID = kbID
 	return s.err
 }
 
-func (s *kbStub) Documents(_ context.Context, kbID string) ([]kb.Document, error) {
+func (s *kbStub) Documents(_ context.Context, kbID string, caller authz.Caller) ([]kb.Document, error) {
 	s.askedKBID = kbID
 	return s.documents, s.err
 }
 
-func (s *kbStub) Document(context.Context, string) (kb.Document, error) {
+func (s *kbStub) Document(_ context.Context, documentID string, caller authz.Caller) (kb.Document, error) {
 	return s.document, s.err
 }
 
-func (s *kbStub) AddDocument(_ context.Context, fileID, kbID string) (kb.Document, error) {
+func (s *kbStub) AddDocument(_ context.Context, fileID, kbID string, caller authz.Caller) (kb.Document, error) {
 	s.askedFileID, s.askedKBID = fileID, kbID
 	return s.document, s.err
 }
 
-func (s *kbStub) RemoveDocument(_ context.Context, documentID string) error {
+func (s *kbStub) RemoveDocument(_ context.Context, documentID string, caller authz.Caller) error {
 	s.removed = documentID
 	return s.err
 }
 
-func (s *kbStub) RebuildDocument(_ context.Context, documentID string) (kb.Document, error) {
+func (s *kbStub) RebuildDocument(_ context.Context, documentID string, caller authz.Caller) (kb.Document, error) {
 	s.rebuilt = documentID
 	return s.document, s.err
 }
@@ -98,15 +99,16 @@ func newKBRouter(stub *kbStub) *gin.Engine {
 func newKBTestRouter(handler *KBHandler) *gin.Engine {
 	router := gin.New()
 	router.Use(middleware.RequestID())
-	router.POST("/api/v1/knowledge-bases", handler.Create)
-	router.GET("/api/v1/knowledge-bases", handler.List)
-	router.GET("/api/v1/knowledge-bases/:kbID", handler.Get)
-	router.DELETE("/api/v1/knowledge-bases/:kbID", handler.Delete)
-	router.POST("/api/v1/knowledge-bases/:kbID/documents", handler.AddDocument)
-	router.DELETE("/api/v1/knowledge-bases/:kbID/documents/:documentID", handler.RemoveDocument)
-	router.POST("/api/v1/knowledge-bases/:kbID/rebuild", handler.Rebuild)
-	router.POST("/api/v1/knowledge-bases/:kbID/search", handler.Search)
-	router.POST("/api/v1/knowledge-bases/:kbID/default", handler.SetDefault)
+	guarded := guard()
+	router.POST("/api/v1/knowledge-bases", guarded, handler.Create)
+	router.GET("/api/v1/knowledge-bases", guarded, handler.List)
+	router.GET("/api/v1/knowledge-bases/:kbID", guarded, handler.Get)
+	router.DELETE("/api/v1/knowledge-bases/:kbID", guarded, handler.Delete)
+	router.POST("/api/v1/knowledge-bases/:kbID/documents", guarded, handler.AddDocument)
+	router.DELETE("/api/v1/knowledge-bases/:kbID/documents/:documentID", guarded, handler.RemoveDocument)
+	router.POST("/api/v1/knowledge-bases/:kbID/rebuild", guarded, handler.Rebuild)
+	router.POST("/api/v1/knowledge-bases/:kbID/search", guarded, handler.Search)
+	router.POST("/api/v1/knowledge-bases/:kbID/default", guarded, handler.SetDefault)
 	return router
 }
 
@@ -149,7 +151,7 @@ func TestCreateKnowledgeBaseAsksTheDomainForIt(t *testing.T) {
 	stub := &kbStub{base: testBase()}
 	router := newKBRouter(stub)
 
-	recorder := call(t, router, http.MethodPost, "/api/v1/knowledge-bases", `{"name":"手册","description":"产品手册"}`)
+	recorder := callAs(t, router, http.MethodPost, "/api/v1/knowledge-bases", `{"name":"手册","description":"产品手册"}`)
 
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", recorder.Code, recorder.Body.String())
@@ -173,7 +175,7 @@ func TestCreateRepeatsWhatTheDomainSaidAboutTheName(t *testing.T) {
 	stub := &kbStub{err: fmt.Errorf("%w: a knowledge base needs a name", kb.ErrInvalidInput)}
 	router := newKBRouter(stub)
 
-	recorder := call(t, router, http.MethodPost, "/api/v1/knowledge-bases", `{"name":""}`)
+	recorder := callAs(t, router, http.MethodPost, "/api/v1/knowledge-bases", `{"name":""}`)
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", recorder.Code, recorder.Body.String())
@@ -190,7 +192,7 @@ func TestGetReturnsTheBaseAndItsParseProgress(t *testing.T) {
 	stub := &kbStub{base: testBase(), documents: []kb.Document{testDocument()}}
 	router := newKBRouter(stub)
 
-	recorder := call(t, router, http.MethodGet, "/api/v1/knowledge-bases/kb_1", "")
+	recorder := callAs(t, router, http.MethodGet, "/api/v1/knowledge-bases/kb_1", "")
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -226,7 +228,7 @@ func TestMissingThingsAreNotFound(t *testing.T) {
 		{http.MethodDelete, "/api/v1/knowledge-bases/kb_9/documents/doc_1", ""},
 	} {
 		t.Run(test.method+" "+test.path, func(t *testing.T) {
-			recorder := call(t, router, test.method, test.path, test.body)
+			recorder := callAs(t, router, test.method, test.path, test.body)
 			if recorder.Code != http.StatusNotFound {
 				t.Fatalf("status = %d, want 404; body=%s", recorder.Code, recorder.Body.String())
 			}
@@ -241,7 +243,7 @@ func TestDeleteAnswersWithNoContent(t *testing.T) {
 	stub := &kbStub{}
 	router := newKBRouter(stub)
 
-	recorder := call(t, router, http.MethodDelete, "/api/v1/knowledge-bases/kb_1", "")
+	recorder := callAs(t, router, http.MethodDelete, "/api/v1/knowledge-bases/kb_1", "")
 
 	if recorder.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204; body=%s", recorder.Code, recorder.Body.String())
@@ -255,7 +257,7 @@ func TestListReturnsEveryBase(t *testing.T) {
 	stub := &kbStub{bases: []kb.KnowledgeBase{testBase()}}
 	router := newKBRouter(stub)
 
-	recorder := call(t, router, http.MethodGet, "/api/v1/knowledge-bases", "")
+	recorder := callAs(t, router, http.MethodGet, "/api/v1/knowledge-bases", "")
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -271,7 +273,7 @@ func TestAddDocumentParsesTheFileIntoTheBase(t *testing.T) {
 	stub := &kbStub{document: testDocument()}
 	router := newKBRouter(stub)
 
-	recorder := call(t, router, http.MethodPost, "/api/v1/knowledge-bases/kb_1/documents", `{"file_id":"lib_1"}`)
+	recorder := callAs(t, router, http.MethodPost, "/api/v1/knowledge-bases/kb_1/documents", `{"file_id":"lib_1"}`)
 
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", recorder.Code, recorder.Body.String())
@@ -316,7 +318,7 @@ func TestAnUnreadableFileIsAnsweredWithItsOwnReason(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			router := newKBRouter(&kbStub{err: test.parseError})
 
-			recorder := call(t, router, http.MethodPost, "/api/v1/knowledge-bases/kb_1/documents", `{"file_id":"lib_1"}`)
+			recorder := callAs(t, router, http.MethodPost, "/api/v1/knowledge-bases/kb_1/documents", `{"file_id":"lib_1"}`)
 
 			if recorder.Code != test.wantStatus {
 				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, test.wantStatus, recorder.Body.String())
@@ -336,7 +338,7 @@ func TestRemoveDocumentRefusesOneInAnotherBase(t *testing.T) {
 	stub := &kbStub{document: kb.Document{ID: "doc_1", KBID: "kb_2"}}
 	router := newKBRouter(stub)
 
-	recorder := call(t, router, http.MethodDelete, "/api/v1/knowledge-bases/kb_1/documents/doc_1", "")
+	recorder := callAs(t, router, http.MethodDelete, "/api/v1/knowledge-bases/kb_1/documents/doc_1", "")
 
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404; body=%s", recorder.Code, recorder.Body.String())
@@ -350,11 +352,11 @@ func TestRebuildNeedsTheDocumentItIsRebuilding(t *testing.T) {
 	stub := &kbStub{document: testDocument()}
 	router := newKBRouter(stub)
 
-	if recorder := call(t, router, http.MethodPost, "/api/v1/knowledge-bases/kb_1/rebuild", ""); recorder.Code != http.StatusBadRequest {
+	if recorder := callAs(t, router, http.MethodPost, "/api/v1/knowledge-bases/kb_1/rebuild", ""); recorder.Code != http.StatusBadRequest {
 		t.Fatalf("no body: status = %d, want 400; body=%s", recorder.Code, recorder.Body.String())
 	}
 
-	recorder := call(t, router, http.MethodPost, "/api/v1/knowledge-bases/kb_1/rebuild", `{"document_id":"doc_1"}`)
+	recorder := callAs(t, router, http.MethodPost, "/api/v1/knowledge-bases/kb_1/rebuild", `{"document_id":"doc_1"}`)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -377,7 +379,7 @@ func TestSearchReturnsTheSourcesWithTheirLocators(t *testing.T) {
 	}}}}
 	router := newKBRouter(stub)
 
-	recorder := call(t, router, http.MethodPost, "/api/v1/knowledge-bases/kb_1/search", `{"query":"保修期多久","top_k":3}`)
+	recorder := callAs(t, router, http.MethodPost, "/api/v1/knowledge-bases/kb_1/search", `{"query":"保修期多久","top_k":3}`)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -404,7 +406,7 @@ func TestSearchWithNoMatchesIsAnEmptyListNotAnError(t *testing.T) {
 	stub := &kbStub{}
 	router := newKBRouter(stub)
 
-	recorder := call(t, router, http.MethodPost, "/api/v1/knowledge-bases/kb_1/search", `{"query":"保修期多久"}`)
+	recorder := callAs(t, router, http.MethodPost, "/api/v1/knowledge-bases/kb_1/search", `{"query":"保修期多久"}`)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -420,7 +422,7 @@ func TestSearchRepeatsTheQueryRule(t *testing.T) {
 	stub := &kbStub{err: fmt.Errorf("%w: it needs at least 2 characters", kb.ErrQueryTooShort)}
 	router := newKBRouter(stub)
 
-	recorder := call(t, router, http.MethodPost, "/api/v1/knowledge-bases/kb_1/search", `{"query":"a"}`)
+	recorder := callAs(t, router, http.MethodPost, "/api/v1/knowledge-bases/kb_1/search", `{"query":"a"}`)
 
 	raw := recorder.Body.String()
 	if recorder.Code != http.StatusBadRequest || !strings.Contains(raw, `"code":"query_too_short"`) {
@@ -435,7 +437,7 @@ func TestSetDefaultAnswersWithTheBase(t *testing.T) {
 	stub := &kbStub{base: testBase()}
 	router := newKBRouter(stub)
 
-	recorder := call(t, router, http.MethodPost, "/api/v1/knowledge-bases/kb_1/default", "")
+	recorder := callAs(t, router, http.MethodPost, "/api/v1/knowledge-bases/kb_1/default", "")
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -457,7 +459,7 @@ func TestAnUnconfiguredKnowledgeBaseAnswersRatherThanPanicking(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := newKBTestRouter(NewKBHandler(nil, nil))
 
-	recorder := call(t, router, http.MethodGet, "/api/v1/knowledge-bases", "")
+	recorder := callAs(t, router, http.MethodGet, "/api/v1/knowledge-bases", "")
 
 	if recorder.Code != http.StatusInternalServerError || !strings.Contains(recorder.Body.String(), "knowledge_bases") {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())

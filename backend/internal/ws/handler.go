@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sync"
 
+	"backend/internal/authz"
 	"backend/internal/httpx"
 	"backend/internal/middleware"
 	"github.com/coder/websocket"
@@ -58,7 +59,8 @@ func (h *Handler) Serve(c *gin.Context) {
 		httpx.WriteError(c, http.StatusInternalServerError, "websocket_unavailable", "the websocket endpoint is not configured")
 		return
 	}
-	if _, authenticated := middleware.CurrentUser(c); !authenticated {
+	user, authenticated := middleware.CurrentUser(c)
+	if !authenticated || user.UserID <= 0 {
 		httpx.WriteError(c, http.StatusUnauthorized, "authorization_required", "bearer token is required")
 		return
 	}
@@ -77,7 +79,11 @@ func (h *Handler) Serve(c *gin.Context) {
 		return
 	}
 
-	connection := newConn(socket, h.turns, h.logger, queueSize)
+	// The account is read here and carried on the connection, because this is the
+	// last place the request still has it: past the upgrade there is no gin
+	// context to ask, and a frame naming a conversation cannot say whose it is —
+	// a socket that could would be a socket that could claim somebody else's.
+	connection := newConn(socket, h.turns, authz.Caller{UserID: user.UserID, Role: user.Role}, h.logger, queueSize)
 	if !h.adopt(connection) {
 		_ = socket.Close(websocket.StatusGoingAway, "the server is shutting down")
 		return

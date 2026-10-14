@@ -27,6 +27,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"backend/internal/authz"
 )
 
 var (
@@ -99,18 +101,26 @@ func (l Locator) Validate() error {
 // being resolved; asking for the whole text and cutting it here would make this
 // layer a second reader of the document, and asking for a span keeps the
 // extractor, the offsets and the unit of "a character" V2's (§2.8).
+//
+// Every read carries the caller, because a document belongs to nobody of its own
+// (migration 00014 gave it no owner column): its ownership is the collection or
+// the file it came from, and the knowledge base is the one that can walk that
+// chain. A material whose document is another account's must not render its
+// text, and the read that would have rendered it is the place to say so — this
+// layer has no other view of who a document belongs to.
 type Documents interface {
 	// DocumentOfFile resolves an uploaded file to the document it was parsed
-	// into. A file no parse has reached yet reports ErrNotFound.
-	DocumentOfFile(ctx context.Context, fileID string) (Document, error)
+	// into. A file no parse has reached yet, or one belonging to another account,
+	// reports ErrNotFound.
+	DocumentOfFile(ctx context.Context, fileID string, caller authz.Caller) (Document, error)
 	// Document reads one document's metadata by its own id.
-	Document(ctx context.Context, documentID string) (Document, error)
+	Document(ctx context.Context, documentID string, caller authz.Caller) (Document, error)
 	// ChunkSpans lists the coordinates of a document's chunks, in reading order.
-	ChunkSpans(ctx context.Context, documentID string) ([]ChunkSpan, error)
+	ChunkSpans(ctx context.Context, documentID string, caller authz.Caller) ([]ChunkSpan, error)
 	// Text reads the characters of one document in [charStart, charEnd). The
 	// span is the caller's to have checked against the document's length, which
 	// is what lets storage clamp and this layer refuse.
-	Text(ctx context.Context, documentID string, charStart, charEnd int64) (string, error)
+	Text(ctx context.Context, documentID string, charStart, charEnd int64, caller authz.Caller) (string, error)
 }
 
 // Document is one parsed file, as the reading layer needs it.
@@ -148,8 +158,14 @@ type Material struct {
 	ContentID  string
 	Filename   string
 	SourceType string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// OwnerID is the account the material was built for, or zero for a row
+	// written before V5 (migration 00014 left every earlier row NULL). Zero is a
+	// state rather than a missing value, exactly as it is on a session: such a
+	// material belongs to nobody, is visible to the administrator and to nobody
+	// else, and no read here ever treats it as the caller's.
+	OwnerID   int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
 	// Pinned and Opened are the workspace tab's state about this material, and
 	// they are nil when the catalogue is read outside a workspace. Nil says
 	// nobody has said, which is not the same as false saying nobody has.

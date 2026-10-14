@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"backend/internal/authz"
 )
 
 // Laying the tree out.
@@ -45,7 +47,7 @@ type MapRequest struct {
 //     call — there is no way to say "this one is already there" — so a repeated
 //     call adds what it says again, and the way not to duplicate a knowledge
 //     point is not to write it twice.
-func (s *Service) Map(ctx context.Context, request MapRequest) (Path, error) {
+func (s *Service) Map(ctx context.Context, request MapRequest, caller authz.Caller) (Path, error) {
 	if len(request.Modules) == 0 {
 		return Path{}, fmt.Errorf("%w: no modules were named", ErrInvalidRequest)
 	}
@@ -111,5 +113,5 @@ func (s *Service) Map(ctx context.Context, request MapRequest) (Path, error) {
 			return Tree{}, nil, fmt.Errorf("encode the mapping of path %s: %w", request.PathID, err)
 		}
 		return next, payload, nil
-	})
+	}, caller)
 }

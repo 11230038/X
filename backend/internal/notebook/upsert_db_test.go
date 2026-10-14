@@ -220,7 +220,7 @@ func TestConcurrentUpsertsOfOneQuestionLeaveOneRow(t *testing.T) {
 			question := given
 			question.Explanation = offered[index]
 			results[index], errs[index] = repository.UpsertQuestion(
-				context.Background(), entryID, question, atSecond(0))
+				context.Background(), entryID, question, atSecond(0), testCaller())
 		}(index)
 	}
 	wait.Wait()

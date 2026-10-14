@@ -54,7 +54,7 @@ func TestDBCreatingAPathWritesTheWholeOfIt(t *testing.T) {
 		t.Errorf("%d links are stored, want the conversation that made it", got)
 	}
 
-	events, err := h.repository.Events(context.Background(), "mp_1")
+	events, err := h.repository.Events(context.Background(), "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the history: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestDBCreatingAPathWritesTheWholeOfIt(t *testing.T) {
 		t.Errorf("the creation is attributed to %+v, want %+v", events[0].Actor, actor)
 	}
 
-	meta, err := h.repository.Meta(context.Background(), "mp_1")
+	meta, err := h.repository.Meta(context.Background(), "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the metadata: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestDBCreatingAPathWritesTheWholeOfIt(t *testing.T) {
 	}
 
 	// And the path reads back whole: the same tree, byte for byte.
-	read, err := h.repository.Path(context.Background(), "mp_1")
+	read, err := h.repository.Path(context.Background(), "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the path back: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestDBTheVersionGuardIsWhatStandsBetweenTwoWriters(t *testing.T) {
 	updated, err := h.service.AddKnowledgePoint(ctx, AddKnowledgePointRequest{
 		Change: Change{PathID: "mp_1", Actor: first, Expected: &one},
 		ID:     "kp_new", Name: "值接收者", ModuleID: "m_basics",
-	})
+	}, h.caller)
 	if err != nil {
 		t.Fatalf("add a knowledge point: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestDBTheVersionGuardIsWhatStandsBetweenTwoWriters(t *testing.T) {
 	_, err = h.service.AddKnowledgePoint(ctx, AddKnowledgePointRequest{
 		Change: Change{PathID: "mp_1", Actor: second, Expected: &one},
 		ID:     "kp_late", Name: "指针接收者", ModuleID: "m_basics",
-	})
+	}, h.caller)
 	if !errors.Is(err, ErrStaleState) {
 		t.Fatalf("a write over a version that moved on: %v, want %v", err, ErrStaleState)
 	}
@@ -194,7 +194,7 @@ func TestDBAWriteThatLosesTheGuardTakesItsEventWithIt(t *testing.T) {
 	_, err := h.service.RemoveKnowledgePoint(context.Background(), RemoveKnowledgePointRequest{
 		Change: Change{PathID: "mp_1", Actor: actor},
 		ID:     "kp_nobody",
-	})
+	}, h.caller)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("removing a knowledge point that is not there: %v, want %v", err, ErrNotFound)
 	}
@@ -221,7 +221,7 @@ func TestDBAChangeThatFailsNeverLeavesAnEventBehind(t *testing.T) {
 		if err := repository.AppendEvent(context.Background(), Event{
 			ID: "mev_orphan", PathID: "mp_1", Type: EventPathMapped, Version: 2, Actor: actor,
 			CreatedAt: atTen,
-		}); err != nil {
+		}, h.caller); err != nil {
 			return err
 		}
 		return sentinel
@@ -229,7 +229,7 @@ func TestDBAChangeThatFailsNeverLeavesAnEventBehind(t *testing.T) {
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("Within() error = %v, want the caller's own", err)
 	}
-	events, err := h.repository.Events(context.Background(), "mp_1")
+	events, err := h.repository.Events(context.Background(), "mp_1", h.caller)
 	if err != nil {
 		t.Fatalf("read the history: %v", err)
 	}
@@ -249,13 +249,20 @@ func TestDBAVersionNobodyHasWrittenReadsAsZeroAndCanBeWritten(t *testing.T) {
 	// same statement as every other write, which is what keeps compare-and-swap
 	// from having a special case, and a special case in a CAS is where lost updates
 	// come from.
+	//
+	// The row is read as the administrator because owner_id is NULL too: migration
+	// 00014 left every pre-V5 row owned by nobody, and the scope the repository
+	// builds matches that column as `owner_id = ? OR owner_id IS NULL` for the
+	// administrator and `owner_id = ?` for everyone else. A path from before this
+	// version is therefore the administrator's to read, which is the state this case
+	// needs to exercise the version guard's own NULL handling.
 	if err := h.resource.GORM().Exec("INSERT INTO mastery_paths "+
 		"(mastery_path_id, owner_session_id, state_json, version, creat_time) "+
 		"VALUES ('mp_old', 's_1', NULL, NULL, ?)", atNine).Error; err != nil {
 		t.Fatalf("write a path nobody has changed: %v", err)
 	}
 
-	path, err := h.repository.Path(context.Background(), "mp_old")
+	path, err := h.repository.Path(context.Background(), "mp_old", h.admin)
 	if err != nil {
 		t.Fatalf("read it: %v", err)
 	}
@@ -267,11 +274,11 @@ func TestDBAVersionNobodyHasWrittenReadsAsZeroAndCanBeWritten(t *testing.T) {
 	}
 	// And the metadata is missing rather than empty, which is a different answer
 	// and one the caller has to be able to tell apart (Load reports the tree).
-	if _, err := h.repository.Meta(context.Background(), "mp_old"); !errors.Is(err, ErrNotFound) {
+	if _, err := h.repository.Meta(context.Background(), "mp_old", h.admin); !errors.Is(err, ErrNotFound) {
 		t.Errorf("reading the metadata of a path that has none: %v, want %v", err, ErrNotFound)
 	}
 
-	version, err := h.repository.SaveTree(context.Background(), "mp_old", 0, aTree(), atTen)
+	version, err := h.repository.SaveTree(context.Background(), "mp_old", 0, aTree(), atTen, h.admin)
 	if err != nil {
 		t.Fatalf("write the first tree: %v", err)
 	}
@@ -293,7 +300,7 @@ func TestDBAMetadataRowIsStartedOnceAndThenRewrittenInPlace(t *testing.T) {
 	// not a history: mastery_events is the tree's history, and a reworded goal is
 	// not a fact about the tree.
 	goal := "学会闭包和逃逸"
-	meta, err := h.service.UpdateMeta(ctx, MetaRequest{PathID: "mp_1", Goal: &goal})
+	meta, err := h.service.UpdateMeta(ctx, MetaRequest{PathID: "mp_1", Goal: &goal}, h.caller)
 	if err != nil {
 		t.Fatalf("rename the path: %v", err)
 	}
@@ -312,17 +319,19 @@ func TestDBAMetadataRowIsStartedOnceAndThenRewrittenInPlace(t *testing.T) {
 	}
 
 	// And a path from before this version has a tree and no metadata row; the first
-	// rewrite is how it gets one rather than a failure.
+	// rewrite is how it gets one rather than a failure. It is written as the
+	// administrator for the same reason as the case above: the row has no owner, so
+	// the account that can reach it is the one whose scope admits NULL.
 	if err := h.resource.GORM().Exec("INSERT INTO mastery_paths "+
 		"(mastery_path_id, owner_session_id, state_json, version, creat_time) "+
 		"VALUES ('mp_old', 's_1', '{}', 1, ?)", atNine).Error; err != nil {
 		t.Fatalf("write an old path: %v", err)
 	}
 	description := "从零开始"
-	if _, err := h.service.UpdateMeta(ctx, MetaRequest{PathID: "mp_old", Description: &description}); err != nil {
+	if _, err := h.service.UpdateMeta(ctx, MetaRequest{PathID: "mp_old", Description: &description}, h.admin); err != nil {
 		t.Fatalf("write metadata for a path that has none: %v", err)
 	}
-	read, err := h.repository.Meta(ctx, "mp_old")
+	read, err := h.repository.Meta(ctx, "mp_old", h.admin)
 	if err != nil {
 		t.Fatalf("read it back: %v", err)
 	}
@@ -333,7 +342,7 @@ func TestDBAMetadataRowIsStartedOnceAndThenRewrittenInPlace(t *testing.T) {
 	// in MP-01–05 reads the column, so accepting "archived" would be inventing a
 	// vocabulary and then not honouring it.
 	archived := "archived"
-	if _, err := h.service.UpdateMeta(ctx, MetaRequest{PathID: "mp_1", Status: &archived}); err == nil {
+	if _, err := h.service.UpdateMeta(ctx, MetaRequest{PathID: "mp_1", Status: &archived}, h.caller); err == nil {
 		t.Error("a status this version does not write was accepted")
 	}
 }

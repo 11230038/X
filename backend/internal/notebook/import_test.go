@@ -77,7 +77,7 @@ func TestTheImportReadsAFileOfQuestions(t *testing.T) {
 		line("什么是闭包", nil),
 		line("下面哪个是闭包", nil),
 		line("闭包捕获的是什么", nil),
-	), true)
+	), true, testCaller())
 	if err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
@@ -113,7 +113,7 @@ func TestAPreviewWritesNothing(t *testing.T) {
 		line("什么是闭包", nil),
 		line("一道没有答案的题", map[string]any{"correct_answer": ""}),
 		line("什么是闭包", nil),
-	), true)
+	), true, testCaller())
 	if err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
@@ -145,11 +145,11 @@ func TestTheReportAndTheCommitAreOneWalkOverOneFile(t *testing.T) {
 		"这不是 JSON",
 	)
 
-	preview, err := service.Import(context.Background(), input, true)
+	preview, err := service.Import(context.Background(), input, true, testCaller())
 	if err != nil {
 		t.Fatalf("Import(dry run) error = %v", err)
 	}
-	commit, err := service.Import(context.Background(), input, false)
+	commit, err := service.Import(context.Background(), input, false, testCaller())
 	if err != nil {
 		t.Fatalf("Import(commit) error = %v", err)
 	}
@@ -189,7 +189,7 @@ func TestALineWithoutAnAnswerIsReportedAndNotWritten(t *testing.T) {
 
 	report, err := service.Import(context.Background(), file(
 		line("一道没有答案的题", map[string]any{"correct_answer": ""}),
-	), false)
+	), false, testCaller())
 	if err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
@@ -216,7 +216,7 @@ func TestAQuestionTheBankAlreadyHoldsIsNotWrittenAgain(t *testing.T) {
 	service, repository := newFakeService(t)
 	repository.withQuestion(theSameQuestionAs("什么是闭包"))
 
-	report, err := service.Import(context.Background(), file(line("什么是闭包", nil)), false)
+	report, err := service.Import(context.Background(), file(line("什么是闭包", nil)), false, testCaller())
 	if err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
@@ -242,7 +242,7 @@ func TestTheSameQuestionWrittenDifferentlyIsAnOverwrite(t *testing.T) {
 	held.Explanation = "旧的说法"
 	repository.withQuestion(held)
 
-	report, err := service.Import(context.Background(), file(line("什么是闭包", nil)), false)
+	report, err := service.Import(context.Background(), file(line("什么是闭包", nil)), false, testCaller())
 	if err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
@@ -268,7 +268,7 @@ func TestSpacingAloneIsEnoughToMakeItAContentChange(t *testing.T) {
 	service, repository := newFakeService(t)
 	repository.withQuestion(theSameQuestionAs("什么是 闭包"))
 
-	report, err := service.Import(context.Background(), file(line("什么是  闭包", nil)), false)
+	report, err := service.Import(context.Background(), file(line("什么是  闭包", nil)), false, testCaller())
 	if err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
@@ -293,7 +293,7 @@ func TestTheSameTextUnderAnotherTypeIsADuplicate(t *testing.T) {
 	repository.withQuestion(fillIn)
 	held := QuestionID(fillIn.Text, fillIn.Type)
 
-	report, err := service.Import(context.Background(), file(line("什么是闭包", nil)), false)
+	report, err := service.Import(context.Background(), file(line("什么是闭包", nil)), false, testCaller())
 	if err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
@@ -324,7 +324,7 @@ func TestAFileThatRepeatsItselfIsReportedAsADuplicate(t *testing.T) {
 		line("什么是闭包", nil),
 		line("哪一个是闭包", nil),
 		line("什么是闭包", nil),
-	), false)
+	), false, testCaller())
 	if err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
@@ -381,7 +381,7 @@ func TestALineThatIsNotAQuestionIsReportedWithItsLineNumber(t *testing.T) {
 		t.Run(scenario.name, func(t *testing.T) {
 			service, repository := newFakeService(t)
 			report, err := service.Import(context.Background(),
-				file(line("什么是闭包", nil), scenario.bad), false)
+				file(line("什么是闭包", nil), scenario.bad), false, testCaller())
 			if err != nil {
 				t.Fatalf("Import() error = %v", err)
 			}
@@ -421,7 +421,7 @@ func TestTheCountsAreTheLinesOfTheFile(t *testing.T) {
 			line("没有答案的题", map[string]any{"correct_answer": ""}),
 			line("银行里已经有的那道题", nil),
 			"这不是 JSON",
-		)+"\n", false)
+		)+"\n", false, testCaller())
 	if err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
@@ -458,7 +458,7 @@ func TestTheAnswerIsStoredInTheFormTheJudgeReads(t *testing.T) {
 			"correct_answer": " 变量 | 变量的值 ",
 			"options":        nil,
 		}),
-	), false)
+	), false, testCaller())
 	if err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
@@ -485,13 +485,13 @@ func TestTheImportReportsWhatStorageSaid(t *testing.T) {
 
 	service, repository := newFakeService(t)
 	repository.entryErr = failure
-	if _, err := service.Import(context.Background(), file(line("什么是闭包", nil)), true); !errors.Is(err, failure) {
+	if _, err := service.Import(context.Background(), file(line("什么是闭包", nil)), true, testCaller()); !errors.Is(err, failure) {
 		t.Errorf("Import() over a bank that could not be read = %v, want the failure storage reported", err)
 	}
 
 	service, repository = newFakeService(t)
 	repository.upsertErr = failure
-	if _, err := service.Import(context.Background(), file(line("什么是闭包", nil)), false); !errors.Is(err, failure) {
+	if _, err := service.Import(context.Background(), file(line("什么是闭包", nil)), false, testCaller()); !errors.Is(err, failure) {
 		t.Errorf("Import() over a write that failed = %v, want the failure storage reported", err)
 	}
 }

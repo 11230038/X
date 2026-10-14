@@ -12,6 +12,7 @@ package dashboard
 // their own packages.
 
 import (
+	"backend/internal/authz"
 	"context"
 	"errors"
 	"strings"
@@ -51,7 +52,7 @@ func (p *pathsStub) List(context.Context, mastery.ListRequest) ([]mastery.Summar
 	return p.rows, p.listErr
 }
 
-func (p *pathsStub) Insight(_ context.Context, pathID string) (mastery.Insight, error) {
+func (p *pathsStub) Insight(_ context.Context, pathID string, _ authz.Caller) (mastery.Insight, error) {
 	p.asked = append(p.asked, pathID)
 	if err := p.readErr[pathID]; err != nil {
 		return mastery.Insight{}, err
@@ -65,10 +66,14 @@ type reviewsStub struct {
 	limit int
 }
 
-func (r *reviewsStub) Queue(_ context.Context, limit int) ([]practice.QueueItem, error) {
+func (r *reviewsStub) Queue(_ context.Context, limit int, _ authz.Caller) ([]practice.QueueItem, error) {
 	r.limit = limit
 	return r.rows, r.err
 }
+
+// testCaller is the account every case reads for. The dashboard is one
+// person's page, so there is exactly one of these and no case varies it.
+var testCaller = authz.Caller{UserID: 1, Role: authz.RoleUser}
 
 // dashboard builds a service over the three, with the limit a case chooses.
 func dashboard(t *testing.T, limit int, s *sessionsStub, p *pathsStub, r *reviewsStub) *Service {
@@ -112,7 +117,7 @@ func studying(pathID, pointID, name string) mastery.Insight {
 
 func TestReadingAPersonWithNothingGivesFourEmptyLists(t *testing.T) {
 	sessions, paths, reviews := empty()
-	view, err := dashboard(t, 10, sessions, paths, reviews).Read(context.Background())
+	view, err := dashboard(t, 10, sessions, paths, reviews).Read(context.Background(), testCaller)
 	if err != nil {
 		t.Fatalf("read the dashboard: %v", err)
 	}
@@ -139,7 +144,7 @@ func TestTheLimitIsTheSameWindowForEveryCategory(t *testing.T) {
 		paths.insights[id] = studying(id, "kp_1", "闭包")
 	}
 
-	view, err := dashboard(t, 2, sessions, paths, reviews).Read(context.Background())
+	view, err := dashboard(t, 2, sessions, paths, reviews).Read(context.Background(), testCaller)
 	if err != nil {
 		t.Fatalf("read the dashboard: %v", err)
 	}
@@ -189,7 +194,7 @@ func TestAnEntryThatCannotBeOpenedIsDroppedAndTheRestAreKept(t *testing.T) {
 		{Question: notebook.Question{QuestionID: "qn_3", Text: "第三种"}, Reason: practice.QueueReason("later")},
 	}
 
-	view, err := dashboard(t, 10, sessions, paths, reviews).Read(context.Background())
+	view, err := dashboard(t, 10, sessions, paths, reviews).Read(context.Background(), testCaller)
 	if err != nil {
 		t.Fatalf("read the dashboard: %v", err)
 	}
@@ -249,7 +254,7 @@ func TestARecommendationWithoutGroundsIsNotShown(t *testing.T) {
 		},
 	}
 
-	view, err := dashboard(t, 10, sessions, paths, reviews).Read(context.Background())
+	view, err := dashboard(t, 10, sessions, paths, reviews).Read(context.Background(), testCaller)
 	if err != nil {
 		t.Fatalf("read the dashboard: %v", err)
 	}
@@ -284,7 +289,7 @@ func TestAMoveInAWordThisPackageDoesNotKnowIsNotShown(t *testing.T) {
 		},
 	}
 
-	view, err := dashboard(t, 10, sessions, paths, reviews).Read(context.Background())
+	view, err := dashboard(t, 10, sessions, paths, reviews).Read(context.Background(), testCaller)
 	if err != nil {
 		t.Fatalf("a step kind this build does not know failed the whole read: %v", err)
 	}
@@ -308,7 +313,7 @@ func TestAMoveThatCannotBeDrawnIsAnErrorRatherThanASilentDrop(t *testing.T) {
 		},
 	}
 
-	_, err := dashboard(t, 10, sessions, paths, reviews).Read(context.Background())
+	_, err := dashboard(t, 10, sessions, paths, reviews).Read(context.Background(), testCaller)
 	if !errors.Is(err, ErrInvalidEntry) {
 		t.Fatalf("a move with no reason: %v, want %v", err, ErrInvalidEntry)
 	}
@@ -335,7 +340,7 @@ func TestASourceThatWillNotAnswerFailsTheWholeRead(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			sessions, paths, reviews := empty()
 			testCase.breakIt(sessions, paths, reviews)
-			_, err := dashboard(t, 10, sessions, paths, reviews).Read(context.Background())
+			_, err := dashboard(t, 10, sessions, paths, reviews).Read(context.Background(), testCaller)
 			if !errors.Is(err, broken) {
 				t.Fatalf("reading with %s broken: %v, want the source's own error", testCase.name, err)
 			}
@@ -350,7 +355,7 @@ func TestASourceThatWillNotAnswerFailsTheWholeRead(t *testing.T) {
 	sessions, paths, reviews := empty()
 	paths.rows = []mastery.Summary{summary("mp_a", "学会闭包", 1, 3, atNine, time.Time{})}
 	paths.readErr["mp_a"] = broken
-	if _, err := dashboard(t, 10, sessions, paths, reviews).Read(context.Background()); !errors.Is(err, broken) {
+	if _, err := dashboard(t, 10, sessions, paths, reviews).Read(context.Background(), testCaller); !errors.Is(err, broken) {
 		t.Fatalf("reading with a path's insight broken: %v, want the source's own error", err)
 	}
 }

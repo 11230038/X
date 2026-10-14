@@ -20,9 +20,20 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/data"
 	"backend/internal/data/testdb"
 )
+
+// dbCaller is the account the storage contract tests read as.
+//
+// Every fixture row here is written by SQL with no owner_id, so it is a row from
+// before V5: visible to the administrator, whose scope is `owner_id = ? OR
+// owner_id IS NULL`, and to nobody else. Reading as the administrator is what
+// keeps these tests about the SQL the adapter writes — order, composite keys,
+// cascades — rather than about the filter, which has its own two accounts further
+// down the file.
+var dbCaller = authz.Caller{UserID: 1, Role: authz.RoleAdmin}
 
 // dbTables are the tables these tests write, children first. sessions comes last
 // because three of the reading tables are foreign keys into it, and emptying it
@@ -98,7 +109,7 @@ func countRows(t *testing.T, resource *data.Resource, table string) int64 {
 // catalogueIDs is a listing by id, which is what its order is about.
 func catalogueIDs(t *testing.T, repo *GORMRepository, workspaceID string) []string {
 	t.Helper()
-	materials, err := repo.Materials(context.Background(), workspaceID)
+	materials, err := repo.Materials(context.Background(), workspaceID, dbCaller)
 	if err != nil {
 		t.Fatalf("list the catalogue: %v", err)
 	}
@@ -113,7 +124,7 @@ func catalogueIDs(t *testing.T, repo *GORMRepository, workspaceID string) []stri
 // said" can be told from "somebody said no".
 func pinnedOf(t *testing.T, repo *GORMRepository, workspaceID, materialID string) (string, string) {
 	t.Helper()
-	materials, err := repo.Materials(context.Background(), workspaceID)
+	materials, err := repo.Materials(context.Background(), workspaceID, dbCaller)
 	if err != nil {
 		t.Fatalf("list the catalogue: %v", err)
 	}
@@ -157,7 +168,7 @@ func TestDBTheCatalogueIsMostRecentlyTouchedFirstThenByID(t *testing.T) {
 
 	// The row itself is what the fixture wrote, or the order above is asserting
 	// against a clock the fixture does not control.
-	material, err := repo.Material(context.Background(), "rm_a")
+	material, err := repo.Material(context.Background(), "rm_a", dbCaller)
 	if err != nil {
 		t.Fatalf("read a material back: %v", err)
 	}
@@ -222,22 +233,22 @@ func TestDBAMaterialIsFoundByItsIDAndByItsDocument(t *testing.T) {
 	// one a reader gets must not change between runs: the order is spelled out
 	// rather than left to the storage engine.
 	ctx := context.Background()
-	found, err := repo.MaterialOfContent(ctx, "doc_1")
+	found, err := repo.MaterialOfContent(ctx, "doc_1", dbCaller)
 	if err != nil {
 		t.Fatalf("read the material of a document: %v", err)
 	}
 	if found.MaterialID != "rm_early" {
 		t.Errorf("the material of doc_1 is %q, want the earliest row", found.MaterialID)
 	}
-	if _, err := repo.MaterialOfContent(ctx, "doc_nobody_parsed"); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.MaterialOfContent(ctx, "doc_nobody_parsed", dbCaller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a document with no material: %v, want %v", err, ErrNotFound)
 	}
 	// A blank document id is not a document that no material reads: there is
 	// nothing to look up, and the answer is the same one.
-	if _, err := repo.MaterialOfContent(ctx, ""); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.MaterialOfContent(ctx, "", dbCaller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("reading the material of no document: %v, want %v", err, ErrNotFound)
 	}
-	if _, err := repo.Material(ctx, "rm_missing"); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.Material(ctx, "rm_missing", dbCaller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("reading a material that is not there: %v, want %v", err, ErrNotFound)
 	}
 }
@@ -250,7 +261,7 @@ func TestDBAMaterialPointsAtWhateverItsSourceNames(t *testing.T) {
 	// being consulted or required.
 	storeMaterialRow(t, resource, "rm_1", "whatever:not-a-document-id", atSecond(1), nil)
 
-	material, err := repo.Material(context.Background(), "rm_1")
+	material, err := repo.Material(context.Background(), "rm_1", dbCaller)
 	if err != nil {
 		t.Fatalf("read a material: %v", err)
 	}
@@ -265,7 +276,7 @@ func TestDBAMaterialPointsAtWhateverItsSourceNames(t *testing.T) {
 	testdb.Exec(t, resource, "INSERT INTO reading_materials "+
 		"(material_id, content_id, filename, source_type, creat_time) VALUES (?, NULL, NULL, NULL, ?)",
 		"rm_2", atSecond(2))
-	material, err = repo.Material(context.Background(), "rm_2")
+	material, err = repo.Material(context.Background(), "rm_2", dbCaller)
 	if err != nil {
 		t.Fatalf("read a material with no document: %v", err)
 	}
@@ -314,11 +325,100 @@ func TestDBCreateMaterialWritesTheEmptyColumnsAsNothing(t *testing.T) {
 	// that matters: it is what the catalogue is ordered by, so an adapter that
 	// dropped it would file every material the moment it was made at the bottom
 	// of the list of everything the reader has touched.
-	material, err := repo.Material(context.Background(), "rm_1")
+	material, err := repo.Material(context.Background(), "rm_1", dbCaller)
 	if err != nil {
 		t.Fatalf("read it back: %v", err)
 	}
 	if !material.CreatedAt.Equal(atSecond(3)) || !material.UpdatedAt.Equal(atSecond(3)) {
 		t.Errorf("the created material reads %+v, want the two times it was written with", material)
+	}
+}
+
+// storeOwnedMaterialRow writes a catalogue row owned by one account. It is the
+// other half of storeMaterialRow: that one writes the NULL owner every row from
+// before V5 carries, and this one writes the owner a row made after V5 has.
+func storeOwnedMaterialRow(t *testing.T, resource *data.Resource, id, contentID string, owner int64, at time.Time) {
+	t.Helper()
+	testdb.Exec(t, resource, "INSERT INTO reading_materials "+
+		"(material_id, content_id, filename, source_type, creat_time, update_time, owner_id) "+
+		"VALUES (?, ?, ?, ?, ?, ?, ?)", id, contentID, "算法笔记.md", "library", at, at, owner)
+}
+
+// TestDBOneAccountsCatalogueIsNotAnothers is ownership as a filter rather than a
+// check: each account's listing contains its own materials and not the other's,
+// and an id belonging to the other account is answered exactly as an id that was
+// never issued — not as a refusal that would say the row exists.
+func TestDBOneAccountsCatalogueIsNotAnothers(t *testing.T) {
+	repo, resource := newDBRepository(t)
+	storeOwnedMaterialRow(t, resource, "rm_alice", "doc_a", 7, atSecond(1))
+	storeOwnedMaterialRow(t, resource, "rm_bob", "doc_b", 8, atSecond(2))
+
+	alice := authz.Caller{UserID: 7, Role: authz.RoleUser}
+	bob := authz.Caller{UserID: 8, Role: authz.RoleUser}
+	ctx := context.Background()
+
+	// The listing is narrowed before a row is ever returned, so account 7 never
+	// sees account 8's material and vice versa.
+	listingOf := func(caller authz.Caller) []string {
+		t.Helper()
+		materials, err := repo.Materials(ctx, "", caller)
+		if err != nil {
+			t.Fatalf("list the catalogue: %v", err)
+		}
+		ids := make([]string, 0, len(materials))
+		for _, material := range materials {
+			ids = append(ids, material.MaterialID)
+		}
+		return ids
+	}
+	if got := listingOf(alice); !slices.Equal(got, []string{"rm_alice"}) {
+		t.Errorf("account 7's catalogue is %v, want only its own material", got)
+	}
+	if got := listingOf(bob); !slices.Equal(got, []string{"rm_bob"}) {
+		t.Errorf("account 8's catalogue is %v, want only its own material", got)
+	}
+
+	// A read by id of the other account's material is the same answer a row that is
+	// not there gets: another account's material is not one this caller may know
+	// the name of.
+	if _, err := repo.Material(ctx, "rm_alice", bob); !errors.Is(err, ErrNotFound) {
+		t.Errorf("account 8 reading account 7's material = %v, want %v", err, ErrNotFound)
+	}
+	if _, err := repo.Material(ctx, "rm_bob", alice); !errors.Is(err, ErrNotFound) {
+		t.Errorf("account 7 reading account 8's material = %v, want %v", err, ErrNotFound)
+	}
+	// The row is not gone; it is the caller's scope that removed it. The
+	// administrator, whose scope admits every row, reads it back.
+	if _, err := repo.Material(ctx, "rm_alice", dbCaller); err != nil {
+		t.Errorf("the administrator reading an owned material = %v, want it found", err)
+	}
+}
+
+// TestDBAMarkIsNarrowedThroughItsMaterial is the derived-table rule for one of the
+// rows that carries no owner column of its own: a mark is reachable only through a
+// material the caller may read, so the other account's mark is a mark that is not
+// there.
+func TestDBAMarkIsNarrowedThroughItsMaterial(t *testing.T) {
+	repo, resource := newDBRepository(t)
+	storeOwnedMaterialRow(t, resource, "rm_alice", "doc_a", 7, atSecond(1))
+	testdb.Exec(t, resource, "INSERT INTO reading_marks "+
+		"(mark_id, material_id, kind, locator_json, revision, creat_time) VALUES (?, ?, ?, ?, ?, ?)",
+		"rmk_1", "rm_alice", "bookmark",
+		`{"material_id":"rm_alice","ordinal":0,"char_start":0,"char_end":0}`, 1, atSecond(1))
+
+	bob := authz.Caller{UserID: 8, Role: authz.RoleUser}
+	alice := authz.Caller{UserID: 7, Role: authz.RoleUser}
+	ctx := context.Background()
+
+	if _, err := repo.Mark(ctx, "rmk_1", bob); !errors.Is(err, ErrNotFound) {
+		t.Errorf("account 8 reading a mark on account 7's material = %v, want %v", err, ErrNotFound)
+	}
+	if marks, err := repo.Marks(ctx, "rm_alice", bob); err != nil || len(marks) != 0 {
+		t.Errorf("account 8 listing account 7's marks = %v/%v, want none", marks, err)
+	}
+	// The caller who owns the material reads it back, so the filter is a scope and
+	// not a wall.
+	if mark, err := repo.Mark(ctx, "rmk_1", alice); err != nil || mark.MarkID != "rmk_1" {
+		t.Errorf("account 7 reading its own mark = %+v/%v, want the row", mark, err)
 	}
 }

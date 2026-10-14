@@ -9,16 +9,42 @@ import (
 	"fmt"
 	"strings"
 
+	"backend/internal/authz"
+	"backend/internal/data"
 	"backend/internal/data/models"
 	"gorm.io/gorm"
 )
 
-func (r *GORMRepository) Document(ctx context.Context, documentID string) (Document, error) {
+// documentScope narrows a documents query to the rows one caller may read.
+//
+// A document carries no owner column — it is not a thing a person makes, it is
+// what a parser produced from something they do have — so its ownership is
+// derived twice over, once from the collection it sits in and once from the file
+// it was read out of. A row reaches the caller when *either* holds: the base is
+// theirs, or there is no base at all and the file is theirs. Attachments are the
+// second half and are not an afterthought: a document with kb_id NULL is what a
+// turn's uploaded file becomes, and it has no collection to be owned through.
+//
+// The whole predicate is one parenthesised WHERE, because GORM ANDs it against
+// whatever the caller has already built. Left unparenthesised the OR would
+// swallow the caller's own conditions and widen the query instead of narrowing
+// it — the failure mode that returns more rows than asked for while every test
+// that reads one row passes.
+func documentScope(db *gorm.DB, caller authz.Caller) *gorm.DB {
+	bases := data.OwnerScope(db.Model(&models.KnowledgeBase{}).Select("kb_id"),
+		caller.UserID, caller.IsAdmin(), "owner_id")
+	files := data.OwnerScope(db.Model(&models.LibraryFile{}).Select("file_id"),
+		caller.UserID, caller.IsAdmin(), "owner_id")
+	return db.Where("(kb_id IN (?) OR (kb_id IS NULL AND file_id IN (?)))", bases, files)
+}
+
+func (r *GORMRepository) Document(ctx context.Context, documentID string, caller authz.Caller) (Document, error) {
 	if err := r.ready(); err != nil {
 		return Document{}, err
 	}
 	var model models.Document
-	if err := r.db.WithContext(ctx).First(&model, "document_id = ?", documentID).Error; err != nil {
+	query := documentScope(r.db.WithContext(ctx), caller)
+	if err := query.First(&model, "document_id = ?", documentID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return Document{}, fmt.Errorf("%w: document %s", ErrNotFound, documentID)
 		}
@@ -33,12 +59,13 @@ func (r *GORMRepository) Document(ctx context.Context, documentID string) (Docum
 // `<=>` is MySQL's null-safe equality, and it is doing real work here: the
 // attachment case passes NULL, where `= NULL` matches nothing at all and would
 // make every attachment look like a file that was never parsed.
-func (r *GORMRepository) DocumentForFile(ctx context.Context, fileID, kbID string) (Document, error) {
+func (r *GORMRepository) DocumentForFile(ctx context.Context, fileID, kbID string, caller authz.Caller) (Document, error) {
 	if err := r.ready(); err != nil {
 		return Document{}, err
 	}
 	var model models.Document
-	err := r.db.WithContext(ctx).
+	query := documentScope(r.db.WithContext(ctx), caller)
+	err := query.
 		Where("file_id = ? AND kb_id <=> ?", fileID, nullableString(kbID)).
 		First(&model).Error
 	if err != nil {
@@ -57,12 +84,13 @@ func (r *GORMRepository) DocumentForFile(ctx context.Context, fileID, kbID strin
 // second query: `kb_id IS NULL` sorts true first under DESC. After that the
 // oldest document is taken, which is the one every rebuild of the same bytes is
 // a newer revision of.
-func (r *GORMRepository) DocumentOfFile(ctx context.Context, fileID string) (Document, error) {
+func (r *GORMRepository) DocumentOfFile(ctx context.Context, fileID string, caller authz.Caller) (Document, error) {
 	if err := r.ready(); err != nil {
 		return Document{}, err
 	}
 	var model models.Document
-	err := r.db.WithContext(ctx).
+	query := documentScope(r.db.WithContext(ctx), caller)
+	err := query.
 		Where("file_id = ?", fileID).
 		Order("kb_id IS NULL DESC, creat_time ASC, document_id ASC").
 		First(&model).Error
@@ -77,11 +105,11 @@ func (r *GORMRepository) DocumentOfFile(ctx context.Context, fileID string) (Doc
 
 // Documents lists a base's documents in the order they were added, or an empty
 // base's nothing when kbID is empty.
-func (r *GORMRepository) Documents(ctx context.Context, kbID string) ([]Document, error) {
+func (r *GORMRepository) Documents(ctx context.Context, kbID string, caller authz.Caller) ([]Document, error) {
 	if err := r.ready(); err != nil {
 		return nil, err
 	}
-	query := r.db.WithContext(ctx).Model(&models.Document{})
+	query := documentScope(r.db.WithContext(ctx), caller).Model(&models.Document{})
 	if kbID == "" {
 		query = query.Where("kb_id IS NULL")
 	} else {
@@ -121,12 +149,12 @@ func (r *GORMRepository) CreateDocument(ctx context.Context, write DocumentWrite
 // started at the same moment would otherwise both write revision n+1 (the chunk
 // ids would collide) or both move the pointer, and the second would win with
 // chunks whose text nobody chose.
-func (r *GORMRepository) ReplaceRevision(ctx context.Context, write DocumentWrite, fromRevision int) error {
+func (r *GORMRepository) ReplaceRevision(ctx context.Context, write DocumentWrite, fromRevision int, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
 		return err
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&models.Document{}).
+		result := documentScope(tx.Model(&models.Document{}), caller).
 			Where("document_id = ? AND active_revision = ?", write.Document.ID, fromRevision).
 			Updates(map[string]any{
 				"engine":          write.Document.Engine,
@@ -150,7 +178,11 @@ func (r *GORMRepository) ReplaceRevision(ctx context.Context, write DocumentWrit
 			return fmt.Errorf("move the active revision: %w", result.Error)
 		}
 		if result.RowsAffected == 0 {
-			if _, err := r.Document(ctx, write.Document.ID); err != nil {
+			// The re-read tells the two ways this can happen apart, and it is the
+			// scoped read: a document the caller cannot see is reported as missing
+			// rather than as a lost race, so that a rebuild aimed at somebody
+			// else's document says nothing about whether that document exists.
+			if _, err := r.Document(ctx, write.Document.ID, caller); err != nil {
 				return err
 			}
 			return fmt.Errorf("%w: document %s is not at revision %d",
@@ -161,11 +193,12 @@ func (r *GORMRepository) ReplaceRevision(ctx context.Context, write DocumentWrit
 }
 
 // DeleteDocument removes a document and its chunks.
-func (r *GORMRepository) DeleteDocument(ctx context.Context, documentID string) error {
+func (r *GORMRepository) DeleteDocument(ctx context.Context, documentID string, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
 		return err
 	}
-	result := r.db.WithContext(ctx).Delete(&models.Document{}, "document_id = ?", documentID)
+	query := documentScope(r.db.WithContext(ctx), caller)
+	result := query.Delete(&models.Document{}, "document_id = ?", documentID)
 	if result.Error != nil {
 		return fmt.Errorf("delete document: %w", result.Error)
 	}

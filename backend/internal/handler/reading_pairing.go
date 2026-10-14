@@ -83,7 +83,11 @@ func (h *ReadingHandler) Pairings(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	answer, err := h.readings.Pairings(c.Request.Context(), c.Param("materialID"))
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	answer, err := h.readings.Pairings(c.Request.Context(), c.Param("materialID"), account)
 	if err != nil {
 		h.fail(c, "list_pairings_failed", err)
 		return
@@ -118,10 +122,14 @@ func (h *ReadingHandler) ConfirmPairing(c *gin.Context) {
 	if !readJSON(c, maxReadingRequestBytes, &request) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	pairing, err := h.readings.ConfirmPairing(c.Request.Context(), reading.PairingRequest{
 		MaterialID:            materialID,
 		CounterpartMaterialID: strings.TrimSpace(request.CounterpartMaterialID),
-	})
+	}, account)
 	if err != nil {
 		h.fail(c, "confirm_pairing_failed", err)
 		return
@@ -141,7 +149,11 @@ func (h *ReadingHandler) CancelPairing(c *gin.Context) {
 		return
 	}
 	pairingID := c.Param("pairingID")
-	cancelled, err := h.readings.CancelPairing(c.Request.Context(), pairingID)
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	cancelled, err := h.readings.CancelPairing(c.Request.Context(), pairingID, account)
 	if err != nil {
 		h.fail(c, "cancel_pairing_failed", err)
 		return

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/httpx"
 	"backend/internal/session"
 	"github.com/gin-gonic/gin"
@@ -16,14 +17,18 @@ import (
 
 // Sessions is the session use case consumed by the HTTP handler.
 type Sessions interface {
-	Create(context.Context) (session.Session, error)
-	Get(context.Context, string) (session.Session, error)
+	Create(context.Context, authz.Caller) (session.Session, error)
+	Get(context.Context, string, authz.Caller) (session.Session, error)
 	List(context.Context, session.ListOptions) ([]session.Session, error)
-	Rename(context.Context, string, string) (session.Session, error)
-	SoftDelete(context.Context, string) error
-	Restore(context.Context, string) error
-	DeletePermanently(context.Context, string) error
-	Messages(context.Context, string) ([]session.Message, error)
+	Rename(context.Context, string, string, authz.Caller) (session.Session, error)
+	SoftDelete(context.Context, string, authz.Caller) error
+	Restore(context.Context, string, authz.Caller) error
+	DeletePermanently(context.Context, string, authz.Caller) error
+	// Claim takes over a session that belongs to no account (§2.5). It is the
+	// exit from the state every row written before V5 is in, and the only write
+	// here whose subject is not something the caller already had.
+	Claim(context.Context, string, authz.Caller) error
+	Messages(context.Context, string, authz.Caller) ([]session.Message, error)
 }
 
 // SessionHandler handles the session list, its titles, its recycle bin and its
@@ -79,7 +84,11 @@ func (h *SessionHandler) Create(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	created, err := h.sessions.Create(c.Request.Context())
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	created, err := h.sessions.Create(c.Request.Context(), account)
 	if err != nil {
 		h.fail(c, "create_session_failed", err)
 		return
@@ -92,12 +101,16 @@ func (h *SessionHandler) List(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	deleted, err := boolParam(c, "deleted")
 	if err != nil {
 		httpx.WriteError(c, http.StatusBadRequest, "invalid_query", err.Error())
 		return
 	}
-	options := session.ListOptions{Deleted: deleted}
+	options := session.ListOptions{Caller: account, Deleted: deleted}
 	if options.Limit, err = intParam(c, "limit"); err != nil {
 		httpx.WriteError(c, http.StatusBadRequest, "invalid_query", err.Error())
 		return
@@ -128,7 +141,11 @@ func (h *SessionHandler) Get(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	record, err := h.sessions.Get(c.Request.Context(), c.Param("sessionID"))
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	record, err := h.sessions.Get(c.Request.Context(), c.Param("sessionID"), account)
 	if err != nil {
 		h.fail(c, "get_session_failed", err)
 		return
@@ -145,7 +162,11 @@ func (h *SessionHandler) Rename(c *gin.Context) {
 	if !readJSON(c, maxSessionRequestBytes, &request) {
 		return
 	}
-	renamed, err := h.sessions.Rename(c.Request.Context(), c.Param("sessionID"), request.Title)
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	renamed, err := h.sessions.Rename(c.Request.Context(), c.Param("sessionID"), request.Title, account)
 	if err != nil {
 		h.fail(c, "rename_session_failed", err)
 		return
@@ -158,7 +179,11 @@ func (h *SessionHandler) SoftDelete(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	if err := h.sessions.SoftDelete(c.Request.Context(), c.Param("sessionID")); err != nil {
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	if err := h.sessions.SoftDelete(c.Request.Context(), c.Param("sessionID"), account); err != nil {
 		h.fail(c, "delete_session_failed", err)
 		return
 	}
@@ -170,13 +195,46 @@ func (h *SessionHandler) Restore(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	if err := h.sessions.Restore(c.Request.Context(), c.Param("sessionID")); err != nil {
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	if err := h.sessions.Restore(c.Request.Context(), c.Param("sessionID"), account); err != nil {
 		h.fail(c, "restore_session_failed", err)
 		return
 	}
-	record, err := h.sessions.Get(c.Request.Context(), c.Param("sessionID"))
+	record, err := h.sessions.Get(c.Request.Context(), c.Param("sessionID"), account)
 	if err != nil {
 		h.fail(c, "restore_session_failed", err)
+		return
+	}
+	httpx.WriteSuccess(c, http.StatusOK, toSessionView(record))
+}
+
+// Claim takes over a session that belongs to no account (§2.5).
+//
+// It answers with the session rather than with a 204, because the one thing the
+// caller learns from this is that the row is now theirs — and the list they were
+// looking at a moment ago did not contain it, so there is a row they do not have
+// in hand. A 404 here means either that no such session exists or that it
+// already belongs to somebody else, and the two are deliberately one answer: the
+// second fact is not one an account is entitled to learn about another's row.
+func (h *SessionHandler) Claim(c *gin.Context) {
+	if !h.ready(c) {
+		return
+	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	sessionID := c.Param("sessionID")
+	if err := h.sessions.Claim(c.Request.Context(), sessionID, account); err != nil {
+		h.fail(c, "claim_session_failed", err)
+		return
+	}
+	record, err := h.sessions.Get(c.Request.Context(), sessionID, account)
+	if err != nil {
+		h.fail(c, "claim_session_failed", err)
 		return
 	}
 	httpx.WriteSuccess(c, http.StatusOK, toSessionView(record))
@@ -187,7 +245,11 @@ func (h *SessionHandler) DeletePermanently(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	if err := h.sessions.DeletePermanently(c.Request.Context(), c.Param("sessionID")); err != nil {
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	if err := h.sessions.DeletePermanently(c.Request.Context(), c.Param("sessionID"), account); err != nil {
 		h.fail(c, "destroy_session_failed", err)
 		return
 	}
@@ -200,7 +262,11 @@ func (h *SessionHandler) Messages(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	history, err := h.sessions.Messages(c.Request.Context(), c.Param("sessionID"))
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	history, err := h.sessions.Messages(c.Request.Context(), c.Param("sessionID"), account)
 	if err != nil {
 		h.fail(c, "list_messages_failed", err)
 		return

@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"backend/internal/authz"
 )
 
 // DueReader is the review domain as the question bank reads it (§1.2).
@@ -30,7 +32,13 @@ type DueReader interface {
 	// epoch": one is a question nobody has met, the other is one that is
 	// hopelessly overdue, and a map that spelled them the same way would make
 	// the difference unreadable at every caller.
-	DueNext(ctx context.Context, entryIDs []string) (map[string]time.Time, error)
+	//
+	// The caller travels for the reason every read in this version takes one:
+	// the review state has no owner column of its own — it is reached through
+	// the question it is filed under — so the reader narrows by the caller's
+	// questions, and a row key belonging to somebody else yields no date rather
+	// than somebody else's date.
+	DueNext(ctx context.Context, entryIDs []string, caller authz.Caller) (map[string]time.Time, error)
 }
 
 // WithDueReader attaches the review domain, and returns the service so that the
@@ -51,7 +59,7 @@ func (s *Service) WithDueReader(reader DueReader) *Service {
 // It is one call for the whole page and not one per entry: a listing that asked
 // the review domain twenty times would be a listing whose cost grew with the
 // page size, and the same fifty rows would be fifty round trips.
-func (s *Service) withDue(ctx context.Context, entries []Entry) ([]Entry, error) {
+func (s *Service) withDue(ctx context.Context, entries []Entry, caller authz.Caller) ([]Entry, error) {
 	if s.due == nil || len(entries) == 0 {
 		return entries, nil
 	}
@@ -61,7 +69,7 @@ func (s *Service) withDue(ctx context.Context, entries []Entry) ([]Entry, error)
 			ids = append(ids, entry.ID)
 		}
 	}
-	due, err := s.due.DueNext(ctx, ids)
+	due, err := s.due.DueNext(ctx, ids, caller)
 	if err != nil {
 		return nil, err
 	}
@@ -85,8 +93,8 @@ func (s *Service) withDue(ctx context.Context, entries []Entry) ([]Entry, error)
 // this due" must not be answered two ways for a list and for a page: a question
 // showing a date in the list and no date when opened is the kind of drift that
 // takes a bug report to find.
-func (s *Service) withOneDue(ctx context.Context, entry Entry) (Entry, error) {
-	entries, err := s.withDue(ctx, []Entry{entry})
+func (s *Service) withOneDue(ctx context.Context, entry Entry, caller authz.Caller) (Entry, error) {
+	entries, err := s.withDue(ctx, []Entry{entry}, caller)
 	if err != nil {
 		return Entry{}, err
 	}

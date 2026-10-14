@@ -48,7 +48,7 @@ func TestReadingHandlerExtensionsAnswersForAMaterialThatIsThere(t *testing.T) {
 	stub := &readingStub{material: reading.Material{MaterialID: "rm_1"}}
 	router := newReadingRouter(stub, registry)
 
-	recorder := call(t, router, http.MethodGet, "/api/v1/reading/materials/rm_1/extensions", "")
+	recorder := callAs(t, router, http.MethodGet, "/api/v1/reading/materials/rm_1/extensions", "")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -78,7 +78,7 @@ func TestReadingHandlerExtensionsAnswersForAMaterialThatIsThere(t *testing.T) {
 	// nobody asked, so the material is checked even though the catalogue is a
 	// property of the build.
 	stub.material = reading.Material{MaterialID: "rm_other"}
-	recorder = call(t, router, http.MethodGet, "/api/v1/reading/materials/rm_1/extensions", "")
+	recorder = callAs(t, router, http.MethodGet, "/api/v1/reading/materials/rm_1/extensions", "")
 	if recorder.Code != http.StatusNotFound {
 		t.Errorf("listing extensions for a material that is not there: status = %d, want 404",
 			recorder.Code)
@@ -92,7 +92,7 @@ func TestReadingHandlerRunExtensionHandsOverTheResolvedPassage(t *testing.T) {
 		t.Fatalf("NewRegistry() error = %v", err)
 	}
 	stub := &readingStub{passage: reading.Passage{Text: "闭包捕获的是变量而不是值"}}
-	recorder := call(t, newReadingRouter(stub, registry), http.MethodPost,
+	recorder := callAs(t, newReadingRouter(stub, registry), http.MethodPost,
 		"/api/v1/reading/materials/rm_1/extensions/explain",
 		`{"locator":{"char_start":10,"char_end":20}}`)
 
@@ -133,7 +133,7 @@ func TestReadingHandlerRunExtensionAnswersASKipWithTheReason(t *testing.T) {
 		t.Fatalf("NewRegistry() error = %v", err)
 	}
 	stub := &readingStub{}
-	recorder := call(t, newReadingRouter(stub, registry), http.MethodPost,
+	recorder := callAs(t, newReadingRouter(stub, registry), http.MethodPost,
 		"/api/v1/reading/materials/rm_1/extensions/audio", `{"locator":{"char_start":0,"char_end":10}}`)
 
 	// An extension that cannot run is not a failed request: the panel says why,
@@ -156,7 +156,7 @@ func TestReadingHandlerRunExtensionAnswersASKipWithTheReason(t *testing.T) {
 
 	// An extension that does not exist is a different answer: there is no panel
 	// to draw a reason in.
-	recorder = call(t, newReadingRouter(stub, registry), http.MethodPost,
+	recorder = callAs(t, newReadingRouter(stub, registry), http.MethodPost,
 		"/api/v1/reading/materials/rm_1/extensions/translate", `{"locator":{"char_start":0,"char_end":10}}`)
 	if recorder.Code != http.StatusNotFound {
 		t.Errorf("running an extension that does not exist: status = %d, want 404", recorder.Code)

@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"backend/internal/authz"
 )
 
 type recordingRepository struct {
@@ -36,12 +38,19 @@ func (r *recordingRepository) Create(_ context.Context, record FileRecord) error
 	return r.err
 }
 
-func (r *recordingRepository) Find(_ context.Context, id string) (FileRecord, error) {
+// Find mirrors the scope storage applies, so that a two-account test here
+// behaves the way the database would rather than the way a map of everything
+// would. It is a means and not evidence: what the real predicate does to a real
+// table is repository_db_test.go's business, and this is a copy that can drift.
+func (r *recordingRepository) Find(_ context.Context, id string, caller authz.Caller) (FileRecord, error) {
 	if r.findErr != nil {
 		return FileRecord{}, r.findErr
 	}
 	record, ok := r.stored[id]
 	if !ok {
+		return FileRecord{}, fmt.Errorf("%w: %s", ErrNotFound, id)
+	}
+	if record.OwnerID != caller.UserID && !(caller.IsAdmin() && record.OwnerID == 0) {
 		return FileRecord{}, fmt.Errorf("%w: %s", ErrNotFound, id)
 	}
 	return record, nil
@@ -80,7 +89,7 @@ func TestUploadStoresValidatedPDFAndMetadata(t *testing.T) {
 	}
 	content := []byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n")
 
-	result, err := service.Upload(context.Background(), UploadInput{
+	result, err := service.Upload(context.Background(), UploadInput{OwnerID: testOwnerID,
 		Filename:     "../../course-notes.pdf",
 		DeclaredMIME: "application/pdf",
 		Content:      bytes.NewReader(content),
@@ -122,7 +131,7 @@ func TestUploadAcceptsFileAtExactSizeLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Upload(context.Background(), UploadInput{Filename: "notes.md", Content: strings.NewReader(content)}); err != nil {
+	if _, err := service.Upload(context.Background(), UploadInput{OwnerID: testOwnerID, Filename: "notes.md", Content: strings.NewReader(content)}); err != nil {
 		t.Fatalf("Upload() error = %v", err)
 	}
 	if repository.record.SizeBytes != int64(len(content)) {
@@ -137,7 +146,7 @@ func TestUploadRejectsOversizedFileAndCleansStaging(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = service.Upload(context.Background(), UploadInput{
+	_, err = service.Upload(context.Background(), UploadInput{OwnerID: testOwnerID,
 		Filename: "notes.md",
 		Content:  strings.NewReader("more than eight bytes"),
 	})
@@ -155,7 +164,7 @@ func TestUploadRollsBackFileWhenRepositoryFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = service.Upload(context.Background(), UploadInput{
+	_, err = service.Upload(context.Background(), UploadInput{OwnerID: testOwnerID,
 		Filename: "notes.md",
 		Content:  strings.NewReader("plain markdown"),
 	})
@@ -180,7 +189,7 @@ func TestUploadHonorsCanceledContextAndCleansStaging(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err = service.Upload(ctx, UploadInput{
+	_, err = service.Upload(ctx, UploadInput{OwnerID: testOwnerID,
 		Filename: "notes.md",
 		Content:  strings.NewReader("plain markdown"),
 	})
@@ -197,7 +206,7 @@ func TestUploadRejectsInvalidFileAndCleansStaging(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = service.Upload(context.Background(), UploadInput{
+	_, err = service.Upload(context.Background(), UploadInput{OwnerID: testOwnerID,
 		Filename: "fake.pdf",
 		Content:  strings.NewReader("not a pdf"),
 	})
@@ -216,14 +225,14 @@ func TestOpenReadsAStoredFileBackWithItsCategory(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := "# 数学分析\n\n拉格朗日中值定理。\n"
-	uploaded, err := service.Upload(context.Background(), UploadInput{
+	uploaded, err := service.Upload(context.Background(), UploadInput{OwnerID: testOwnerID,
 		Filename: "notes.md", DeclaredMIME: "text/markdown", Content: strings.NewReader(content),
 	})
 	if err != nil {
 		t.Fatalf("Upload() error = %v", err)
 	}
 
-	file, err := service.Open(context.Background(), uploaded.ID)
+	file, err := service.Open(context.Background(), uploaded.ID, testCaller())
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
@@ -248,11 +257,11 @@ func TestOpenReportsAFileThatIsNotThere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.Open(context.Background(), "lib_missing")
+	_, err = service.Open(context.Background(), "lib_missing", testCaller())
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Open() error = %v, want ErrNotFound", err)
 	}
-	if _, err := service.Open(context.Background(), "  "); !errors.Is(err, ErrInvalidFile) {
+	if _, err := service.Open(context.Background(), "  ", testCaller()); !errors.Is(err, ErrInvalidFile) {
 		t.Errorf("Open(blank) error = %v, want ErrInvalidFile", err)
 	}
 	// A record with no file behind it is the same answer: the bytes are not
@@ -265,7 +274,7 @@ func TestOpenReportsAFileThatIsNotThere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Open(context.Background(), "lib_gone"); !errors.Is(err, ErrNotFound) {
+	if _, err := service.Open(context.Background(), "lib_gone", testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Open(record without a file) error = %v, want ErrNotFound", err)
 	}
 }
@@ -288,7 +297,7 @@ func TestOpenRefusesAPathItWouldNotHaveWritten(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			file, err := service.Open(context.Background(), "lib_odd")
+			file, err := service.Open(context.Background(), "lib_odd", testCaller())
 			if err == nil {
 				_ = file.Content.Close()
 				t.Fatalf("Open(%q) opened a file outside the library", tt.path)
@@ -310,14 +319,14 @@ func TestFindReturnsTheFileAsUploadDid(t *testing.T) {
 		t.Fatalf("NewService() error = %v", err)
 	}
 	content := []byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n")
-	uploaded, err := service.Upload(context.Background(), UploadInput{
+	uploaded, err := service.Upload(context.Background(), UploadInput{OwnerID: testOwnerID,
 		Filename: "notes.pdf", DeclaredMIME: "application/pdf", Content: bytes.NewReader(content),
 	})
 	if err != nil {
 		t.Fatalf("Upload() error = %v", err)
 	}
 
-	found, err := service.Find(context.Background(), uploaded.ID)
+	found, err := service.Find(context.Background(), uploaded.ID, testCaller())
 	if err != nil {
 		t.Fatalf("Find() error = %v", err)
 	}
@@ -344,7 +353,7 @@ func TestFindRefusesARecordWithNoCategory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := service.Find(context.Background(), "lib_odd"); err == nil {
+	if _, err := service.Find(context.Background(), "lib_odd", testCaller()); err == nil {
 		t.Fatal("Find() error = nil, want a refusal")
 	}
 }
@@ -355,12 +364,12 @@ func TestFindReportsAMissingFileAndAnEmptyId(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := service.Find(context.Background(), "lib_missing"); !errors.Is(err, ErrNotFound) {
+	if _, err := service.Find(context.Background(), "lib_missing", testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Find(unknown) error = %v, want ErrNotFound", err)
 	}
 	// An empty id is not a file that is missing: nothing was asked for, and the
 	// empty string is not an id anything was ever stored under.
-	if _, err := service.Find(context.Background(), "  "); !errors.Is(err, ErrInvalidFile) {
+	if _, err := service.Find(context.Background(), "  ", testCaller()); !errors.Is(err, ErrInvalidFile) {
 		t.Errorf("Find(blank) error = %v, want ErrInvalidFile", err)
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"backend/internal/authz"
 )
 
 // Reading and naming paths, which is what the surface does with them outside a
@@ -43,13 +45,21 @@ type Summary struct {
 // ListRequest is how a listing is narrowed. An empty SessionID lists every path,
 // which is what a surface asks for when it has no conversation in hand.
 type ListRequest struct {
+	// Caller narrows the listing to one account, and it rides on the request
+	// rather than being a parameter for the reason the session listing's does
+	// (session.ListOptions.Caller): the struct already exists to carry what the
+	// listing is narrowed by, and the caller is one of those things. An empty
+	// caller is not a listing of everything — before V5 this route answered every
+	// path in the database, which was right only because the database held one
+	// person's work.
+	Caller authz.Caller
 	// SessionID, when set, lists only the paths this conversation has touched.
 	SessionID string
 }
 
 // List reads the paths, most recently seen first.
 func (s *Service) List(ctx context.Context, request ListRequest) ([]Summary, error) {
-	rows, err := s.repository.Paths(ctx, strings.TrimSpace(request.SessionID))
+	rows, err := s.repository.Paths(ctx, strings.TrimSpace(request.SessionID), request.Caller)
 	if err != nil {
 		return nil, err
 	}
@@ -108,18 +118,18 @@ type MetaRequest struct {
 // none of it. A goal that was reworded is still the same goal, and a version
 // bump here would make every turn holding a read state look stale for a reason
 // that has nothing to do with the tree.
-func (s *Service) UpdateMeta(ctx context.Context, request MetaRequest) (TopicMeta, error) {
+func (s *Service) UpdateMeta(ctx context.Context, request MetaRequest, caller authz.Caller) (TopicMeta, error) {
 	if strings.TrimSpace(request.PathID) == "" {
 		return TopicMeta{}, fmt.Errorf("%w: the path is blank", ErrInvalidRequest)
 	}
 	if request.Goal == nil && request.Description == nil && request.Emoji == nil && request.Status == nil {
 		return TopicMeta{}, fmt.Errorf("%w: the request names nothing to change", ErrInvalidRequest)
 	}
-	if err := s.requirePath(ctx, request.PathID); err != nil {
+	if err := s.requirePath(ctx, request.PathID, caller); err != nil {
 		return TopicMeta{}, err
 	}
 
-	meta, err := s.repository.Meta(ctx, request.PathID)
+	meta, err := s.repository.Meta(ctx, request.PathID, caller)
 	if err != nil {
 		if !isNotFound(err) {
 			return TopicMeta{}, err
@@ -153,7 +163,7 @@ func (s *Service) UpdateMeta(ctx context.Context, request MetaRequest) (TopicMet
 	if strings.TrimSpace(meta.Emoji) == "" {
 		meta.Emoji = defaultEmoji
 	}
-	if err := s.repository.SaveMeta(ctx, meta, s.clock()); err != nil {
+	if err := s.repository.SaveMeta(ctx, meta, s.clock(), caller); err != nil {
 		return TopicMeta{}, err
 	}
 	return meta, nil
@@ -171,18 +181,18 @@ func (s *Service) UpdateMeta(ctx context.Context, request MetaRequest) (TopicMet
 // It releases nothing and reports false when nobody holds the path, which is the
 // truth rather than a failure: a second release, or a release after the lease
 // expired and was dropped, asked for a state that is already the state.
-func (s *Service) ReleaseAny(ctx context.Context, pathID string) (Lease, bool, error) {
+func (s *Service) ReleaseAny(ctx context.Context, pathID string, caller authz.Caller) (Lease, bool, error) {
 	if strings.TrimSpace(pathID) == "" {
 		return Lease{}, false, fmt.Errorf("%w: the path is blank", ErrInvalidRequest)
 	}
-	lease, err := s.repository.Lease(ctx, pathID)
+	lease, err := s.repository.Lease(ctx, pathID, caller)
 	if err != nil {
 		if isNotFound(err) {
 			return Lease{}, false, nil
 		}
 		return Lease{}, false, err
 	}
-	released, err := s.Release(ctx, pathID, Actor{SessionID: lease.SessionID, TurnID: lease.TurnID})
+	released, err := s.Release(ctx, pathID, Actor{SessionID: lease.SessionID, TurnID: lease.TurnID}, caller)
 	if err != nil {
 		return Lease{}, false, err
 	}

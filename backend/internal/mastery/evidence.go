@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"backend/internal/authz"
 )
 
 // Evidence recording is its own file because it is its own act. A tree change
@@ -29,7 +31,7 @@ import (
 // event names the version it reached; when it did not, the event names the
 // version the observation was made against. Both are true statements about
 // different things, and a made-up version would be a statement about neither.
-func (s *Service) RecordEvidence(ctx context.Context, evidence Evidence) (Evidence, error) {
+func (s *Service) RecordEvidence(ctx context.Context, evidence Evidence, caller authz.Caller) (Evidence, error) {
 	// The id is issued here when the caller has none, which is the ordinary
 	// case and the same rule the tree follows: whoever is closer to the learner
 	// says what was seen, and this package numbers the row it wrote (Map). A
@@ -49,7 +51,7 @@ func (s *Service) RecordEvidence(ctx context.Context, evidence Evidence) (Eviden
 		evidence.CreatedAt = now
 	}
 	err := s.repository.Within(ctx, func(repository Repository) error {
-		return s.recordEvidence(ctx, repository, evidence, now)
+		return s.recordEvidence(ctx, repository, evidence, now, caller)
 	})
 	if err != nil {
 		return Evidence{}, err
@@ -66,8 +68,10 @@ func (s *Service) RecordEvidence(ctx context.Context, evidence Evidence) (Eviden
 // evidence to show for it. The rule it implements is unchanged and is the whole
 // reason it is separate from the tree changes: state first, event second, and a
 // state write that loses the guard is tolerated.
-func (s *Service) recordEvidence(ctx context.Context, repository Repository, evidence Evidence, now time.Time) error {
-	path, err := repository.Path(ctx, evidence.PathID)
+func (s *Service) recordEvidence(ctx context.Context, repository Repository, evidence Evidence, now time.Time, caller authz.Caller) error {
+	// Scoped, like every other read of a path: an observation against another
+	// account's path is ErrNotFound here, before anything is written.
+	path, err := repository.Path(ctx, evidence.PathID, caller)
 	if err != nil {
 		return err
 	}
@@ -82,10 +86,10 @@ func (s *Service) recordEvidence(ctx context.Context, repository Repository, evi
 			ErrNotFound, evidence.KnowledgePoint, path.ID)
 	}
 
-	if err := repository.AppendEvidence(ctx, evidence); err != nil {
+	if err := repository.AppendEvidence(ctx, evidence, caller); err != nil {
 		return err
 	}
-	evidences, err := repository.Evidences(ctx, path.ID)
+	evidences, err := repository.Evidences(ctx, path.ID, caller)
 	if err != nil {
 		return err
 	}
@@ -95,7 +99,7 @@ func (s *Service) recordEvidence(ctx context.Context, repository Repository, evi
 	// whether it held.
 	version := path.Version
 	updated := false
-	moved, err := repository.SaveTree(ctx, path.ID, path.Version, tree, now)
+	moved, err := repository.SaveTree(ctx, path.ID, path.Version, tree, now, caller)
 	switch {
 	case err == nil:
 		version, updated = moved, true
@@ -130,14 +134,14 @@ func (s *Service) recordEvidence(ctx context.Context, repository Repository, evi
 		Actor:     evidence.Actor,
 		CreatedAt: now,
 	}
-	if err := repository.AppendEvent(ctx, event); err != nil {
+	if err := repository.AppendEvent(ctx, event, caller); err != nil {
 		return err
 	}
-	return repository.TouchSession(ctx, path.ID, evidence.Actor, now)
+	return repository.TouchSession(ctx, path.ID, evidence.Actor, now, caller)
 }
 
 // Evidences reads a path's evidence, oldest first, so that the gate and the
 // insight endpoint do not each have to decide what order means.
-func (s *Service) Evidences(ctx context.Context, pathID string) ([]Evidence, error) {
-	return s.repository.Evidences(ctx, pathID)
+func (s *Service) Evidences(ctx context.Context, pathID string, caller authz.Caller) ([]Evidence, error) {
+	return s.repository.Evidences(ctx, pathID, caller)
 }

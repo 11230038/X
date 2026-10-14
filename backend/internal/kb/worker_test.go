@@ -152,7 +152,7 @@ func TestWorkerParksADocumentTheProviderRefused(t *testing.T) {
 		t.Errorf("a parked document was picked up again: work = %v, error = %v", worked, err)
 	}
 
-	if _, err := h.service.RebuildDocument(context.Background(), document.ID); err != nil {
+	if _, err := h.service.RebuildDocument(context.Background(), document.ID, testCaller()); err != nil {
 		t.Fatalf("RebuildDocument() error = %v", err)
 	}
 	h.fill(t, worker)

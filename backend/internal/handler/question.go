@@ -9,21 +9,27 @@ import (
 	"strings"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/httpx"
 	"backend/internal/notebook"
 	"github.com/gin-gonic/gin"
 )
 
 // Questions is the question bank use case consumed by the HTTP handler.
+//
+// Every method but List takes the caller last; List takes it inside its filter.
+// The account is read from the request rather than passed in, because it is the
+// request's: which questions a call may touch is decided by the token it was
+// served under, and never by a parameter a client could set.
 type Questions interface {
-	Get(context.Context, string) (notebook.Entry, error)
+	Get(context.Context, string, authz.Caller) (notebook.Entry, error)
 	List(context.Context, notebook.Filter) ([]notebook.Entry, error)
-	Mark(context.Context, string, notebook.Change) error
-	SetCategories(context.Context, string, []string) error
-	Categories(context.Context) ([]notebook.Category, error)
+	Mark(context.Context, string, notebook.Change, authz.Caller) error
+	SetCategories(context.Context, string, []string, authz.Caller) error
+	Categories(context.Context, authz.Caller) ([]notebook.Category, error)
 	// Import is the batch import (QN-05): the file's whole text, and whether this
 	// request is the preview.
-	Import(context.Context, string, bool) (notebook.ImportReport, error)
+	Import(context.Context, string, bool, authz.Caller) (notebook.ImportReport, error)
 }
 
 // QuestionHandler handles the question bank: the list, one question, the marks
@@ -142,7 +148,11 @@ func (h *QuestionHandler) List(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	filter, ok := h.filter(c)
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	filter, ok := h.filter(c, account)
 	if !ok {
 		return
 	}
@@ -170,7 +180,11 @@ func (h *QuestionHandler) Get(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	entry, err := h.questions.Get(c.Request.Context(), c.Param("questionID"))
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	entry, err := h.questions.Get(c.Request.Context(), c.Param("questionID"), account)
 	if err != nil {
 		h.fail(c, "get_question_failed", err)
 		return
@@ -191,6 +205,10 @@ func (h *QuestionHandler) Patch(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
 	var request patchRequest
 	if !readJSON(c, maxQuestionRequestBytes, &request) {
 		return
@@ -202,13 +220,13 @@ func (h *QuestionHandler) Patch(c *gin.Context) {
 	questionID := c.Param("questionID")
 	if request.Bookmarked != nil || request.Resolved != nil {
 		change := notebook.Change{Bookmarked: request.Bookmarked, Resolved: request.Resolved}
-		if err := h.questions.Mark(c.Request.Context(), questionID, change); err != nil {
+		if err := h.questions.Mark(c.Request.Context(), questionID, change, account); err != nil {
 			h.fail(c, "mark_question_failed", err)
 			return
 		}
 	}
 	if request.Categories != nil {
-		err := h.questions.SetCategories(c.Request.Context(), questionID, *request.Categories)
+		err := h.questions.SetCategories(c.Request.Context(), questionID, *request.Categories, account)
 		if err != nil {
 			h.fail(c, "file_question_failed", err)
 			return
@@ -216,7 +234,7 @@ func (h *QuestionHandler) Patch(c *gin.Context) {
 	}
 	// The answer is the question as it now stands, so that a client does not
 	// have to follow a write with a read to find out what it wrote.
-	entry, err := h.questions.Get(c.Request.Context(), questionID)
+	entry, err := h.questions.Get(c.Request.Context(), questionID, account)
 	if err != nil {
 		h.fail(c, "mark_question_failed", err)
 		return
@@ -229,7 +247,11 @@ func (h *QuestionHandler) Categories(c *gin.Context) {
 	if !h.ready(c) {
 		return
 	}
-	found, err := h.questions.Categories(c.Request.Context())
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	found, err := h.questions.Categories(c.Request.Context(), account)
 	if err != nil {
 		h.fail(c, "list_categories_failed", err)
 		return
@@ -248,8 +270,12 @@ func (h *QuestionHandler) Categories(c *gin.Context) {
 // and the client has no way to tell that the list it got is not the list it
 // asked for. The values themselves are checked by the domain, which is where
 // the three states of `resolved` and the three question types are defined.
-func (h *QuestionHandler) filter(c *gin.Context) (notebook.Filter, bool) {
-	var filter notebook.Filter
+//
+// The account goes in first and is the one field no parameter can set: the rest
+// of the filter says which questions the caller is asking about, and this says
+// whose questions they may be.
+func (h *QuestionHandler) filter(c *gin.Context, account authz.Caller) (notebook.Filter, bool) {
+	filter := notebook.Filter{Caller: account}
 	filter.Source = strings.TrimSpace(c.Query("source"))
 	filter.MaterialID = strings.TrimSpace(c.Query("material_id"))
 	filter.Difficulty = strings.TrimSpace(c.Query("difficulty"))

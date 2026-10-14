@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"backend/internal/authz"
+	"backend/internal/data"
 	"backend/internal/data/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -66,7 +68,8 @@ func (r *GORMRepository) CreateKnowledgeBase(ctx context.Context, record Knowled
 				KBID: record.ID, Name: record.Name,
 				Description: nullableString(record.Description),
 				Provider:    record.Provider, EmbeddingModel: record.EmbeddingModel,
-				IsDefault: isDefault, CreatedAt: record.CreatedAt,
+				IsDefault: isDefault, OwnerID: data.OwnerPointer(record.OwnerID),
+				CreatedAt: record.CreatedAt,
 			}
 			return tx.Create(&model).Error
 		}
@@ -85,12 +88,13 @@ func (r *GORMRepository) CreateKnowledgeBase(ctx context.Context, record Knowled
 }
 
 // KnowledgeBase returns one base with its counts.
-func (r *GORMRepository) KnowledgeBase(ctx context.Context, kbID string) (KnowledgeBase, error) {
+func (r *GORMRepository) KnowledgeBase(ctx context.Context, kbID string, caller authz.Caller) (KnowledgeBase, error) {
 	if err := r.ready(); err != nil {
 		return KnowledgeBase{}, err
 	}
 	var model models.KnowledgeBase
-	err := r.db.WithContext(ctx).First(&model, "kb_id = ?", kbID).Error
+	query := data.OwnerScope(r.db.WithContext(ctx), caller.UserID, caller.IsAdmin(), "owner_id")
+	err := query.First(&model, "kb_id = ?", kbID).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return KnowledgeBase{}, fmt.Errorf("%w: knowledge base %s", ErrNotFound, kbID)
@@ -108,13 +112,17 @@ func (r *GORMRepository) KnowledgeBase(ctx context.Context, kbID string) (Knowle
 	return record, nil
 }
 
-// KnowledgeBases lists every base, the default first.
-func (r *GORMRepository) KnowledgeBases(ctx context.Context) ([]KnowledgeBase, error) {
+// KnowledgeBases lists the caller's bases, the default first.
+//
+// Until V5 this listed every row in the table, which was right only while the
+// table held one person's collections.
+func (r *GORMRepository) KnowledgeBases(ctx context.Context, caller authz.Caller) ([]KnowledgeBase, error) {
 	if err := r.ready(); err != nil {
 		return nil, err
 	}
 	var records []models.KnowledgeBase
-	err := r.db.WithContext(ctx).
+	query := data.OwnerScope(r.db.WithContext(ctx), caller.UserID, caller.IsAdmin(), "owner_id")
+	err := query.
 		Order("is_default DESC, creat_time ASC").
 		Find(&records).Error
 	if err != nil {
@@ -175,7 +183,7 @@ func (r *GORMRepository) KnowledgeBaseCounts(ctx context.Context) (map[string]Co
 
 // SetDefaultKnowledgeBase moves the default mark to one base, leaving exactly
 // one behind it.
-func (r *GORMRepository) SetDefaultKnowledgeBase(ctx context.Context, kbID string) error {
+func (r *GORMRepository) SetDefaultKnowledgeBase(ctx context.Context, kbID string, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
 		return err
 	}
@@ -189,24 +197,38 @@ func (r *GORMRepository) SetDefaultKnowledgeBase(ctx context.Context, kbID strin
 		// code did. What the lock buys is that the ordinary case does not have
 		// to fail and retry: here the table has rows to lock, so the setter that
 		// arrives second waits rather than colliding.
+		//
+		// The clear and the target read are narrowed to the caller, which they
+		// were not before V5. The mark itself is still instance-wide — the unique
+		// index is on a generated column derived from is_default alone, with no
+		// room for an account — so a second account cannot star its own base
+		// while the first account holds the mark. That is recorded in the
+		// deviation log rather than papered over here: clearing somebody else's
+		// mark to make room would be the cross-account write this whole version
+		// exists to stop.
 		var bases []models.KnowledgeBase
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Find(&bases).Error; err != nil {
+		lock := data.OwnerScope(tx.Clauses(clause.Locking{Strength: "UPDATE"}),
+			caller.UserID, caller.IsAdmin(), "owner_id")
+		if err := lock.Find(&bases).Error; err != nil {
 			return fmt.Errorf("lock knowledge bases: %w", err)
 		}
 		var target models.KnowledgeBase
-		if err := tx.First(&target, "kb_id = ?", kbID).Error; err != nil {
+		targetQuery := data.OwnerScope(tx, caller.UserID, caller.IsAdmin(), "owner_id")
+		if err := targetQuery.First(&target, "kb_id = ?", kbID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("%w: knowledge base %s", ErrNotFound, kbID)
 			}
 			return fmt.Errorf("read knowledge base: %w", err)
 		}
-		clear := tx.Model(&models.KnowledgeBase{}).
+		clear := data.OwnerScope(tx.Model(&models.KnowledgeBase{}),
+			caller.UserID, caller.IsAdmin(), "owner_id").
 			Where("is_default = TRUE AND kb_id <> ?", kbID).
 			Update("is_default", false)
 		if clear.Error != nil {
 			return fmt.Errorf("clear the default knowledge base: %w", clear.Error)
 		}
-		set := tx.Model(&models.KnowledgeBase{}).
+		set := data.OwnerScope(tx.Model(&models.KnowledgeBase{}),
+			caller.UserID, caller.IsAdmin(), "owner_id").
 			Where("kb_id = ?", kbID).
 			Update("is_default", true)
 		if set.Error != nil {
@@ -222,33 +244,43 @@ func (r *GORMRepository) SetDefaultKnowledgeBase(ctx context.Context, kbID strin
 // mark: the mark has to be somewhere while bases exist, and promoting a row is
 // not the substitution KB-07 forbids — that rule is about a *turn's* scope, and
 // retrieval never consults the default when it searches.
-func (r *GORMRepository) DeleteKnowledgeBase(ctx context.Context, kbID string) error {
+func (r *GORMRepository) DeleteKnowledgeBase(ctx context.Context, kbID string, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
 		return err
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var target models.KnowledgeBase
-		if err := tx.First(&target, "kb_id = ?", kbID).Error; err != nil {
+		read := data.OwnerScope(tx, caller.UserID, caller.IsAdmin(), "owner_id")
+		if err := read.First(&target, "kb_id = ?", kbID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("%w: knowledge base %s", ErrNotFound, kbID)
 			}
 			return fmt.Errorf("read knowledge base: %w", err)
 		}
-		if err := tx.Delete(&models.KnowledgeBase{}, "kb_id = ?", kbID).Error; err != nil {
+		remove := data.OwnerScope(tx, caller.UserID, caller.IsAdmin(), "owner_id")
+		if err := remove.Delete(&models.KnowledgeBase{}, "kb_id = ?", kbID).Error; err != nil {
 			return fmt.Errorf("delete knowledge base: %w", err)
 		}
 		if !target.IsDefault {
 			return nil
 		}
+		// The successor is looked for among the caller's own bases, not the table.
+		// Promoting another account's base would hand them a mark they did not ask
+		// for and put this caller's next base at odds with the unique index; when
+		// this account has none left the mark simply goes free, and the next base
+		// any account creates takes it (CreateKnowledgeBase claims a free mark).
 		var oldest models.KnowledgeBase
-		err := tx.Order("creat_time ASC").First(&oldest).Error
+		promote := data.OwnerScope(tx, caller.UserID, caller.IsAdmin(), "owner_id")
+		err := promote.Order("creat_time ASC").First(&oldest).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
 		}
 		if err != nil {
 			return fmt.Errorf("read the next default knowledge base: %w", err)
 		}
-		if err := tx.Model(&models.KnowledgeBase{}).Where("kb_id = ?", oldest.KBID).
+		mark := data.OwnerScope(tx.Model(&models.KnowledgeBase{}),
+			caller.UserID, caller.IsAdmin(), "owner_id")
+		if err := mark.Where("kb_id = ?", oldest.KBID).
 			Update("is_default", true).Error; err != nil {
 			return fmt.Errorf("promote the next default knowledge base: %w", err)
 		}

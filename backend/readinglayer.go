@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"backend/internal/authz"
 	"backend/internal/config"
 	"backend/internal/event"
 	"backend/internal/kb"
@@ -75,24 +76,24 @@ type readingDocuments struct {
 
 var _ reading.Documents = readingDocuments{}
 
-func (d readingDocuments) DocumentOfFile(ctx context.Context, fileID string) (reading.Document, error) {
-	document, err := d.materials.DocumentOfFile(ctx, fileID)
+func (d readingDocuments) DocumentOfFile(ctx context.Context, fileID string, caller authz.Caller) (reading.Document, error) {
+	document, err := d.materials.DocumentOfFile(ctx, fileID, caller)
 	if err != nil {
 		return reading.Document{}, err
 	}
 	return readingDocument(document), nil
 }
 
-func (d readingDocuments) Document(ctx context.Context, documentID string) (reading.Document, error) {
-	document, err := d.materials.Document(ctx, documentID)
+func (d readingDocuments) Document(ctx context.Context, documentID string, caller authz.Caller) (reading.Document, error) {
+	document, err := d.materials.Document(ctx, documentID, caller)
 	if err != nil {
 		return reading.Document{}, err
 	}
 	return readingDocument(document), nil
 }
 
-func (d readingDocuments) ChunkSpans(ctx context.Context, documentID string) ([]reading.ChunkSpan, error) {
-	spans, err := d.materials.ChunkSpans(ctx, documentID)
+func (d readingDocuments) ChunkSpans(ctx context.Context, documentID string, caller authz.Caller) ([]reading.ChunkSpan, error) {
+	spans, err := d.materials.ChunkSpans(ctx, documentID, caller)
 	if err != nil {
 		return nil, err
 	}
@@ -109,8 +110,8 @@ func (d readingDocuments) ChunkSpans(ctx context.Context, documentID string) ([]
 // asked for: the reading layer has already checked the span against the
 // document's length, so the clamping the window read does is a second answer to
 // a question that has one.
-func (d readingDocuments) Text(ctx context.Context, documentID string, charStart, charEnd int64) (string, error) {
-	window, err := d.materials.ReadWindow(ctx, documentID, charStart, charEnd-charStart)
+func (d readingDocuments) Text(ctx context.Context, documentID string, charStart, charEnd int64, caller authz.Caller) (string, error) {
+	window, err := d.materials.ReadWindow(ctx, documentID, charStart, charEnd-charStart, caller)
 	if err != nil {
 		return "", err
 	}
@@ -147,14 +148,14 @@ var _ turn.Readings = readingSelection{}
 // citation is opened by the file and the offset and a reader opening one on a
 // document that has been rebuilt since can see that the coordinates are from the
 // revision before (§2.8).
-func (s readingSelection) Passage(ctx context.Context, selection turn.Selection) (event.Source, error) {
+func (s readingSelection) Passage(ctx context.Context, selection turn.Selection, caller authz.Caller) (event.Source, error) {
 	passage, err := s.readings.Resolve(ctx, selection.MaterialID, reading.Locator{
 		MaterialID: selection.MaterialID,
 		Ordinal:    selection.Locator.Ordinal,
 		CharStart:  selection.Locator.CharStart,
 		CharEnd:    selection.Locator.CharEnd,
 		Page:       selection.Locator.Page,
-	})
+	}, caller)
 	if err != nil {
 		return event.Source{}, err
 	}

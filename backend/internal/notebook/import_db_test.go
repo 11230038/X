@@ -88,7 +88,7 @@ func TestDBAImportPreviewLeavesTheBankUntouched(t *testing.T) {
 		line("一道新的题", nil),
 		lineOfQuestion(t, held),
 		line("没有答案的题", map[string]any{"correct_answer": ""}),
-	), true)
+	), true, testCaller())
 	if err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
@@ -124,7 +124,7 @@ func TestDBTheCommitWritesOnlyWhatTheReportNamed(t *testing.T) {
 		line("第二道新题", nil),
 		line("没有答案的题", map[string]any{"correct_answer": ""}),
 		line("第三道新题", nil),
-	), false)
+	), false, testCaller())
 	if err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
@@ -172,7 +172,7 @@ func TestDBTheOverwriteReplacesTheQuestionFaceAndKeepsTheAnswerFace(t *testing.T
 
 	changed := held
 	changed.Explanation = "换一种说法"
-	report, err := service.Import(context.Background(), file(lineOfQuestion(t, changed)), false)
+	report, err := service.Import(context.Background(), file(lineOfQuestion(t, changed)), false, testCaller())
 	if err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}
@@ -203,14 +203,14 @@ func TestDBImportingTheSameFileTwiceAddsNothing(t *testing.T) {
 		line("第三道题", nil),
 	)
 
-	first, err := service.Import(context.Background(), input, false)
+	first, err := service.Import(context.Background(), input, false, testCaller())
 	if err != nil {
 		t.Fatalf("the first import = %v", err)
 	}
 	if first.Writable != 3 {
 		t.Fatalf("the first import is %+v, want three writable lines", first)
 	}
-	second, err := service.Import(context.Background(), input, false)
+	second, err := service.Import(context.Background(), input, false, testCaller())
 	if err != nil {
 		t.Fatalf("the second import = %v", err)
 	}
@@ -236,7 +236,7 @@ func TestDBTheSameTextUnderAnotherTypeIsFoundInTheBank(t *testing.T) {
 			"options":        nil,
 			"correct_answer": "能读取外部变量的函数",
 		}),
-	), false)
+	), false, testCaller())
 	if err != nil {
 		t.Fatalf("Import() error = %v", err)
 	}

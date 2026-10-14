@@ -42,7 +42,7 @@ func TestALocatorResolvesToTheTextItNames(t *testing.T) {
 
 	passage, err := service.Resolve(context.Background(), "rm_1", Locator{
 		MaterialID: "rm_1", Ordinal: 2, CharStart: 0, CharEnd: 5,
-	})
+	}, testCaller)
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
@@ -75,7 +75,7 @@ func TestTheOffsetsAreTheCoordinateAndTheOrdinalIsAHint(t *testing.T) {
 	// read by.
 	passage, err := service.Resolve(context.Background(), "rm_1", Locator{
 		MaterialID: "rm_1", Ordinal: 9, CharStart: 10, CharEnd: 20,
-	})
+	}, testCaller)
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
@@ -99,7 +99,7 @@ func TestALocatorPastTheEndOfTheTextIsRefusedRatherThanClamped(t *testing.T) {
 
 	_, err := service.Resolve(context.Background(), "rm_1", Locator{
 		MaterialID: "rm_1", CharStart: 0, CharEnd: length + 1,
-	})
+	}, testCaller)
 	if !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("Resolve() error = %v, want an invalid request", err)
 	}
@@ -122,7 +122,7 @@ func TestACharacterSpanAtTheEndOfTheTextIsTheDocumentAndNotPastIt(t *testing.T) 
 
 	passage, err := service.Resolve(context.Background(), "rm_1", Locator{
 		MaterialID: "rm_1", CharStart: length - 2, CharEnd: length,
-	})
+	}, testCaller)
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
@@ -141,7 +141,7 @@ func TestAPlaceIsNotAPassage(t *testing.T) {
 	// move differs.
 	_, err := service.Resolve(context.Background(), "rm_1", Locator{
 		MaterialID: "rm_1", CharStart: 12, CharEnd: 12,
-	})
+	}, testCaller)
 	if !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("Resolve() error = %v, want an invalid request", err)
 	}
@@ -196,7 +196,7 @@ func TestAResolveRefusesWhatItCannotActOn(t *testing.T) {
 			service, repository, documents := newFakeService(t, 100)
 			repository.withMaterial(sampleMaterial("rm_1", "doc_1"))
 
-			_, err := service.Resolve(context.Background(), test.material, test.locator)
+			_, err := service.Resolve(context.Background(), test.material, test.locator, testCaller)
 			if !errors.Is(err, ErrInvalidRequest) {
 				t.Fatalf("Resolve() error = %v, want an invalid request", err)
 			}
@@ -223,7 +223,7 @@ func TestAMaterialWithNothingBehindItIsNotAPassage(t *testing.T) {
 
 	_, err := service.Resolve(context.Background(), "rm_1", Locator{
 		MaterialID: "rm_1", CharStart: 0, CharEnd: 5,
-	})
+	}, testCaller)
 	if !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("Resolve() error = %v, want an invalid request", err)
 	}
@@ -243,7 +243,7 @@ func TestAPassageWiderThanAUnitIsRefused(t *testing.T) {
 	// passage a model is handed is a unit a reader could have been looking at.
 	_, err := service.Resolve(context.Background(), "rm_1", Locator{
 		MaterialID: "rm_1", CharStart: 0, CharEnd: 9,
-	})
+	}, testCaller)
 	if !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("Resolve() error = %v, want an invalid request", err)
 	}
@@ -257,7 +257,7 @@ func TestAPassageWiderThanAUnitIsRefused(t *testing.T) {
 	// A span exactly at the bound is a unit, and is served.
 	if _, err := service.Resolve(context.Background(), "rm_1", Locator{
 		MaterialID: "rm_1", CharStart: 0, CharEnd: 8,
-	}); err != nil {
+	}, testCaller); err != nil {
 		t.Errorf("Resolve() refused a span at the bound: %v", err)
 	}
 }
@@ -267,7 +267,7 @@ func TestAMaterialThatIsNotThereIsNotAPassage(t *testing.T) {
 
 	_, err := service.Resolve(context.Background(), "rm_missing", Locator{
 		MaterialID: "rm_missing", CharStart: 0, CharEnd: 5,
-	})
+	}, testCaller)
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Resolve() error = %v, want a missing resource", err)
 	}

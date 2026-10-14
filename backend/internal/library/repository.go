@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"backend/internal/authz"
+	"backend/internal/data"
 	"backend/internal/data/models"
 	"gorm.io/gorm"
 )
@@ -27,6 +29,7 @@ func (r *GORMRepository) Create(ctx context.Context, record FileRecord) error {
 	model := models.LibraryFile{
 		ID: record.ID, SHA256: record.SHA256, Filename: record.Filename,
 		MIMEType: record.MIMEType, SizeBytes: record.SizeBytes, LibraryPath: record.LibraryPath,
+		OwnerID:   data.OwnerPointer(record.OwnerID),
 		CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
 	}
 	if err := r.db.WithContext(ctx).Create(&model).Error; err != nil {
@@ -40,23 +43,28 @@ func (r *GORMRepository) Create(ctx context.Context, record FileRecord) error {
 // A missing row is ErrNotFound rather than GORM's own sentinel, so that the
 // only thing a caller above this line has to know about storage is that the
 // file is not here.
-func (r *GORMRepository) Find(ctx context.Context, id string) (FileRecord, error) {
+func (r *GORMRepository) Find(ctx context.Context, id string, caller authz.Caller) (FileRecord, error) {
 	if r == nil || r.db == nil {
 		return FileRecord{}, fmt.Errorf("library repository is not initialized")
 	}
 	var model models.LibraryFile
-	err := r.db.WithContext(ctx).Where("id = ?", id).First(&model).Error
+	query := data.OwnerScope(r.db.WithContext(ctx), caller.UserID, caller.IsAdmin(), "owner_id")
+	err := query.Where("id = ?", id).First(&model).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return FileRecord{}, fmt.Errorf("%w: %s", ErrNotFound, id)
 	}
 	if err != nil {
 		return FileRecord{}, fmt.Errorf("read library file metadata: %w", err)
 	}
-	return FileRecord{
+	record := FileRecord{
 		ID: model.ID, SHA256: model.SHA256, Filename: model.Filename,
 		MIMEType: model.MIMEType, SizeBytes: model.SizeBytes,
 		LibraryPath: model.LibraryPath, CreatedAt: model.CreatedAt, UpdatedAt: model.UpdatedAt,
-	}, nil
+	}
+	if model.OwnerID != nil {
+		record.OwnerID = *model.OwnerID
+	}
+	return record, nil
 }
 
 var _ MetadataRepository = (*GORMRepository)(nil)

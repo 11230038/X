@@ -89,7 +89,7 @@ func TestQuestionImportHandlerTurnsDryRunIntoTheRequestItIs(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			stub := &questionStub{}
-			recorder := call(t, newQuestionRouter(stub), http.MethodPost,
+			recorder := callAs(t, newQuestionRouter(stub), http.MethodPost,
 				"/api/v1/questions/import"+test.query, importFile)
 
 			if recorder.Code != http.StatusOK {
@@ -119,7 +119,7 @@ func TestQuestionImportHandlerTurnsDryRunIntoTheRequestItIs(t *testing.T) {
 // preview, and answer with a report of a bank that had already changed.
 func TestQuestionImportHandlerRefusesADryRunThatIsNotABoolean(t *testing.T) {
 	stub := &questionStub{}
-	recorder := call(t, newQuestionRouter(stub), http.MethodPost,
+	recorder := callAs(t, newQuestionRouter(stub), http.MethodPost,
 		"/api/v1/questions/import?dry_run=perhaps", importFile)
 
 	if recorder.Code != http.StatusBadRequest {
@@ -145,7 +145,7 @@ func TestQuestionImportHandlerRefusesADryRunThatIsNotABoolean(t *testing.T) {
 // be the case a client cannot tell from a field being missing.
 func TestQuestionImportHandlerReturnsTheReportLineByLine(t *testing.T) {
 	stub := &questionStub{report: sampleImportReport()}
-	recorder := call(t, newQuestionRouter(stub), http.MethodPost,
+	recorder := callAs(t, newQuestionRouter(stub), http.MethodPost,
 		"/api/v1/questions/import?dry_run=true", importFile)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -187,7 +187,7 @@ func TestQuestionImportHandlerReturnsTheReportLineByLine(t *testing.T) {
 // would have lost the half of the answer that says what to fix.
 func TestQuestionImportHandlerAnswersACommitThatRefusedLines(t *testing.T) {
 	stub := &questionStub{report: sampleImportReport()}
-	recorder := call(t, newQuestionRouter(stub), http.MethodPost, "/api/v1/questions/import", importFile)
+	recorder := callAs(t, newQuestionRouter(stub), http.MethodPost, "/api/v1/questions/import", importFile)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
@@ -203,7 +203,7 @@ func TestQuestionImportHandlerAnswersACommitThatRefusedLines(t *testing.T) {
 func TestQuestionImportHandlerRefusesAnEmptyFile(t *testing.T) {
 	for _, body := range []string{"", "   \n\t\n"} {
 		stub := &questionStub{}
-		recorder := call(t, newQuestionRouter(stub), http.MethodPost,
+		recorder := callAs(t, newQuestionRouter(stub), http.MethodPost,
 			"/api/v1/questions/import", body)
 		if recorder.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d over %q, want 400", recorder.Code, body)
@@ -222,7 +222,7 @@ func TestQuestionImportHandlerRefusesAnEmptyFile(t *testing.T) {
 func TestQuestionImportHandlerRefusesAFileOverTheBound(t *testing.T) {
 	stub := &questionStub{}
 	oversized := `{"question":"` + strings.Repeat("长", int(maxQuestionImportBytes)) + `"}`
-	recorder := call(t, newQuestionRouter(stub), http.MethodPost,
+	recorder := callAs(t, newQuestionRouter(stub), http.MethodPost,
 		"/api/v1/questions/import", oversized)
 
 	if recorder.Code != http.StatusRequestEntityTooLarge {
@@ -248,7 +248,7 @@ func TestQuestionImportHandlerRefusesAFileOverTheBound(t *testing.T) {
 // like every other storage failure's.
 func TestQuestionImportHandlerReportsAStorageFailure(t *testing.T) {
 	stub := &questionStub{err: errors.New("private database details")}
-	recorder := call(t, newQuestionRouter(stub), http.MethodPost, "/api/v1/questions/import", importFile)
+	recorder := callAs(t, newQuestionRouter(stub), http.MethodPost, "/api/v1/questions/import", importFile)
 
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500; body=%s", recorder.Code, recorder.Body.String())

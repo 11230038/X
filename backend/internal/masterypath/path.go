@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"backend/internal/authz"
 	"backend/internal/mastery"
 	"backend/internal/notebook"
 	"backend/internal/practice"
@@ -38,6 +39,14 @@ type TurnPath struct {
 
 	pathID string
 	actor  mastery.Actor
+	// caller is the account this turn is running for, and it is the third of the
+	// things that are one per turn. The domain scopes every read and write to it,
+	// so the bridge has to carry it: the tools call the domain themselves and this
+	// is the only way the account reaches them. It is not derivable from the
+	// session or the actor — a turn may run in a session that belongs to no
+	// account (one written before V5), on behalf of an account that does — and a
+	// bridge that guessed would guess wrong exactly there.
+	caller authz.Caller
 	// version is the version this turn last read, and it is what the next write
 	// is guarded by. It moves forward after every successful write, so a turn
 	// that makes three edits in a row is not refused by its own first one.
@@ -80,8 +89,14 @@ var _ tool.MasteryPath = (*TurnPath)(nil)
 // made against the stored row — a choice question's accepted spellings live
 // there and nowhere else — so the bridge reads it rather than trusting what the
 // model said the question was.
+//
+// It takes the caller because the bank's own read does now: the question belongs
+// to an account, and a verdict filed from a turn may only be made against a
+// question that turn's account can read. The bridge passes the turn's account
+// through, so the two halves of the read — the path's and the question's — are
+// scoped to the same person.
 type QuestionReader interface {
-	Get(ctx context.Context, questionID string) (notebook.Entry, error)
+	Get(ctx context.Context, questionID string, caller authz.Caller) (notebook.Entry, error)
 }
 
 var _ QuestionReader = (*notebook.Service)(nil)
@@ -96,7 +111,11 @@ var _ Judge = (*practice.Judge)(nil)
 // NewTurnPath returns the bridge for one turn on one path.
 //
 // held and holder are the arrival's answer about the lease (§2.3): a turn that
-// did not get it gets a bridge that reads and refuses writes.
+// did not get it gets a bridge that reads and refuses writes. caller is the
+// account every call through this bridge is scoped to, and it is a parameter
+// rather than a field set later for the same reason pathID and actor are: a
+// bridge that could be built without one is a bridge whose calls would have no
+// account to narrow to.
 func NewTurnPath(
 	service *mastery.Service,
 	bank tool.QuestionBank,
@@ -104,6 +123,7 @@ func NewTurnPath(
 	judge Judge,
 	pathID string,
 	actor mastery.Actor,
+	caller authz.Caller,
 	version int64,
 	held bool,
 	holder mastery.Lease,
@@ -115,6 +135,7 @@ func NewTurnPath(
 		judge:   judge,
 		pathID:  pathID,
 		actor:   actor,
+		caller:  caller,
 		version: version,
 		held:    held,
 		holder:  holder,
@@ -192,7 +213,7 @@ func (t *TurnPath) Ask(ctx context.Context, question notebook.Question, knowledg
 		Actor:            t.actor,
 		KnowledgePointID: knowledgePointID,
 		QuestionID:       saved.QuestionID,
-	}); err != nil {
+	}, t.caller); err != nil {
 		return tool.Saved{}, t.refuse(err)
 	}
 	// The question is on the path now, so its version has moved: it is read back
@@ -221,7 +242,7 @@ func (t *TurnPath) Grade(ctx context.Context, questionID, userAnswer string) (to
 	if err := t.writable(); err != nil {
 		return tool.Graded{}, err
 	}
-	entry, err := t.reader.Get(ctx, questionID)
+	entry, err := t.reader.Get(ctx, questionID, t.caller)
 	if err != nil {
 		return tool.Graded{}, t.refuse(err)
 	}
@@ -246,7 +267,7 @@ func (t *TurnPath) Grade(ctx context.Context, questionID, userAnswer string) (to
 		Result:         result,
 		Detail:         detail,
 		AssessmentType: string(judgment.Kind),
-	}); err != nil {
+	}, t.caller); err != nil {
 		return tool.Graded{}, t.refuse(err)
 	}
 	if _, err := t.refresh(ctx); err != nil {
@@ -276,7 +297,7 @@ func (t *TurnPath) Observe(ctx context.Context, observation tool.Observation) (m
 		Source:         mastery.SourceAssessment,
 		Detail:         detail,
 		Actor:          t.actor,
-	}); err != nil {
+	}, t.caller); err != nil {
 		return mastery.View{}, t.refuse(err)
 	}
 	view, err := t.refresh(ctx)
@@ -300,7 +321,7 @@ func (t *TurnPath) Skip(ctx context.Context, knowledgePointID, reason string) er
 		Actor:            t.actor,
 		KnowledgePointID: knowledgePointID,
 		Reason:           reason,
-	}); err != nil {
+	}, t.caller); err != nil {
 		return t.refuse(err)
 	}
 	if _, err := t.refresh(ctx); err != nil {
@@ -317,7 +338,7 @@ func (t *TurnPath) Map(ctx context.Context, modules []mastery.Module) (mastery.V
 	if _, err := t.service.Map(ctx, mastery.MapRequest{
 		Change:  t.change(),
 		Modules: modules,
-	}); err != nil {
+	}, t.caller); err != nil {
 		return mastery.View{}, t.refuse(err)
 	}
 	view, err := t.refresh(ctx)
@@ -338,7 +359,7 @@ func (t *TurnPath) Edit(ctx context.Context, edit tool.KnowledgePointEdit) (mast
 		Edit:     edit.Edit,
 		ToModule: edit.ToModule,
 		Position: edit.Position,
-	}); err != nil {
+	}, t.caller); err != nil {
 		return mastery.View{}, t.refuse(err)
 	}
 	view, err := t.refresh(ctx)
@@ -365,7 +386,7 @@ func (t *TurnPath) Switch(ctx context.Context, pathID string) (mastery.View, err
 		Actor: t.actor,
 		From:  t.pathID,
 		To:    pathID,
-	})
+	}, t.caller)
 	if err != nil {
 		return mastery.View{}, t.refuse(err)
 	}
@@ -382,7 +403,7 @@ func (t *TurnPath) Switch(ctx context.Context, pathID string) (mastery.View, err
 // expired and been taken over while the turn ran, and a turn that has finished
 // with a path should be able to say so either way.
 func (t *TurnPath) Leave(ctx context.Context) error {
-	if _, err := t.service.Release(ctx, t.pathID, t.actor); err != nil {
+	if _, err := t.service.Release(ctx, t.pathID, t.actor, t.caller); err != nil {
 		return t.refuse(err)
 	}
 	return nil
@@ -396,7 +417,7 @@ func (t *TurnPath) change() mastery.Change {
 
 // refresh re-reads the path and moves this turn's version up to what it reads.
 func (t *TurnPath) refresh(ctx context.Context) (mastery.View, error) {
-	view, err := t.service.Load(ctx, t.pathID)
+	view, err := t.service.Load(ctx, t.pathID, t.caller)
 	if err != nil {
 		return mastery.View{}, err
 	}

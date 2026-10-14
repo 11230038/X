@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/data/testdb"
 	"backend/internal/notebook"
 )
@@ -51,8 +52,12 @@ func (h *harness) answerAt(t *testing.T, instant time.Time, review Review) Revie
 	return h.submit(t, review)
 }
 
+// stats reads one window as the account these tests act as. The caller rides in
+// the query rather than in a parameter, so it is set here: a trend is always
+// somebody's, and a query a case writes names only the window it is asking about.
 func (h *harness) stats(t *testing.T, query StatsQuery) Stats {
 	t.Helper()
+	query.Caller = testCaller()
 	stats, err := h.service.Stats(context.Background(), query)
 	if err != nil {
 		t.Fatalf("read the statistics: %v", err)
@@ -247,6 +252,7 @@ func TestAWindowOrBucketThisVersionCannotDrawIsRefused(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
+			test.query.Caller = testCaller()
 			_, err := h.service.Stats(context.Background(), test.query)
 			if !errors.Is(err, ErrInvalidStats) {
 				t.Fatalf("the request was answered with %v", err)
@@ -283,7 +289,7 @@ func TestTheBreakdownsCountTheQuestionsOfTheWindow(t *testing.T) {
 		question := fillFor(text)
 		question.Source = source
 		storeQuestionAt(t, h.resource, entryID, question, at)
-		if err := bank.AddCategories(context.Background(), entryID, []string{category}); err != nil {
+		if err := bank.AddCategories(context.Background(), entryID, []string{category}, testCaller()); err != nil {
 			t.Fatalf("file %s under %s: %v", text, category, err)
 		}
 	}
@@ -313,5 +319,31 @@ func TestTheBreakdownsCountTheQuestionsOfTheWindow(t *testing.T) {
 		if stats.Categories[index] != want {
 			t.Errorf("category breakdown %d is %+v, wanted %+v", index, stats.Categories[index], want)
 		}
+	}
+}
+
+// TestDBTheTrendIsNarrowedToOneAccount is §7.2's acceptance for the statistics:
+// the window counts one account's questions and no others, so two accounts
+// reading the same window are told about their own work rather than a shared
+// total.
+func TestDBTheTrendIsNarrowedToOneAccount(t *testing.T) {
+	h := newStatsHarness(t)
+	storeQuestionAtAs(t, h.resource, "nbe_1", fillFor("我的第一题"), statsDay.Add(9*time.Hour), testCaller())
+	storeQuestionAtAs(t, h.resource, "nbe_2", fillFor("我的第二题"), statsDay.Add(10*time.Hour), testCaller())
+	storeQuestionAtAs(t, h.resource, "nbe_3", fillFor("别人的题"), statsDay.Add(11*time.Hour), otherCaller())
+	window := func(caller authz.Caller) Stats {
+		t.Helper()
+		stats, err := h.service.Stats(context.Background(), StatsQuery{From: statsDay, To: statsDay, Caller: caller})
+		if err != nil {
+			t.Fatalf("read the statistics: %v", err)
+		}
+		return stats
+	}
+
+	if added := bucketAt(t, window(testCaller()), "2026-10-06").Added; added != 2 {
+		t.Errorf("my trend credits me with %d questions, want my own two", added)
+	}
+	if added := bucketAt(t, window(otherCaller()), "2026-10-06").Added; added != 1 {
+		t.Errorf("the other account's trend credits it with %d questions, want its own one", added)
 	}
 }

@@ -58,6 +58,13 @@ func TestLibraryFilesHandlerUploadsSingleFile(t *testing.T) {
 	if uploader.input.Filename != "notes.md" || uploader.input.Content == nil {
 		t.Errorf("uploader input = %+v", uploader.input)
 	}
+	// The file belongs to whoever held the token, and the request cannot say
+	// otherwise: there is no owner field in a multipart body, and a route that
+	// read one would let a caller upload into somebody else's library.
+	if uploader.input.OwnerID != handlerAccountID {
+		t.Errorf("the file was stored for account %d, want the token's %d",
+			uploader.input.OwnerID, handlerAccountID)
+	}
 	if strings.Contains(recorder.Body.String(), "library_path") {
 		t.Fatal("response exposed internal library path")
 	}
@@ -84,7 +91,9 @@ func TestLibraryFilesHandlerRejectsInvalidMultipart(t *testing.T) {
 			return multipartRequest(t, []multipartPart{{field: "file", filename: "a.md", content: strings.Repeat("a", 2048)}})
 		}, wantStatus: 413, wantCode: "request_too_large"},
 		{name: "not multipart", request: func(_ *testing.T) *http.Request {
-			return httptest.NewRequest(http.MethodPost, "/api/v1/library/files", strings.NewReader("data"))
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/library/files", strings.NewReader("data"))
+			request.Header.Set("Authorization", "Bearer "+handlerToken)
+			return request
 		}, wantStatus: 400, wantCode: "invalid_multipart"},
 	}
 
@@ -146,7 +155,7 @@ func newLibraryHandlerRouter(uploader FileUploader, maxBytes int64) *gin.Engine 
 	handler := NewLibraryFilesHandler(uploader, maxBytes, logger)
 	router := gin.New()
 	router.Use(middleware.RequestID())
-	router.POST("/api/v1/library/files", handler.Upload)
+	router.POST("/api/v1/library/files", guard(), handler.Upload)
 	return router
 }
 
@@ -163,6 +172,9 @@ func multipartRequest(t *testing.T, parts []multipartPart) *http.Request {
 
 func multipartRequestWithValue(t *testing.T, parts []multipartPart, field, value string) *http.Request {
 	t.Helper()
+	// The upload route is behind the token, so the request has to carry one: what
+	// this file is testing is what the handler does with a file, not what the
+	// middleware does without a token.
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	for _, part := range parts {
@@ -184,5 +196,6 @@ func multipartRequestWithValue(t *testing.T, parts []multipartPart, field, value
 	}
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/library/files", &body)
 	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.Header.Set("Authorization", "Bearer "+handlerToken)
 	return request
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"backend/internal/authz"
+	"backend/internal/data"
 	"backend/internal/data/models"
 	"backend/internal/notebook"
 	"gorm.io/datatypes"
@@ -17,6 +19,61 @@ import (
 // nothing to name.
 const tableState = "practice_review_state"
 
+// ownedEntries is the caller's questions, as the subquery the review tables are
+// narrowed through.
+//
+// Neither review table carries an owner column — migration 00014 gave one to
+// notebook_entries and to the seven others, and these two are not among them —
+// because ownership is derived: a review state and a review event are filed
+// under the question they are about, so their owner is that question's owner.
+// The subquery is how that one rule is stated once instead of twice, and it is
+// the same shape the session and knowledge-base adapters use for their
+// owner-derived children.
+func ownedEntries(db *gorm.DB, caller authz.Caller) *gorm.DB {
+	return data.OwnerScope(db.Model(&models.NotebookEntry{}).Select("notebook_entries_id"),
+		caller.UserID, caller.IsAdmin(), "owner_id")
+}
+
+// ownerPredicate is OwnerScope's rule as a raw predicate over the table aliased
+// alias.
+//
+// The two raw statements in this package — the state join and the queue — cannot
+// go through data.OwnerScope, which takes a *gorm.DB and builds a WHERE for it,
+// because the predicate has to sit inside a statement that is written whole. So
+// the one rule is restated here, once, and every raw read in the package takes
+// it from here rather than spelling it out again. It returns the predicate and
+// the single bound value it wants, so a caller can slot both into its argument
+// list.
+func ownerPredicate(alias string, caller authz.Caller) (string, int64) {
+	column := alias + ".owner_id"
+	if caller.IsAdmin() {
+		return "(" + column + " = ? OR " + column + " IS NULL)", caller.UserID
+	}
+	return column + " = ?", caller.UserID
+}
+
+// requireOwnedEntry reports a question the caller may not see, so that nothing
+// can be written under it.
+//
+// It is the guard the two inserts share. The review tables have no owner column
+// of their own and a statement that only inserts has no WHERE to narrow, so the
+// parent question is read through the scope the rest of the package reads
+// through before anything is filed under it. A question belonging to another
+// account answers ErrNotFound, which is the same answer a question that is
+// nowhere gets.
+func requireOwnedEntry(db *gorm.DB, ctx context.Context, entryID string, caller authz.Caller) error {
+	var entry models.NotebookEntry
+	query := data.OwnerScope(db.WithContext(ctx), caller.UserID, caller.IsAdmin(), "owner_id")
+	err := query.Select("notebook_entries_id").First(&entry, "notebook_entries_id = ?", entryID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("%w: %s", ErrNotFound, entryID)
+	}
+	if err != nil {
+		return fmt.Errorf("look for question %s: %w", entryID, err)
+	}
+	return nil
+}
+
 // Repository is the storage the review path needs.
 //
 // Every method here is one statement, and the shape of the interface is what
@@ -26,6 +83,12 @@ const tableState = "practice_review_state"
 // than asking them. The transaction is the service's too, which is why the only
 // way in is Within: a repository that could be used without a transaction would
 // be a repository that could write half a submission.
+//
+// Every method takes the caller last, and none of them decides anything about
+// it: §2.3 makes the account a filter rather than a check, so the caller's
+// questions are the only ones a review state or a review event can be reached
+// through, and a question belonging to another account is answered as absent.
+// Stats takes a StatsQuery, which carries the caller inside it.
 type Repository interface {
 	// Within runs work against one transaction. The repository it hands over is
 	// bound to that transaction and is the only one the work may use: a write
@@ -35,11 +98,11 @@ type Repository interface {
 	Within(ctx context.Context, work func(Repository) error) error
 
 	// Entry reads a question, its answer face, and the state beside it.
-	Entry(ctx context.Context, questionID string) (StoredEntry, error)
+	Entry(ctx context.Context, questionID string, caller authz.Caller) (StoredEntry, error)
 	// Queue reads the questions to practise now, at most size of them. The time
 	// is the caller's: "due" is a comparison against a clock, and a repository
 	// that read one would make every case about the day it ran on.
-	Queue(ctx context.Context, now time.Time, size int) ([]QueueItem, error)
+	Queue(ctx context.Context, now time.Time, size int, caller authz.Caller) ([]QueueItem, error)
 	// Stats reads the practice history of one window, bucket by bucket, with the
 	// distribution of that window's questions.
 	Stats(ctx context.Context, query StatsQuery) (Stats, error)
@@ -50,24 +113,24 @@ type Repository interface {
 	// It is separate from Queue and not a narrower Queue, because the two answer
 	// different questions: Queue asks which questions a sitting should ask, and
 	// this asks when the questions somebody is already looking at come back.
-	DueTimes(ctx context.Context, entryIDs []string) (map[string]time.Time, error)
+	DueTimes(ctx context.Context, entryIDs []string, caller authz.Caller) (map[string]time.Time, error)
 	// RecordedReview reads an event row by its request id, ErrNotFound when
 	// there is none.
-	RecordedReview(ctx context.Context, requestID string) (StoredReview, error)
+	RecordedReview(ctx context.Context, requestID string, caller authz.Caller) (StoredReview, error)
 
 	// RecordReview writes one event. ErrDuplicate means this request id has
 	// already been recorded.
-	RecordReview(ctx context.Context, review StoredReview) error
+	RecordReview(ctx context.Context, review StoredReview, caller authz.Caller) error
 	// StartState writes the first state row for a question, at version 0.
 	// ErrDuplicate means somebody else created it first.
-	StartState(ctx context.Context, entryID string, state State) error
+	StartState(ctx context.Context, entryID string, state State, caller authz.Caller) error
 	// AdvanceState moves a state row from one version to the next, and reports
 	// whether it was still at the version it was read at: false is the answer
 	// this whole path exists to be able to give.
-	AdvanceState(ctx context.Context, entryID string, expected int64, state State) (bool, error)
+	AdvanceState(ctx context.Context, entryID string, expected int64, state State, caller authz.Caller) (bool, error)
 	// RecordAnswer writes the answer face of a submission. What it leaves out is
 	// AnswerFace's business, not this method's.
-	RecordAnswer(ctx context.Context, entryID string, face AnswerFace, now time.Time) error
+	RecordAnswer(ctx context.Context, entryID string, face AnswerFace, now time.Time, caller authz.Caller) error
 }
 
 // GORMRepository reads and writes the review tables through GORM (seekdb over
@@ -122,7 +185,7 @@ const stateOfQuestionSQL = "SELECT e.notebook_entries_id AS id, " +
 // The two statements are not one transaction of their own. The caller's
 // transaction is what makes the pair consistent, because the guard is what
 // turns the state read into a promise about everything after it.
-func (r *GORMRepository) Entry(ctx context.Context, questionID string) (StoredEntry, error) {
+func (r *GORMRepository) Entry(ctx context.Context, questionID string, caller authz.Caller) (StoredEntry, error) {
 	if err := r.ready(); err != nil {
 		return StoredEntry{}, err
 	}
@@ -138,7 +201,11 @@ func (r *GORMRepository) Entry(ctx context.Context, questionID string) (StoredEn
 		Lapses         *int32     `gorm:"column:lapses"`
 		Version        *int64     `gorm:"column:version"`
 	}
-	err := r.db.WithContext(ctx).Raw(stateOfQuestionSQL, questionID).Scan(&state).Error
+	// The join is narrowed to the caller's own entries, so the state and the row
+	// key both come from a question this account may see: another account's
+	// question is not there to join to, and the empty key below reads as absent.
+	scope, owner := ownerPredicate("e", caller)
+	err := r.db.WithContext(ctx).Raw(stateOfQuestionSQL+" AND "+scope, questionID, owner).Scan(&state).Error
 	if err != nil {
 		return StoredEntry{}, fmt.Errorf("read the review state of question %s: %w", questionID, err)
 	}
@@ -150,7 +217,11 @@ func (r *GORMRepository) Entry(ctx context.Context, questionID string) (StoredEn
 	}
 
 	var record models.NotebookEntry
-	err = r.db.WithContext(ctx).First(&record, "notebook_entries_id = ?", state.ID).Error
+	// Scoped as well, even though the key came from the scoped join: a read that
+	// trusted the key it was handed would be a second, unscoped door onto the
+	// row, and the two doors would only have to disagree once.
+	entryQuery := data.OwnerScope(r.db.WithContext(ctx), caller.UserID, caller.IsAdmin(), "owner_id")
+	err = entryQuery.First(&record, "notebook_entries_id = ?", state.ID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		// It was there for the join and gone for this read, so it was removed in
 		// between. Reporting it as absent is the truth about it now.
@@ -192,7 +263,7 @@ func (r *GORMRepository) Entry(ctx context.Context, questionID string) (StoredEn
 // Only the due time is selected. The rest of the state row — the streak, the
 // ease, the review count — belongs to the curve and to the queue, and a listing
 // that carried it would be handing a client numbers it has no use for.
-func (r *GORMRepository) DueTimes(ctx context.Context, entryIDs []string) (map[string]time.Time, error) {
+func (r *GORMRepository) DueTimes(ctx context.Context, entryIDs []string, caller authz.Caller) (map[string]time.Time, error) {
 	due := make(map[string]time.Time, len(entryIDs))
 	if err := r.ready(); err != nil {
 		return nil, err
@@ -204,9 +275,15 @@ func (r *GORMRepository) DueTimes(ctx context.Context, entryIDs []string) (map[s
 		EntryID string     `gorm:"column:notebook_entries_id"`
 		DueTime *time.Time `gorm:"column:due_time"`
 	}
+	// The state table has no owner of its own, so the caller narrows it through
+	// the questions the state is filed under: a row key belonging to another
+	// account is not in this account's entries and yields no date rather than
+	// somebody else's date.
+	owned := ownedEntries(r.db.WithContext(ctx), caller)
 	err := r.db.WithContext(ctx).Table(tableState).
 		Select("notebook_entries_id, due_time").
 		Where("notebook_entries_id IN ?", entryIDs).
+		Where("notebook_entries_id IN (?)", owned).
 		Find(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("read the due times of %d questions: %w", len(entryIDs), err)
@@ -225,12 +302,21 @@ func (r *GORMRepository) DueTimes(ctx context.Context, entryIDs []string) (map[s
 }
 
 // RecordedReview reads one event row by its request id.
-func (r *GORMRepository) RecordedReview(ctx context.Context, requestID string) (StoredReview, error) {
+//
+// The caller narrows it through the question the event is filed under, which is
+// the only owner this table has. A request id that belongs to another account is
+// not found, which is what makes an id one account cannot use to read another's
+// submission.
+func (r *GORMRepository) RecordedReview(ctx context.Context, requestID string, caller authz.Caller) (StoredReview, error) {
 	if err := r.ready(); err != nil {
 		return StoredReview{}, err
 	}
 	var record models.PracticeReviewEvent
-	err := r.db.WithContext(ctx).First(&record, "request_id = ?", requestID).Error
+	owned := ownedEntries(r.db.WithContext(ctx), caller)
+	err := r.db.WithContext(ctx).
+		Where("request_id = ?", requestID).
+		Where("notebook_entries_id IN (?)", owned).
+		First(&record).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return StoredReview{}, fmt.Errorf("%w: review %s", ErrNotFound, requestID)
 	}
@@ -256,8 +342,14 @@ func (r *GORMRepository) RecordedReview(ctx context.Context, requestID string) (
 // makes the answer usable — a check made by reading and then inserting has a
 // window between the two, and a submission recorded twice is exactly what this
 // path exists to prevent.
-func (r *GORMRepository) RecordReview(ctx context.Context, review StoredReview) error {
+func (r *GORMRepository) RecordReview(ctx context.Context, review StoredReview, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
+		return err
+	}
+	// An insert has no WHERE to narrow, so the question this event is filed under
+	// is read through the scope first: without it a caller holding another
+	// account's row key could attach a review to that account's question.
+	if err := requireOwnedEntry(r.db, ctx, review.NotebookEntriesID, caller); err != nil {
 		return err
 	}
 	record := models.PracticeReviewEvent{
@@ -273,8 +365,13 @@ func (r *GORMRepository) RecordReview(ctx context.Context, review StoredReview) 
 }
 
 // StartState writes the first state row for a question.
-func (r *GORMRepository) StartState(ctx context.Context, entryID string, state State) error {
+func (r *GORMRepository) StartState(ctx context.Context, entryID string, state State, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
+		return err
+	}
+	// Same guard as RecordReview, and for the same reason: this is an insert, so
+	// the question it is filed under has to be checked before it is written.
+	if err := requireOwnedEntry(r.db, ctx, entryID, caller); err != nil {
 		return err
 	}
 	columns := stateColumns(state)
@@ -294,14 +391,19 @@ func (r *GORMRepository) StartState(ctx context.Context, entryID string, state S
 // row had plus one, which is what makes the guard a comparison rather than a
 // write, and which stays correct when two writers reach the row in the same
 // instant and only the first may count.
-func (r *GORMRepository) AdvanceState(ctx context.Context, entryID string, expected int64, state State) (bool, error) {
+func (r *GORMRepository) AdvanceState(ctx context.Context, entryID string, expected int64, state State, caller authz.Caller) (bool, error) {
 	if err := r.ready(); err != nil {
 		return false, err
 	}
 	columns := stateColumns(state)
 	columns["version"] = gorm.Expr("version + 1")
+	// The update is narrowed to the caller's own entries, the same subquery the
+	// reads use: a row key belonging to another account does not match, so the
+	// guard reports false rather than moving somebody else's curve.
+	owned := ownedEntries(r.db.WithContext(ctx), caller)
 	result := r.db.WithContext(ctx).Table(tableState).
 		Where("notebook_entries_id = ? AND version = ?", entryID, expected).
+		Where("notebook_entries_id IN (?)", owned).
 		Updates(columns)
 	if result.Error != nil {
 		return false, fmt.Errorf("advance the review state of %s: %w", entryID, result.Error)
@@ -316,7 +418,7 @@ func (r *GORMRepository) AdvanceState(ctx context.Context, entryID string, expec
 // nothing else will fix what it writes. What it writes is the face and the
 // update time and nothing else — not the question, not the marks a review does
 // not speak for, and not the row key.
-func (r *GORMRepository) RecordAnswer(ctx context.Context, entryID string, face AnswerFace, now time.Time) error {
+func (r *GORMRepository) RecordAnswer(ctx context.Context, entryID string, face AnswerFace, now time.Time, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
 		return err
 	}
@@ -330,9 +432,12 @@ func (r *GORMRepository) RecordAnswer(ctx context.Context, entryID string, face 
 	if face.Resolved != nil {
 		columns["resolved"] = *face.Resolved
 	}
-	err := r.db.WithContext(ctx).Table("notebook_entries").
-		Where("notebook_entries_id = ?", entryID).
-		Updates(columns).Error
+	// This writes the question row itself, which has an owner column, so the
+	// scope is applied directly rather than through a subquery: the answer face
+	// moves for the caller's question and for no other.
+	query := data.OwnerScope(r.db.WithContext(ctx).Table("notebook_entries"),
+		caller.UserID, caller.IsAdmin(), "owner_id")
+	err := query.Where("notebook_entries_id = ?", entryID).Updates(columns).Error
 	if err != nil {
 		return fmt.Errorf("write the answer face of %s: %w", entryID, err)
 	}

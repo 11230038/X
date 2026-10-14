@@ -74,7 +74,7 @@ func TestPracticeHandlerMapsItsRefusals(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			stub := &practiceStub{err: test.err}
-			recorder := call(t, newPracticeRouter(stub, 20), http.MethodPost,
+			recorder := callAs(t, newPracticeRouter(stub, 20), http.MethodPost,
 				"/api/v1/practice/reviews",
 				`{"request_id":"req_1","question_id":"qn_1","user_answer":"答"}`)
 
@@ -115,7 +115,7 @@ func TestPracticeHandlerTellsTheTwoVersionConflictsApart(t *testing.T) {
 
 	t.Run("with the state", func(t *testing.T) {
 		stub := &practiceStub{err: &practice.StaleReview{State: state}}
-		recorder := call(t, newPracticeRouter(stub, 20), http.MethodPost,
+		recorder := callAs(t, newPracticeRouter(stub, 20), http.MethodPost,
 			"/api/v1/practice/reviews",
 			`{"request_id":"req_1","question_id":"qn_1","user_answer":"答"}`)
 		var envelope struct {
@@ -135,7 +135,7 @@ func TestPracticeHandlerTellsTheTwoVersionConflictsApart(t *testing.T) {
 
 	t.Run("without it", func(t *testing.T) {
 		stub := &practiceStub{err: practice.ErrStaleReview}
-		recorder := call(t, newPracticeRouter(stub, 20), http.MethodPost,
+		recorder := callAs(t, newPracticeRouter(stub, 20), http.MethodPost,
 			"/api/v1/practice/reviews",
 			`{"request_id":"req_1","question_id":"qn_1","user_answer":"答"}`)
 		var envelope struct {
@@ -156,7 +156,7 @@ func TestPracticeHandlerTellsTheTwoVersionConflictsApart(t *testing.T) {
 // client is handed is a status and a code.
 func TestPracticeHandlerDoesNotReportStorageToTheClient(t *testing.T) {
 	stub := &practiceStub{err: errors.New("private database details")}
-	recorder := call(t, newPracticeRouter(stub, 20), http.MethodGet, "/api/v1/practice/queue", "")
+	recorder := callAs(t, newPracticeRouter(stub, 20), http.MethodGet, "/api/v1/practice/queue", "")
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500; body=%s", recorder.Code, recorder.Body.String())
 	}

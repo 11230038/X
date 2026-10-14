@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 
+	"backend/internal/authz"
 	"backend/internal/kb"
 	"backend/internal/library"
 )
@@ -22,9 +23,16 @@ type fileSource struct {
 
 var _ kb.FileSource = fileSource{}
 
-// Open reads one stored file for parsing.
-func (f fileSource) Open(ctx context.Context, fileID string) (kb.SourceFile, error) {
-	file, err := f.library.Open(ctx, fileID)
+// Open reads one stored file for parsing, as the caller's own file.
+//
+// The account is passed through rather than dropped here, and this adapter is
+// exactly where it would be easiest to drop: the port is about bytes, the
+// library is about bytes, and the account looks like neither one's business. It
+// is both of theirs. Whoever holds a file id could otherwise ask the knowledge
+// base to parse somebody else's upload into their own collection and read it
+// back as a document, which is the upload's contents by a longer road.
+func (f fileSource) Open(ctx context.Context, fileID string, caller authz.Caller) (kb.SourceFile, error) {
+	file, err := f.library.Open(ctx, fileID, caller)
 	if err != nil {
 		return kb.SourceFile{}, err
 	}

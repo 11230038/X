@@ -14,7 +14,7 @@ func TestLocateFindsThePassagesThatAnswerAQuery(t *testing.T) {
 	base := h.base(t, "kb")
 	document := h.addDocument(t, base.ID, "lib_one", attachmentText)
 
-	found, err := h.service.Locate(context.Background(), document.ID, "熔断器 打开", 2)
+	found, err := h.service.Locate(context.Background(), document.ID, "熔断器 打开", 2, testCaller())
 	if err != nil {
 		t.Fatalf("Locate() error = %v", err)
 	}
@@ -59,7 +59,7 @@ func TestLocateFallsBackToTheDocumentsOpening(t *testing.T) {
 	base := h.base(t, "kb")
 	document := h.addDocument(t, base.ID, "lib_one", attachmentText)
 
-	found, err := h.service.Locate(context.Background(), document.ID, "量子色动力学", 2)
+	found, err := h.service.Locate(context.Background(), document.ID, "量子色动力学", 2, testCaller())
 	if err != nil {
 		t.Fatalf("Locate() error = %v", err)
 	}
@@ -86,11 +86,11 @@ func TestLocateReadsOnlyTheActiveRevision(t *testing.T) {
 	h := newHarness(t)
 	base := h.base(t, "kb")
 	document := h.addDocument(t, base.ID, "lib_one", attachmentText)
-	if _, err := h.service.RebuildDocument(context.Background(), document.ID); err != nil {
+	if _, err := h.service.RebuildDocument(context.Background(), document.ID, testCaller()); err != nil {
 		t.Fatalf("RebuildDocument() error = %v", err)
 	}
 
-	found, err := h.service.Locate(context.Background(), document.ID, "熔断器", 5)
+	found, err := h.service.Locate(context.Background(), document.ID, "熔断器", 5, testCaller())
 	if err != nil {
 		t.Fatalf("Locate() error = %v", err)
 	}
@@ -107,7 +107,7 @@ func TestLocateRefusesAQueryItCannotTokenise(t *testing.T) {
 	document := h.addDocument(t, base.ID, "lib_one", attachmentText)
 
 	for _, query := range []string{"", "  ", "熔"} {
-		if _, err := h.service.Locate(context.Background(), document.ID, query, 3); !errors.Is(err, ErrQueryTooShort) {
+		if _, err := h.service.Locate(context.Background(), document.ID, query, 3, testCaller()); !errors.Is(err, ErrQueryTooShort) {
 			t.Errorf("Locate(%q) error = %v, want ErrQueryTooShort", query, err)
 		}
 	}
@@ -115,7 +115,7 @@ func TestLocateRefusesAQueryItCannotTokenise(t *testing.T) {
 
 func TestLocateReportsADocumentThatIsNotThere(t *testing.T) {
 	h := newHarness(t)
-	if _, err := h.service.Locate(context.Background(), "doc_missing", "熔断器", 3); !errors.Is(err, ErrNotFound) {
+	if _, err := h.service.Locate(context.Background(), "doc_missing", "熔断器", 3, testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("error = %v, want ErrNotFound", err)
 	}
 }
@@ -189,12 +189,12 @@ func TestLocateOnADocumentWithNoChunks(t *testing.T) {
 	h := newHarness(t)
 	base := h.base(t, "kb")
 	h.addFile("lib_empty", "empty.md", "")
-	document, err := h.service.AddDocument(context.Background(), "lib_empty", base.ID)
+	document, err := h.service.AddDocument(context.Background(), "lib_empty", base.ID, testCaller())
 	if err != nil {
 		t.Fatalf("AddDocument(empty) error = %v", err)
 	}
 
-	found, err := h.service.Locate(context.Background(), document.ID, "熔断器", 3)
+	found, err := h.service.Locate(context.Background(), document.ID, "熔断器", 3, testCaller())
 	if err != nil {
 		t.Fatalf("Locate() error = %v", err)
 	}

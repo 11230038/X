@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"backend/internal/authz"
+	"backend/internal/data"
 	"backend/internal/data/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -32,6 +34,7 @@ func (r *GORMRepository) Create(ctx context.Context, record Session) error {
 	model := models.Session{
 		SessionID: record.ID,
 		Title:     titlePointer(record.Title),
+		OwnerID:   data.OwnerPointer(record.OwnerID),
 		CreatedAt: record.CreatedAt,
 		UpdatedAt: record.UpdatedAt,
 	}
@@ -41,13 +44,50 @@ func (r *GORMRepository) Create(ctx context.Context, record Session) error {
 	return nil
 }
 
+// Claim hands a session that belongs to nobody to the caller.
+//
+// The update is one statement with the whole condition in it — the id, the
+// scope, and `owner_id IS NULL` — and that is deliberate. Reading the row and
+// then writing it would leave the window between the two in which a second
+// claim, or a deletion, makes the write land on a row the read did not describe.
+// Here a lost race is a row that did not change, which is a fact this function
+// can answer from.
+//
+// A row that did not change is then either the caller's already or not there at
+// all, and the re-read says which. It is the same scoped read the rest of this
+// file uses, so a session belonging to another account answers ErrNotFound here
+// exactly as it does everywhere else.
+func (r *GORMRepository) Claim(ctx context.Context, sessionID string, caller authz.Caller) error {
+	if err := r.ready(); err != nil {
+		return err
+	}
+	update := r.db.WithContext(ctx).Model(&models.Session{}).
+		Where("session_id = ? AND owner_id IS NULL", sessionID).
+		Update("owner_id", caller.UserID)
+	if update.Error != nil {
+		return fmt.Errorf("claim session: %w", update.Error)
+	}
+	if update.RowsAffected > 0 {
+		return nil
+	}
+	if _, err := r.Session(ctx, sessionID, caller); err != nil {
+		return err
+	}
+	// Visible and unchanged: the caller already holds it. Claiming what is
+	// already yours is the outcome the caller asked for, so it is not an error —
+	// and saying so is more use than a conflict a client would have to special
+	// case for the ordinary case of a double-click.
+	return nil
+}
+
 // Session returns one session whatever state it is in.
-func (r *GORMRepository) Session(ctx context.Context, sessionID string) (Session, error) {
+func (r *GORMRepository) Session(ctx context.Context, sessionID string, caller authz.Caller) (Session, error) {
 	if err := r.ready(); err != nil {
 		return Session{}, err
 	}
 	var model models.Session
-	if err := r.db.WithContext(ctx).First(&model, "session_id = ?", sessionID).Error; err != nil {
+	query := data.OwnerScope(r.db.WithContext(ctx), caller.UserID, caller.IsAdmin(), "owner_id")
+	if err := query.First(&model, "session_id = ?", sessionID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return Session{}, fmt.Errorf("%w: %s", ErrNotFound, sessionID)
 		}
@@ -69,6 +109,9 @@ func (r *GORMRepository) List(ctx context.Context, options ListOptions) ([]Sessi
 	query := r.db.WithContext(ctx).
 		Where("is_deleted = ?", options.Deleted).
 		Order("update_time DESC, session_id ASC").
+		Scopes(func(query *gorm.DB) *gorm.DB {
+			return data.OwnerScope(query, options.Caller.UserID, options.Caller.IsAdmin(), "owner_id")
+		}).
 		Limit(clampLimit(options.Limit)).
 		Offset(max(options.Offset, 0))
 	if err := query.Find(&records).Error; err != nil {
@@ -82,8 +125,8 @@ func (r *GORMRepository) List(ctx context.Context, options ListOptions) ([]Sessi
 }
 
 // Rename sets a session's title and marks the change as activity.
-func (r *GORMRepository) Rename(ctx context.Context, sessionID, title string, now time.Time) error {
-	return r.update(ctx, sessionID, map[string]any{
+func (r *GORMRepository) Rename(ctx context.Context, sessionID, title string, now time.Time, caller authz.Caller) error {
+	return r.update(ctx, sessionID, caller, map[string]any{
 		"title":       title,
 		"update_time": now,
 	})
@@ -94,23 +137,24 @@ func (r *GORMRepository) Rename(ctx context.Context, sessionID, title string, no
 // Both columns are written together because the table's check constraint
 // requires them to agree, so a state where one was updated and the other was not
 // is rejected by the database rather than stored.
-func (r *GORMRepository) SetDeleted(ctx context.Context, sessionID string, deleted bool, now time.Time) error {
+func (r *GORMRepository) SetDeleted(ctx context.Context, sessionID string, deleted bool, now time.Time, caller authz.Caller) error {
 	updates := map[string]any{"is_deleted": deleted, "update_time": now}
 	if deleted {
 		updates["deleted_at"] = now
 	} else {
 		updates["deleted_at"] = nil
 	}
-	return r.update(ctx, sessionID, updates)
+	return r.update(ctx, sessionID, caller, updates)
 }
 
 // Delete removes a session for good. Its messages and turns go with it, through
 // the cascade the schema already declares.
-func (r *GORMRepository) Delete(ctx context.Context, sessionID string) error {
+func (r *GORMRepository) Delete(ctx context.Context, sessionID string, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
 		return err
 	}
-	result := r.db.WithContext(ctx).Delete(&models.Session{}, "session_id = ?", sessionID)
+	scoped := data.OwnerScope(r.db.WithContext(ctx), caller.UserID, caller.IsAdmin(), "owner_id")
+	result := scoped.Delete(&models.Session{}, "session_id = ?", sessionID)
 	if result.Error != nil {
 		return fmt.Errorf("delete session: %w", result.Error)
 	}
@@ -124,12 +168,12 @@ func (r *GORMRepository) Delete(ctx context.Context, sessionID string) error {
 }
 
 // AppendMessage stores a message and marks the session active, together.
-func (r *GORMRepository) AppendMessage(ctx context.Context, record Message) error {
+func (r *GORMRepository) AppendMessage(ctx context.Context, record Message, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
 		return err
 	}
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := requireSession(tx, record.SessionID); err != nil {
+		if err := requireSession(tx, record.SessionID, caller); err != nil {
 			return err
 		}
 		model := models.Message{
@@ -158,15 +202,26 @@ func (r *GORMRepository) AppendMessage(ctx context.Context, record Message) erro
 }
 
 // Messages returns a session's messages, oldest first.
-func (r *GORMRepository) Messages(ctx context.Context, sessionID string) ([]Message, error) {
+//
+// The ownership filter is on the session rather than on the message, because a
+// message has no owner of its own: it is a child of the conversation, and a
+// child's owner is its parent's (migration 00014 gave it no column). The
+// subquery is what keeps that one rule in one place instead of a second copy of
+// it here.
+func (r *GORMRepository) Messages(ctx context.Context, sessionID string, caller authz.Caller) ([]Message, error) {
 	if err := r.ready(); err != nil {
 		return nil, err
 	}
 	var records []models.Message
+	owned := data.OwnerScope(
+		r.db.WithContext(ctx).Model(&models.Session{}).Select("session_id"),
+		caller.UserID, caller.IsAdmin(), "owner_id",
+	)
 	// message_id breaks ties: two messages can share a timestamp, and the order
 	// the model sees has to be the order they were written in.
 	err := r.db.WithContext(ctx).
 		Where("session_id = ?", sessionID).
+		Where("session_id IN (?)", owned).
 		Order("creat_time ASC, message_id ASC").
 		Find(&records).Error
 	if err != nil {
@@ -181,12 +236,12 @@ func (r *GORMRepository) Messages(ctx context.Context, sessionID string) ([]Mess
 
 // update applies a column change to one session and reports whether it was
 // there.
-func (r *GORMRepository) update(ctx context.Context, sessionID string, updates map[string]any) error {
+func (r *GORMRepository) update(ctx context.Context, sessionID string, caller authz.Caller, updates map[string]any) error {
 	if err := r.ready(); err != nil {
 		return err
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := requireSession(tx, sessionID); err != nil {
+		if err := requireSession(tx, sessionID, caller); err != nil {
 			return err
 		}
 		if err := tx.Model(&models.Session{}).
@@ -208,9 +263,10 @@ func (r *GORMRepository) update(ctx context.Context, sessionID string, updates m
 // message appended in the same second as the session's last update — into an
 // error about a session that is right there. The read is a locking one, so what
 // it reports still holds when the write that follows lands.
-func requireSession(tx *gorm.DB, sessionID string) error {
+func requireSession(tx *gorm.DB, sessionID string, caller authz.Caller) error {
 	var stored models.Session
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+	query := data.OwnerScope(tx, caller.UserID, caller.IsAdmin(), "owner_id")
+	err := query.Clauses(clause.Locking{Strength: "UPDATE"}).
 		First(&stored, "session_id = ?", sessionID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return fmt.Errorf("%w: %s", ErrNotFound, sessionID)
@@ -233,6 +289,9 @@ func toSession(model models.Session) Session {
 		ID:        model.SessionID,
 		CreatedAt: model.CreatedAt,
 		UpdatedAt: model.UpdatedAt,
+	}
+	if model.OwnerID != nil {
+		converted.OwnerID = *model.OwnerID
 	}
 	if model.Title != nil {
 		converted.Title = *model.Title

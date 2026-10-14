@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"backend/internal/authz"
 	"backend/internal/embed"
 	"backend/internal/parse"
 )
@@ -39,11 +40,24 @@ type stubFiles struct {
 	files  map[string]stubFile
 	err    error
 	opened []string
+	// openedBy is the account each Open was made on behalf of, in step with
+	// opened: what a caller to this package carries has to reach the library, and
+	// an id in a file's place is not the same as an account asking for it.
+	openedBy []int64
 }
 
-func (s *stubFiles) Open(_ context.Context, fileID string) (SourceFile, error) {
+// Open ignores the caller and records who asked, which is the one thing a
+// stand-in for storage can honestly do here: a file's owner is a column in
+// another domain's table, and a fake that pretended to check it would be
+// asserting its own copy of a rule. What the ownership of a file does is
+// checked where the file row is read, in the library package and against a real
+// database. What is worth seeing from here is that the account reached this
+// far — a turn's caller has to travel through the knowledge base to the file it
+// parses, and this is that it did.
+func (s *stubFiles) Open(_ context.Context, fileID string, caller authz.Caller) (SourceFile, error) {
 	s.mu.Lock()
 	s.opened = append(s.opened, fileID)
+	s.openedBy = append(s.openedBy, caller.UserID)
 	s.mu.Unlock()
 	if s.err != nil {
 		return SourceFile{}, s.err
@@ -167,7 +181,7 @@ func (h *harness) addFile(fileID, name, content string) {
 // base creates a knowledge base, asserting it was created.
 func (h *harness) base(t *testing.T, name string) KnowledgeBase {
 	t.Helper()
-	base, err := h.service.CreateKnowledgeBase(context.Background(), name, "")
+	base, err := h.service.CreateKnowledgeBase(context.Background(), name, "", testCaller())
 	if err != nil {
 		t.Fatalf("CreateKnowledgeBase(%q) error = %v", name, err)
 	}
@@ -178,7 +192,7 @@ func (h *harness) base(t *testing.T, name string) KnowledgeBase {
 func (h *harness) addDocument(t *testing.T, kbID, fileID, content string) Document {
 	t.Helper()
 	h.addFile(fileID, fileID+".md", content)
-	document, err := h.service.AddDocument(context.Background(), fileID, kbID)
+	document, err := h.service.AddDocument(context.Background(), fileID, kbID, testCaller())
 	if err != nil {
 		t.Fatalf("AddDocument(%q) error = %v", fileID, err)
 	}
@@ -211,7 +225,7 @@ func (h *harness) worker(t *testing.T, adjust ...func(*WorkerOptions)) *Worker {
 // stored reads a document back, asserting it is still there.
 func (h *harness) stored(t *testing.T, documentID string) Document {
 	t.Helper()
-	document, err := h.repo.Document(context.Background(), documentID)
+	document, err := h.repo.Document(context.Background(), documentID, testCaller())
 	if err != nil {
 		t.Fatalf("read document %s: %v", documentID, err)
 	}

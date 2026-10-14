@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"backend/internal/authz"
 	"backend/internal/httpx"
 	"backend/internal/kb"
 	"backend/internal/library"
@@ -35,6 +36,13 @@ func NewLibraryFilesHandler(uploader FileUploader, maxRequestBytes int64, logger
 func (h *LibraryFilesHandler) Upload(c *gin.Context) {
 	if h == nil || h.uploader == nil || h.maxRequestBytes <= 0 {
 		httpx.WriteError(c, http.StatusInternalServerError, "upload_failed", "file upload failed")
+		return
+	}
+	// The account is read before the body is: every file that gets stored has to
+	// belong to somebody, and reading half a gigabyte before discovering that
+	// nobody is signed in is work done for a request that cannot succeed.
+	account, ok := caller(c)
+	if !ok {
 		return
 	}
 	if c.Request.ContentLength > h.maxRequestBytes {
@@ -88,7 +96,8 @@ func (h *LibraryFilesHandler) Upload(c *gin.Context) {
 	}
 	defer file.Close()
 	result, err := h.uploader.Upload(c.Request.Context(), library.UploadInput{
-		Filename: fileHeaders[0].Filename, DeclaredMIME: fileHeaders[0].Header.Get("Content-Type"), Content: file,
+		Filename: fileHeaders[0].Filename, DeclaredMIME: fileHeaders[0].Header.Get("Content-Type"),
+		Content: file, OwnerID: account.UserID,
 	})
 	if err != nil {
 		h.writeUploadError(c, err)
@@ -119,25 +128,32 @@ func (h *LibraryFilesHandler) writeUploadError(c *gin.Context, err error) {
 
 // FileLibrary is the read side of the file library: one file's metadata.
 type FileLibrary interface {
-	Find(ctx context.Context, id string) (library.UploadResult, error)
+	Find(ctx context.Context, id string, caller authz.Caller) (library.UploadResult, error)
 }
 
 // MaterialReader is the parsed side of a file: the document it was read into,
 // a window of the text a model was shown, and where the chunk boundaries of that
 // document's active revision fall.
+//
+// The caller is on every method for the same reason it is on FileLibrary above:
+// the file id in the path has already been proved to be the caller's, and a
+// document read that took the id on trust would be the same read arriving by a
+// second door. A document has no owner of its own — it is the caller's when the
+// collection or the file behind it is.
 type MaterialReader interface {
-	DocumentOfFile(ctx context.Context, fileID string) (kb.Document, error)
-	ReadWindow(ctx context.Context, documentID string, offset, limit int64) (kb.Window, error)
-	ChunkSpans(ctx context.Context, documentID string) ([]kb.ChunkSpan, error)
+	DocumentOfFile(ctx context.Context, fileID string, caller authz.Caller) (kb.Document, error)
+	ReadWindow(ctx context.Context, documentID string, offset, limit int64, caller authz.Caller) (kb.Window, error)
+	ChunkSpans(ctx context.Context, documentID string, caller authz.Caller) ([]kb.ChunkSpan, error)
 }
 
 // LibraryReadHandler answers what one file is and what was read out of it
 // (ATT-01, ATT-02).
 //
-// It is a separate handler from the upload, and on a different route group, for
-// a reason that is not the file it lives in: uploading a file has no owner yet
-// while reading one is reading material a turn was grounded on. The upload route
-// is public until there is an owner column; these two are behind the token.
+// It is a separate handler from the upload because the two answer different
+// questions — what was stored, and what was read out of it — and because the
+// second has to reach the knowledge base while the first only reaches the disk.
+// Both are now behind the token: a file belongs to the account that uploaded it,
+// and reading one back as somebody else is not found (V5 §2.3).
 type LibraryReadHandler struct {
 	files     FileLibrary
 	materials MaterialReader
@@ -187,12 +203,12 @@ type fileTextView struct {
 
 // Get returns one file's metadata and its parse state.
 func (h *LibraryReadHandler) Get(c *gin.Context) {
-	file, ok := h.file(c)
+	file, account, ok := h.file(c)
 	if !ok {
 		return
 	}
 	response := fileView{File: file}
-	document, err := h.materials.DocumentOfFile(c.Request.Context(), file.ID)
+	document, err := h.materials.DocumentOfFile(c.Request.Context(), file.ID, account)
 	switch {
 	case err == nil:
 		parsed := toDocumentView(document)
@@ -213,7 +229,7 @@ func (h *LibraryReadHandler) Get(c *gin.Context) {
 // locator's char_start and char_end — so a citation opens by passing them
 // straight through.
 func (h *LibraryReadHandler) Text(c *gin.Context) {
-	file, ok := h.file(c)
+	file, account, ok := h.file(c)
 	if !ok {
 		return
 	}
@@ -227,7 +243,7 @@ func (h *LibraryReadHandler) Text(c *gin.Context) {
 		httpx.WriteError(c, http.StatusBadRequest, "invalid_query", err.Error())
 		return
 	}
-	document, err := h.materials.DocumentOfFile(c.Request.Context(), file.ID)
+	document, err := h.materials.DocumentOfFile(c.Request.Context(), file.ID, account)
 	if errors.Is(err, kb.ErrNotFound) {
 		httpx.WriteError(c, http.StatusNotFound, "not_parsed", "this file has not been read into any material yet")
 		return
@@ -236,12 +252,12 @@ func (h *LibraryReadHandler) Text(c *gin.Context) {
 		h.fail(c, "read_file_text_failed", err)
 		return
 	}
-	window, err := h.materials.ReadWindow(c.Request.Context(), document.ID, int64(offset), int64(limit))
+	window, err := h.materials.ReadWindow(c.Request.Context(), document.ID, int64(offset), int64(limit), account)
 	if err != nil {
 		h.fail(c, "read_file_text_failed", err)
 		return
 	}
-	spans, err := h.materials.ChunkSpans(c.Request.Context(), document.ID)
+	spans, err := h.materials.ChunkSpans(c.Request.Context(), document.ID, account)
 	if err != nil {
 		h.fail(c, "read_file_text_failed", err)
 		return
@@ -261,21 +277,36 @@ func (h *LibraryReadHandler) Text(c *gin.Context) {
 }
 
 // file reads the file the request names, or answers why it cannot.
-func (h *LibraryReadHandler) file(c *gin.Context) (library.UploadResult, bool) {
+//
+// It hands the account back alongside the record rather than letting the caller
+// read it again. The account is not an incidental parameter here: it is what the
+// lookup was narrowed by, and the reads that follow — the document parsed from
+// this file, the window of its text — have to be narrowed by the same one. A
+// second read of the token would be a second answer to a question that already
+// has one.
+func (h *LibraryReadHandler) file(c *gin.Context) (library.UploadResult, authz.Caller, bool) {
 	if h == nil || h.files == nil || h.materials == nil {
 		httpx.WriteError(c, http.StatusInternalServerError, "library_unavailable", "the file library is not configured")
-		return library.UploadResult{}, false
+		return library.UploadResult{}, authz.Caller{}, false
 	}
-	record, err := h.files.Find(c.Request.Context(), c.Param("fileID"))
+	account, ok := caller(c)
+	if !ok {
+		return library.UploadResult{}, authz.Caller{}, false
+	}
+	// The file a request names is looked up as the caller's own. A file belonging
+	// to another account is not found rather than forbidden: telling the two
+	// apart would say that the id names something, which is the one fact a probe
+	// for ids is trying to learn.
+	record, err := h.files.Find(c.Request.Context(), c.Param("fileID"), account)
 	if err != nil {
 		if errors.Is(err, library.ErrNotFound) {
 			httpx.WriteError(c, http.StatusNotFound, "not_found", "no such file")
-			return library.UploadResult{}, false
+			return library.UploadResult{}, authz.Caller{}, false
 		}
 		h.fail(c, "read_file_failed", err)
-		return library.UploadResult{}, false
+		return library.UploadResult{}, authz.Caller{}, false
 	}
-	return record, true
+	return record, account, true
 }
 
 func (h *LibraryReadHandler) fail(c *gin.Context, code string, err error) {

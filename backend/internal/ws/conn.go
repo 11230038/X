@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/event"
 	"backend/internal/turn"
 	"github.com/coder/websocket"
@@ -94,6 +95,11 @@ type watch struct {
 type conn struct {
 	socket *websocket.Conn
 	turns  Turns
+	// caller is the account that authenticated this connection. It is read once,
+	// at the handshake, and every turn started on this socket runs as that
+	// account: a signed-in connection cannot start a turn for somebody else,
+	// because no frame has a field that could say who.
+	caller authz.Caller
 	logger *slog.Logger
 	// buffer is how many frames may be waiting for this client. It is a field
 	// rather than a constant so a test can make the queue fill up.
@@ -111,10 +117,11 @@ type conn struct {
 	watching sync.WaitGroup
 }
 
-func newConn(socket *websocket.Conn, turns Turns, logger *slog.Logger, buffer int) *conn {
+func newConn(socket *websocket.Conn, turns Turns, caller authz.Caller, logger *slog.Logger, buffer int) *conn {
 	return &conn{
 		socket: socket,
 		turns:  turns,
+		caller: caller,
 		logger: logger,
 		buffer: buffer,
 		out:    make(chan outbound, buffer),

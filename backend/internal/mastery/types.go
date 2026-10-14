@@ -179,7 +179,16 @@ type Path struct {
 	// owner in the schema's sense (a foreign key), not an access-control boundary:
 	// other sessions reach the path through mastery_path_sessions.
 	OwnerSessionID string
-	Tree           Tree
+	// OwnerID is the account the path belongs to, or zero for a row written before
+	// V5 (migration 00014 left every earlier row NULL). Zero is a state rather than
+	// a missing value: such a path belongs to nobody, is visible to the
+	// administrator and to nobody else, and is the state a claim would hand out.
+	//
+	// It is not OwnerSessionID. That column names the conversation the path was
+	// started in, and a path outlives its session — the owner is the account that
+	// came back for it, which is what the scoping on every read here narrows to.
+	OwnerID int64
+	Tree    Tree
 	// Version is the value the next write has to match. Zero means the row has
 	// never been written, which is what a row left behind by an older deployment
 	// looks like.

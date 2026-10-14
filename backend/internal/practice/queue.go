@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/data/models"
 	"backend/internal/notebook"
 )
@@ -75,9 +76,9 @@ type QueueItem struct {
 // then questions nobody has seen. Written as a single key over one column it
 // looks right and is wrong — one of the three groups then always sits behind
 // another no matter how long it has waited.
-func (s *Service) Queue(ctx context.Context, size int) ([]QueueItem, error) {
+func (s *Service) Queue(ctx context.Context, size int, caller authz.Caller) ([]QueueItem, error) {
 	now := s.now().UTC()
-	rows, err := s.repository.Queue(ctx, now, clampQueueSize(size))
+	rows, err := s.repository.Queue(ctx, now, clampQueueSize(size), caller)
 	if err != nil {
 		return nil, err
 	}
@@ -118,19 +119,28 @@ func clampQueueSize(size int) int {
 // The aliases on the state columns are not decoration: both tables have a
 // column called `extra`, and one of them is a JSON blob this query has no use
 // for. Naming the columns it does want keeps the row it scans unambiguous.
-const queueOfDueAndNewSQL = "SELECT e.*, " +
-	"s.due_time AS review_due_time, s.is_mistake AS review_is_mistake, " +
-	"s.`case` AS review_ease, s.streak AS review_streak, " +
-	"s.lapses AS review_lapses, s.review_count AS review_review_count, " +
-	"s.version AS review_version " +
-	"FROM notebook_entries e " +
-	"LEFT JOIN practice_review_state s ON s.notebook_entries_id = e.notebook_entries_id " +
-	"WHERE e.resolved IS NOT TRUE " +
-	"AND (s.due_time <= ? OR (s.notebook_entries_id IS NULL AND e.user_answer IS NULL)) " +
-	"ORDER BY CASE WHEN s.is_mistake IS TRUE THEN 0 ELSE 1 END, " +
-	"CASE WHEN s.notebook_entries_id IS NULL THEN 1 ELSE 0 END, " +
-	"s.due_time ASC, e.creat_time DESC, e.notebook_entries_id ASC " +
-	"LIMIT ?"
+//
+// The scope is a parameter of the builder rather than written into the
+// statement, because it is the one predicate this package states in raw SQL and
+// it comes from ownerPredicate — the same rule as everywhere else in the
+// package, said once. It sits directly on `e`, the question row, which is the
+// side that carries the owner column.
+func queueOfDueAndNewSQL(scope string) string {
+	return "SELECT e.*, " +
+		"s.due_time AS review_due_time, s.is_mistake AS review_is_mistake, " +
+		"s.`case` AS review_ease, s.streak AS review_streak, " +
+		"s.lapses AS review_lapses, s.review_count AS review_review_count, " +
+		"s.version AS review_version " +
+		"FROM notebook_entries e " +
+		"LEFT JOIN practice_review_state s ON s.notebook_entries_id = e.notebook_entries_id " +
+		"WHERE e.resolved IS NOT TRUE " +
+		"AND (s.due_time <= ? OR (s.notebook_entries_id IS NULL AND e.user_answer IS NULL)) " +
+		"AND " + scope + " " +
+		"ORDER BY CASE WHEN s.is_mistake IS TRUE THEN 0 ELSE 1 END, " +
+		"CASE WHEN s.notebook_entries_id IS NULL THEN 1 ELSE 0 END, " +
+		"s.due_time ASC, e.creat_time DESC, e.notebook_entries_id ASC " +
+		"LIMIT ?"
+}
 
 // queueRow is one row of the queue as storage returns it: the entry row, the
 // three state columns the queue sorts by, and the version.
@@ -146,12 +156,13 @@ type queueRow struct {
 }
 
 // Queue reads the questions to practise now.
-func (r *GORMRepository) Queue(ctx context.Context, now time.Time, size int) ([]QueueItem, error) {
+func (r *GORMRepository) Queue(ctx context.Context, now time.Time, size int, caller authz.Caller) ([]QueueItem, error) {
 	if err := r.ready(); err != nil {
 		return nil, err
 	}
 	var rows []queueRow
-	err := r.db.WithContext(ctx).Raw(queueOfDueAndNewSQL, now, size).Scan(&rows).Error
+	scope, owner := ownerPredicate("e", caller)
+	err := r.db.WithContext(ctx).Raw(queueOfDueAndNewSQL(scope), now, owner, size).Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("read the review queue: %w", err)
 	}

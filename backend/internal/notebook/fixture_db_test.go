@@ -17,10 +17,29 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/data"
 	"backend/internal/data/testdb"
 	"gorm.io/datatypes"
 )
+
+// The account the storage fixtures act as, and the one that holds every row a
+// default fixture writes. A number rather than a name because owner_id holds a
+// number, and the point of the constant is that the seeded rows and the caller
+// agree about it: a fixture that seeded ownerless rows and then read as this
+// account would find nothing, and every test here would fail for a reason that
+// has nothing to do with what any of them is about.
+const testOwnerID int64 = 7
+
+func testCaller() authz.Caller {
+	return authz.Caller{UserID: testOwnerID, Role: authz.RoleUser}
+}
+
+// otherCaller is a second account, for the one thing a single-account fixture
+// cannot show: that a row belonging to somebody else is not there.
+func otherCaller() authz.Caller {
+	return authz.Caller{UserID: testOwnerID + 1, Role: authz.RoleUser}
+}
 
 var dbTables = []string{
 	"practice_review_events", "practice_review_state",
@@ -74,15 +93,23 @@ func withCategories(question Question, names ...string) Question {
 }
 
 // saveAt writes a question through the repository at a time the caller chooses,
-// which is what the upsert takes instead of reading the clock itself.
+// which is what the upsert takes instead of reading the clock itself. It writes
+// as the account these tests act as.
 func saveAt(t *testing.T, repository *GORMRepository, question Question, at time.Time) Upserted {
+	t.Helper()
+	return saveAtAs(t, repository, question, at, testCaller())
+}
+
+// saveAtAs is saveAt for a caller of the test's own choosing: the two accounts a
+// scoping test needs mean the default caller cannot seed both halves of it.
+func saveAtAs(t *testing.T, repository *GORMRepository, question Question, at time.Time, caller authz.Caller) Upserted {
 	t.Helper()
 	entryID, err := newID(entryIDPrefix)
 	if err != nil {
 		t.Fatalf("generate a row id: %v", err)
 	}
 	question.QuestionID = QuestionID(question.Text, question.Type)
-	result, err := repository.UpsertQuestion(context.Background(), entryID, question, at)
+	result, err := repository.UpsertQuestion(context.Background(), entryID, question, at, caller)
 	if err != nil {
 		t.Fatalf("upsert %q: %v", question.Text, err)
 	}
@@ -91,7 +118,12 @@ func saveAt(t *testing.T, repository *GORMRepository, question Question, at time
 
 func save(t *testing.T, service *Service, question Question) Upserted {
 	t.Helper()
-	result, err := service.Save(context.Background(), question)
+	return saveAs(t, service, question, testCaller())
+}
+
+func saveAs(t *testing.T, service *Service, question Question, caller authz.Caller) Upserted {
+	t.Helper()
+	result, err := service.Save(context.Background(), question, caller)
 	if err != nil {
 		t.Fatalf("save %q: %v", question.Text, err)
 	}
@@ -100,7 +132,12 @@ func save(t *testing.T, service *Service, question Question) Upserted {
 
 func entryOf(t *testing.T, service *Service, questionID string) Entry {
 	t.Helper()
-	entry, err := service.Get(context.Background(), questionID)
+	return entryOfAs(t, service, questionID, testCaller())
+}
+
+func entryOfAs(t *testing.T, service *Service, questionID string, caller authz.Caller) Entry {
+	t.Helper()
+	entry, err := service.Get(context.Background(), questionID, caller)
 	if err != nil {
 		t.Fatalf("read question %s: %v", questionID, err)
 	}

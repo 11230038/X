@@ -24,6 +24,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"backend/internal/authz"
 )
 
 // ErrInvalidStats reports a statistics request this version cannot act on: a
@@ -97,6 +99,12 @@ type StatsQuery struct {
 	To   time.Time
 	// Bucket is the width of one point. The empty one means a day.
 	Bucket Bucket
+	// Caller is the account whose history this is. It is not part of the window
+	// — it does not enter the arithmetic below — but it is carried in the query
+	// for the same reason Filter.Caller is: §2.3 makes ownership a filter, and
+	// the repository narrows every counter to the caller's own questions, so a
+	// trend that forgot it would draw one account's history for another.
+	Caller authz.Caller
 }
 
 // Stats is the practice history of one window.
@@ -222,7 +230,10 @@ func (s *Service) normalizeStats(query StatsQuery) (StatsQuery, error) {
 		return StatsQuery{}, fmt.Errorf("%w: the window covers %d %s buckets, and %d is the most",
 			ErrInvalidStats, count, bucket, maxStatsBuckets)
 	}
-	return StatsQuery{From: start, To: end, Bucket: bucket}, nil
+	// The caller rides through unchanged: it is not the window's business, but
+	// the repository needs it, and a normalized query without it would count the
+	// whole bank.
+	return StatsQuery{From: start, To: end, Bucket: bucket, Caller: query.Caller}, nil
 }
 
 // fillSeries puts one point in the series for every bucket in the window,
@@ -274,16 +285,27 @@ func (r *GORMRepository) Stats(ctx context.Context, query StatsQuery) (Stats, er
 	}
 	stats := Stats{From: query.From, To: query.To, Bucket: query.Bucket}
 
-	err := r.db.WithContext(ctx).Raw(statsSeriesSQL(query.Bucket), query.From, query.To, query.From, query.To).
+	// The three statements are narrowed to the caller's questions, and the
+	// predicate is the same one the queue and the state join use — stated once
+	// in ownerPredicate and spliced in here, because a raw statement cannot go
+	// through data.OwnerScope. Two aliases are needed: the series and the source
+	// breakdown read notebook_entries unaliased, while the filing breakdown
+	// aliases it `e`.
+	scope, owner := ownerPredicate("notebook_entries", query.Caller)
+	filingScope, _ := ownerPredicate("e", query.Caller)
+	err := r.db.WithContext(ctx).
+		Raw(statsSeriesSQL(query.Bucket, scope), query.From, query.To, owner, query.From, query.To, owner).
 		Scan(&stats.Series).Error
 	if err != nil {
 		return Stats{}, fmt.Errorf("read the practice series: %w", err)
 	}
-	err = r.db.WithContext(ctx).Raw(statsSourcesSQL, query.From, query.To).Scan(&stats.Sources).Error
+	err = r.db.WithContext(ctx).Raw(statsSourcesSQL(scope), query.From, query.To, owner).
+		Scan(&stats.Sources).Error
 	if err != nil {
 		return Stats{}, fmt.Errorf("read the practice sources: %w", err)
 	}
-	err = r.db.WithContext(ctx).Raw(statsCategoriesSQL, query.From, query.To).Scan(&stats.Categories).Error
+	err = r.db.WithContext(ctx).Raw(statsCategoriesSQL(filingScope), query.From, query.To, owner).
+		Scan(&stats.Categories).Error
 	if err != nil {
 		return Stats{}, fmt.Errorf("read the practice categories: %w", err)
 	}
@@ -294,10 +316,12 @@ func (r *GORMRepository) Stats(ctx context.Context, query StatsQuery) (Stats, er
 // it has to agree with Bucket.label down to the string it produces.
 //
 // The column name is concatenated rather than bound because it is not a value:
-// it comes from the two columns this package reads, never from a request. There
-// is no caller text anywhere in these statements — every bound parameter is a
-// time — which is why the concatenation is safe and why the escape rules a
-// predicate would need do not apply.
+// it comes from the two columns this package reads, never from a request. The
+// only other thing concatenated into these statements is the owner scope, and it
+// too is not caller text — it comes from ownerPredicate and binds its own value.
+// Every parameter that does come from outside is bound, which is why the
+// concatenation is safe and why the escape rules a predicate of caller text
+// would need do not apply.
 func bucketSQL(bucket Bucket, column string) string {
 	if bucket == BucketWeek {
 		return "DATE_FORMAT(DATE_SUB(" + column + ", INTERVAL WEEKDAY(" + column + ") DAY), '%Y-%m-%d')"
@@ -329,7 +353,12 @@ func bucketSQL(bucket Bucket, column string) string {
 // A review that was judged is compared with TRUE and with FALSE separately.
 // Neither comparison is true for a skip — the path is absent, so the comparison
 // is NULL — which is what leaves skips out of both counts.
-func statsSeriesSQL(bucket Bucket) string {
+//
+// Both halves are narrowed to the caller's own questions. The events half has no
+// owner column, so it is narrowed through the question it is filed under, with
+// the same subquery the queue and the state join use; the entries half is
+// narrowed directly. `scope` is that predicate, already built by the caller.
+func statsSeriesSQL(bucket Bucket, scope string) string {
 	review := bucketSQL(bucket, "review_time")
 	created := bucketSQL(bucket, "creat_time")
 	// The column is named `bucket` inside the statement and `label` on the way
@@ -346,10 +375,11 @@ func statsSeriesSQL(bucket Bucket) string {
 		"SUM(JSON_EXTRACT(outcome_json, '$.judgment.is_correct') = FALSE) AS wrong, " +
 		"0 AS added " +
 		"FROM practice_review_events WHERE review_time >= ? AND review_time < ? " +
+		"AND notebook_entries_id IN (SELECT notebook_entries_id FROM notebook_entries WHERE " + scope + ") " +
 		"GROUP BY " + review +
 		" UNION ALL " +
 		"SELECT " + created + " AS bucket, 0 AS reviews, 0 AS correct, 0 AS wrong, COUNT(*) AS added " +
-		"FROM notebook_entries WHERE creat_time >= ? AND creat_time < ? " +
+		"FROM notebook_entries WHERE creat_time >= ? AND creat_time < ? AND " + scope + " " +
 		"GROUP BY " + created +
 		") AS buckets GROUP BY bucket ORDER BY bucket ASC"
 }
@@ -359,17 +389,25 @@ func statsSeriesSQL(bucket Bucket) string {
 // A question with no source is counted under the empty name rather than
 // dropped: it is a real answer — the question was not written by a conversation
 // — and a breakdown that quietly omits a group makes the other groups look like
-// the whole.
-const statsSourcesSQL = "SELECT COALESCE(source, '') AS name, COUNT(*) AS count " +
-	"FROM notebook_entries WHERE creat_time >= ? AND creat_time < ? " +
-	"GROUP BY COALESCE(source, '') ORDER BY COUNT(*) DESC, name ASC"
+// the whole. The caller narrows it directly on the question row.
+func statsSourcesSQL(scope string) string {
+	return "SELECT COALESCE(source, '') AS name, COUNT(*) AS count " +
+		"FROM notebook_entries WHERE creat_time >= ? AND creat_time < ? AND " + scope + " " +
+		"GROUP BY COALESCE(source, '') ORDER BY COUNT(*) DESC, name ASC"
+}
 
 // statsCategoriesSQL is the breakdown by how the questions are filed. The two
 // joins are the bank's own filing tables, which this package reads rather than
 // owns (§1.2).
-const statsCategoriesSQL = "SELECT category.name AS name, COUNT(*) AS count " +
-	"FROM notebook_entries e " +
-	"JOIN notebook_entry_categories filing ON filing.notebook_entries_id = e.notebook_entries_id " +
-	"JOIN notebook_categories category ON category.notebook_categories_id = filing.notebook_categories_id " +
-	"WHERE e.creat_time >= ? AND e.creat_time < ? " +
-	"GROUP BY category.name ORDER BY COUNT(*) DESC, category.name ASC"
+//
+// The scope is on the question, aliased `e`, which is where the owner column is:
+// a category a caller cannot reach through their own questions does not appear
+// here, however many other questions carry it.
+func statsCategoriesSQL(scope string) string {
+	return "SELECT category.name AS name, COUNT(*) AS count " +
+		"FROM notebook_entries e " +
+		"JOIN notebook_entry_categories filing ON filing.notebook_entries_id = e.notebook_entries_id " +
+		"JOIN notebook_categories category ON category.notebook_categories_id = filing.notebook_categories_id " +
+		"WHERE e.creat_time >= ? AND e.creat_time < ? AND " + scope + " " +
+		"GROUP BY category.name ORDER BY COUNT(*) DESC, category.name ASC"
+}

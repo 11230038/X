@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/embed"
 )
 
@@ -90,14 +91,29 @@ func (f *fakeRepository) CreateKnowledgeBase(_ context.Context, record Knowledge
 	return nil
 }
 
-func (f *fakeRepository) KnowledgeBase(_ context.Context, kbID string) (KnowledgeBase, error) {
+// visible mirrors what OwnerScope does in storage for the one row this fake
+// models an owner on. It is a means and not evidence: what the predicate does to
+// a real table is the contract tests' business, and this is a copy that can
+// drift. The document side has no copy at all — a document has no owner column,
+// its scope is derived from the collection and the file it came from, and that
+// is a join this fake deliberately does not run. Cross-account document reads
+// are pinned against a real database instead.
+func (f *fakeRepository) visibleBase(record KnowledgeBase, caller authz.Caller) bool {
+	if caller.UserID > 0 && record.OwnerID == caller.UserID {
+		return true
+	}
+	// A base that belongs to nobody is the administrator's, and nobody else's.
+	return caller.IsAdmin() && record.OwnerID == 0
+}
+
+func (f *fakeRepository) KnowledgeBase(_ context.Context, kbID string, caller authz.Caller) (KnowledgeBase, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.fail("KnowledgeBase"); err != nil {
 		return KnowledgeBase{}, err
 	}
 	base, ok := f.bases[kbID]
-	if !ok {
+	if !ok || !f.visibleBase(base, caller) {
 		return KnowledgeBase{}, fmt.Errorf("%w: knowledge base %s", ErrNotFound, kbID)
 	}
 	base.Documents, base.ReadyDocuments = 0, 0
@@ -113,7 +129,7 @@ func (f *fakeRepository) KnowledgeBase(_ context.Context, kbID string) (Knowledg
 	return base, nil
 }
 
-func (f *fakeRepository) KnowledgeBases(_ context.Context) ([]KnowledgeBase, error) {
+func (f *fakeRepository) KnowledgeBases(_ context.Context, caller authz.Caller) ([]KnowledgeBase, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.fail("KnowledgeBases"); err != nil {
@@ -121,7 +137,9 @@ func (f *fakeRepository) KnowledgeBases(_ context.Context) ([]KnowledgeBase, err
 	}
 	bases := make([]KnowledgeBase, 0, len(f.bases))
 	for _, base := range f.bases {
-		bases = append(bases, base)
+		if f.visibleBase(base, caller) {
+			bases = append(bases, base)
+		}
 	}
 	sort.Slice(bases, func(i, j int) bool {
 		if bases[i].IsDefault != bases[j].IsDefault {
@@ -150,30 +168,35 @@ func (f *fakeRepository) KnowledgeBaseCounts(_ context.Context) (map[string]Coun
 	return counts, nil
 }
 
-func (f *fakeRepository) SetDefaultKnowledgeBase(_ context.Context, kbID string) error {
+func (f *fakeRepository) SetDefaultKnowledgeBase(_ context.Context, kbID string, caller authz.Caller) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.fail("SetDefaultKnowledgeBase"); err != nil {
 		return err
 	}
-	if _, ok := f.bases[kbID]; !ok {
+	base, ok := f.bases[kbID]
+	if !ok || !f.visibleBase(base, caller) {
 		return fmt.Errorf("%w: knowledge base %s", ErrNotFound, kbID)
 	}
-	for id, base := range f.bases {
-		base.IsDefault = id == kbID
-		f.bases[id] = base
+	// The mark is instance-wide here as it is in storage, where the unique index
+	// has no room for an account. The limitation is recorded rather than modelled
+	// away in the fake, because a fake that hid it would hide the reason the
+	// deviation is written down.
+	for id, other := range f.bases {
+		other.IsDefault = id == kbID
+		f.bases[id] = other
 	}
 	return nil
 }
 
-func (f *fakeRepository) DeleteKnowledgeBase(_ context.Context, kbID string) error {
+func (f *fakeRepository) DeleteKnowledgeBase(_ context.Context, kbID string, caller authz.Caller) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.fail("DeleteKnowledgeBase"); err != nil {
 		return err
 	}
 	base, ok := f.bases[kbID]
-	if !ok {
+	if !ok || !f.visibleBase(base, caller) {
 		return fmt.Errorf("%w: knowledge base %s", ErrNotFound, kbID)
 	}
 	delete(f.bases, kbID)

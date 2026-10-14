@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"backend/internal/auth"
+	"backend/internal/authz"
 	"backend/internal/handler"
 	"backend/internal/kb"
 	"backend/internal/library"
@@ -58,21 +59,21 @@ func newTestRouterWith(t *testing.T, checker readyChecker, practiceErr error) *g
 
 type routerFileStub struct{}
 
-func (routerFileStub) Find(context.Context, string) (library.UploadResult, error) {
+func (routerFileStub) Find(context.Context, string, authz.Caller) (library.UploadResult, error) {
 	return library.UploadResult{ID: "lib_1", SHA256: strings.Repeat("a", 64), Filename: "手册.pdf"}, nil
 }
 
 type routerMaterialStub struct{}
 
-func (routerMaterialStub) DocumentOfFile(context.Context, string) (kb.Document, error) {
+func (routerMaterialStub) DocumentOfFile(context.Context, string, authz.Caller) (kb.Document, error) {
 	return kb.Document{ID: "doc_1", KBID: "kb_1", FileID: "lib_1", TextChars: 12}, nil
 }
 
-func (routerMaterialStub) ReadWindow(context.Context, string, int64, int64) (kb.Window, error) {
+func (routerMaterialStub) ReadWindow(context.Context, string, int64, int64, authz.Caller) (kb.Window, error) {
 	return kb.Window{Document: kb.Document{ID: "doc_1", TextChars: 12}, Text: "保修期是两年。", CharEnd: 7, TotalChars: 12}, nil
 }
 
-func (routerMaterialStub) ChunkSpans(context.Context, string) ([]kb.ChunkSpan, error) {
+func (routerMaterialStub) ChunkSpans(context.Context, string, authz.Caller) ([]kb.ChunkSpan, error) {
 	return nil, nil
 }
 

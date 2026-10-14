@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"backend/internal/authz"
 )
 
 type fakeRepository struct {
@@ -51,7 +53,7 @@ func (f *fakeRepository) withQuestion(question Question) {
 }
 
 func (f *fakeRepository) UpsertQuestion(_ context.Context, entryID string, question Question,
-	_ time.Time) (Upserted, error) {
+	_ time.Time, _ authz.Caller) (Upserted, error) {
 	if f.upsertErr != nil {
 		return Upserted{}, f.upsertErr
 	}
@@ -59,7 +61,7 @@ func (f *fakeRepository) UpsertQuestion(_ context.Context, entryID string, quest
 	return Upserted{ID: entryID, QuestionID: question.QuestionID, Created: true}, nil
 }
 
-func (f *fakeRepository) AddCategories(_ context.Context, entryID string, names []string) error {
+func (f *fakeRepository) AddCategories(_ context.Context, entryID string, names []string, _ authz.Caller) error {
 	if f.fileErr != nil {
 		return f.fileErr
 	}
@@ -68,7 +70,7 @@ func (f *fakeRepository) AddCategories(_ context.Context, entryID string, names 
 	return nil
 }
 
-func (f *fakeRepository) Entry(_ context.Context, questionID string) (Entry, error) {
+func (f *fakeRepository) Entry(_ context.Context, questionID string, _ authz.Caller) (Entry, error) {
 	if f.entryErr != nil {
 		return Entry{}, f.entryErr
 	}
@@ -84,7 +86,7 @@ func (f *fakeRepository) List(_ context.Context, _ Filter) ([]Entry, error) {
 	return nil, f.listErr
 }
 
-func (f *fakeRepository) Mark(_ context.Context, _ string, _ Change) error {
+func (f *fakeRepository) Mark(_ context.Context, _ string, _ Change, _ authz.Caller) error {
 	if f.markErr != nil {
 		return f.markErr
 	}
@@ -92,7 +94,7 @@ func (f *fakeRepository) Mark(_ context.Context, _ string, _ Change) error {
 	return nil
 }
 
-func (f *fakeRepository) SetCategories(_ context.Context, questionID string, names []string) error {
+func (f *fakeRepository) SetCategories(_ context.Context, questionID string, names []string, _ authz.Caller) error {
 	if f.fileErr != nil {
 		return f.fileErr
 	}
@@ -101,7 +103,7 @@ func (f *fakeRepository) SetCategories(_ context.Context, questionID string, nam
 	return nil
 }
 
-func (f *fakeRepository) Categories(_ context.Context) ([]Category, error) {
+func (f *fakeRepository) Categories(_ context.Context, _ authz.Caller) ([]Category, error) {
 	return nil, f.listErr
 }
 
@@ -142,7 +144,7 @@ func TestSaveRefusesAQuestionStorageWouldRefuse(t *testing.T) {
 	}
 	for _, scenario := range cases {
 		t.Run(scenario.name, func(t *testing.T) {
-			_, err := service.Save(context.Background(), scenario.question)
+			_, err := service.Save(context.Background(), scenario.question, testCaller())
 			if !errors.Is(err, scenario.want) {
 				t.Fatalf("Save = %v, want %v", err, scenario.want)
 			}
@@ -160,7 +162,7 @@ func TestSaveComputesTheAddressItself(t *testing.T) {
 	service, repository := newFakeService(t)
 	question := sampleQuestion("什么是闭包")
 	question.QuestionID = "qn_这不是地址"
-	if _, err := service.Save(context.Background(), question); err != nil {
+	if _, err := service.Save(context.Background(), question, testCaller()); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	if len(repository.upserted) != 1 {
@@ -182,7 +184,7 @@ func TestSaveFilesUnderTheRowStorageReported(t *testing.T) {
 		t.Fatalf("new notebook service: %v", err)
 	}
 	question := withCategories(sampleQuestion("什么是闭包"), "数学")
-	result, err := service.Save(context.Background(), question)
+	result, err := service.Save(context.Background(), question, testCaller())
 	if err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -203,8 +205,8 @@ type reportingRepository struct {
 }
 
 func (r *reportingRepository) UpsertQuestion(ctx context.Context, entryID string, question Question,
-	now time.Time) (Upserted, error) {
-	if _, err := r.fakeRepository.UpsertQuestion(ctx, entryID, question, now); err != nil {
+	now time.Time, caller authz.Caller) (Upserted, error) {
+	if _, err := r.fakeRepository.UpsertQuestion(ctx, entryID, question, now, caller); err != nil {
 		return Upserted{}, err
 	}
 	return Upserted{ID: "nbe_已经在的", QuestionID: question.QuestionID}, nil
@@ -213,7 +215,7 @@ func (r *reportingRepository) UpsertQuestion(ctx context.Context, entryID string
 func TestSaveReportsAFilingFailure(t *testing.T) {
 	service, repository := newFakeService(t)
 	repository.fileErr = errors.New("storage is down")
-	if _, err := service.Save(context.Background(), sampleQuestion("什么是闭包")); err == nil {
+	if _, err := service.Save(context.Background(), sampleQuestion("什么是闭包"), testCaller()); err == nil {
 		t.Fatal("a question that could not be filed was reported as saved")
 	}
 }
@@ -221,7 +223,7 @@ func TestSaveReportsAFilingFailure(t *testing.T) {
 func TestServiceReportsWhatStorageSaid(t *testing.T) {
 	service, repository := newFakeService(t)
 	repository.upsertErr = errors.New("storage is down")
-	if _, err := service.Save(context.Background(), sampleQuestion("什么是闭包")); err == nil {
+	if _, err := service.Save(context.Background(), sampleQuestion("什么是闭包"), testCaller()); err == nil {
 		t.Fatal("a question that could not be stored was reported as saved")
 	}
 	repository = &fakeRepository{listErr: errors.New("storage is down")}
@@ -229,12 +231,12 @@ func TestServiceReportsWhatStorageSaid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new notebook service: %v", err)
 	}
-	if _, err := service.List(context.Background(), Filter{}); err == nil {
+	if _, err := service.List(context.Background(), Filter{Caller: testCaller()}); err == nil {
 		t.Fatal("a listing that could not be read was reported as read")
 	}
 	repository.markErr = errors.New("storage is down")
 	yes := true
-	if err := service.Mark(context.Background(), "qn_1", Change{Bookmarked: &yes}); err == nil {
+	if err := service.Mark(context.Background(), "qn_1", Change{Bookmarked: &yes}, testCaller()); err == nil {
 		t.Fatal("a mark that could not be written was reported as written")
 	}
 }
@@ -242,8 +244,8 @@ func TestServiceReportsWhatStorageSaid(t *testing.T) {
 func TestListRefusesAFilterThisVersionCannotActOn(t *testing.T) {
 	service, repository := newFakeService(t)
 	cases := []Filter{
-		{Resolution: Resolution("maybe")},
-		{Type: QuestionType("essay")},
+		{Caller: testCaller(), Resolution: Resolution("maybe")},
+		{Caller: testCaller(), Type: QuestionType("essay")},
 	}
 	for _, filter := range cases {
 		if _, err := service.List(context.Background(), filter); !errors.Is(err, ErrInvalidFilter) {
@@ -257,7 +259,7 @@ func TestListRefusesAFilterThisVersionCannotActOn(t *testing.T) {
 
 func TestMarkRefusesAChangeThatNamesNothing(t *testing.T) {
 	service, repository := newFakeService(t)
-	if err := service.Mark(context.Background(), "qn_1", Change{}); !errors.Is(err, ErrEmptyChange) {
+	if err := service.Mark(context.Background(), "qn_1", Change{}, testCaller()); !errors.Is(err, ErrEmptyChange) {
 		t.Fatalf("Mark with nothing named = %v, want ErrEmptyChange", err)
 	}
 	if repository.marks != 0 {
@@ -271,7 +273,7 @@ func TestMarkRefusesAChangeThatNamesNothing(t *testing.T) {
 // can set them to.
 func TestSetCategoriesAnswersAnEmptyList(t *testing.T) {
 	service, repository := newFakeService(t)
-	if err := service.SetCategories(context.Background(), "qn_1", nil); err != nil {
+	if err := service.SetCategories(context.Background(), "qn_1", nil, testCaller()); err != nil {
 		t.Fatalf("unfile a question: %v", err)
 	}
 	if len(repository.refiledFor) != 1 || repository.refiledFor[0] != "qn_1" {

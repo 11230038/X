@@ -29,7 +29,7 @@ func TestThePairingReadSaysNotEnabledWithAReason(t *testing.T) {
 	}}
 	router := newReadingRouter(stub, nil)
 
-	recorder := call(t, router, http.MethodGet, "/api/v1/reading/materials/rm_zh/pairings", "")
+	recorder := callAs(t, router, http.MethodGet, "/api/v1/reading/materials/rm_zh/pairings", "")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -79,7 +79,7 @@ func TestThePairingReadNamesTheCounterpartWhenItIsEnabled(t *testing.T) {
 	}}
 	router := newReadingRouter(stub, nil)
 
-	recorder := call(t, router, http.MethodGet, "/api/v1/reading/materials/rm_zh/pairings", "")
+	recorder := callAs(t, router, http.MethodGet, "/api/v1/reading/materials/rm_zh/pairings", "")
 	var body struct {
 		Data struct {
 			Bilingual bilingualView `json:"bilingual"`
@@ -107,7 +107,7 @@ func TestConfirmingPairingTakesTheRouteAndTheBody(t *testing.T) {
 	}}
 	router := newReadingRouter(stub, nil)
 
-	recorder := call(t, router, http.MethodPost, "/api/v1/reading/materials/rm_zh/pairings",
+	recorder := callAs(t, router, http.MethodPost, "/api/v1/reading/materials/rm_zh/pairings",
 		`{"counterpart_material_id":"  rm_en  "}`)
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", recorder.Code, recorder.Body.String())
@@ -138,7 +138,7 @@ func TestCancellingAPairingAnswersTheStateItIsAlreadyIn(t *testing.T) {
 	stub := &readingStub{cancelled: false}
 	router := newReadingRouter(stub, nil)
 
-	recorder := call(t, router, http.MethodDelete, "/api/v1/reading/pairings/rp_1", "")
+	recorder := callAs(t, router, http.MethodDelete, "/api/v1/reading/pairings/rp_1", "")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -178,7 +178,7 @@ func TestPairingRefusalsReachTheClient(t *testing.T) {
 	for _, scenario := range cases {
 		t.Run(scenario.name, func(t *testing.T) {
 			router := newReadingRouter(&readingStub{err: scenario.failure}, nil)
-			recorder := call(t, router, scenario.method, scenario.path, scenario.body)
+			recorder := callAs(t, router, scenario.method, scenario.path, scenario.body)
 			if recorder.Code != scenario.wantStatus {
 				t.Fatalf("status = %d, want %d; body=%s",
 					recorder.Code, scenario.wantStatus, recorder.Body.String())
@@ -199,7 +199,7 @@ func TestPairingRefusalsReachTheClient(t *testing.T) {
 func TestAPairingThatIsNotThereIsStillAnAnswer(t *testing.T) {
 	router := newReadingRouter(&readingStub{cancelled: false}, nil)
 
-	recorder := call(t, router, http.MethodDelete, "/api/v1/reading/pairings/rp_1", "")
+	recorder := callAs(t, router, http.MethodDelete, "/api/v1/reading/pairings/rp_1", "")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
 	}

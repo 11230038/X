@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"backend/internal/authz"
+	"backend/internal/data"
 	"backend/internal/data/models"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -16,36 +18,49 @@ import (
 // conversations that have touched it. It is the half of this domain's storage
 // that is about *what a path is*; evidence.go and repository.go hold the half
 // that is about what has been seen and what has changed.
-
-// pathSQL reads a path. The version is coalesced on the way out and written
-// through the same expression on the way back in, so a row whose version is NULL
-// — one left behind by a deployment that never wrote a tree — reads as version 0
-// and can be written by the same statement as any other. Without that, the first
-// write to such a row would have to be a special case, and a special case in a
-// compare-and-swap is where lost updates come from.
-const pathSQL = "SELECT mastery_path_id, owner_session_id, state_json, " +
-	"COALESCE(version, 0) AS version, creat_time, update_time " +
-	"FROM mastery_paths WHERE mastery_path_id = ?"
+//
+// mastery_paths is the one table here that owns an owner: migration 00014 gave it
+// an owner_id and gave the tables that derive from it none. Both reads below
+// narrow with data.OwnerScope, which is why they are built with GORM's query
+// builder rather than written as SQL text: the scope is a *gorm.DB that has to be
+// composed into the statement, and a string cannot take it.
 
 // Path reads one path.
-func (r *GORMRepository) Path(ctx context.Context, pathID string) (Path, error) {
+//
+// The version is coalesced on the way out and written through the same
+// expression on the way back in, so a row whose version is NULL — one left behind
+// by a deployment that never wrote a tree — reads as version 0 and can be written
+// by the same statement as any other. Without that, the first write to such a row
+// would have to be a special case, and a special case in a compare-and-swap is
+// where lost updates come from.
+func (r *GORMRepository) Path(ctx context.Context, pathID string, caller authz.Caller) (Path, error) {
 	if err := r.ready(); err != nil {
 		return Path{}, err
 	}
 	var row struct {
 		ID             string     `gorm:"column:mastery_path_id"`
 		OwnerSessionID string     `gorm:"column:owner_session_id"`
+		OwnerID        *int64     `gorm:"column:owner_id"`
 		State          []byte     `gorm:"column:state_json"`
 		Version        int64      `gorm:"column:version"`
 		CreatedAt      time.Time  `gorm:"column:creat_time"`
 		UpdatedAt      *time.Time `gorm:"column:update_time"`
 	}
-	err := r.db.WithContext(ctx).Raw(pathSQL, pathID).Scan(&row).Error
+	query := data.OwnerScope(r.db.WithContext(ctx).Table("mastery_paths"),
+		caller.UserID, caller.IsAdmin(), "owner_id")
+	err := query.
+		Select("mastery_path_id, owner_session_id, owner_id, state_json, "+
+			"COALESCE(version, 0) AS version, creat_time, update_time").
+		Where("mastery_path_id = ?", pathID).
+		Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// A path another account owns is not found here exactly as a path that was
+		// never created is: the scope removes it from the statement, so there is
+		// nothing left to distinguish.
+		return Path{}, fmt.Errorf("%w: path %s", ErrNotFound, pathID)
+	}
 	if err != nil {
 		return Path{}, fmt.Errorf("read mastery path %s: %w", pathID, err)
-	}
-	if row.ID == "" {
-		return Path{}, fmt.Errorf("%w: path %s", ErrNotFound, pathID)
 	}
 	tree, err := DecodeTree(row.State)
 	if err != nil {
@@ -54,6 +69,7 @@ func (r *GORMRepository) Path(ctx context.Context, pathID string) (Path, error) 
 	path := Path{
 		ID:             row.ID,
 		OwnerSessionID: row.OwnerSessionID,
+		OwnerID:        ownerOf(row.OwnerID),
 		Tree:           tree,
 		Version:        row.Version,
 		CreatedAt:      row.CreatedAt,
@@ -64,47 +80,13 @@ func (r *GORMRepository) Path(ctx context.Context, pathID string) (Path, error) 
 	return path, nil
 }
 
-// pathListSQL reads every path with its topic metadata and the last time a
-// conversation touched it.
-//
-// The metadata is joined in rather than read per row, and the last-seen time is
-// a correlated subquery rather than a second pass, because a listing is the one
-// read in this domain that is naturally over *all* the rows: a list that made
-// two more calls per path would be a list whose cost grew with how much the
-// person reading it had studied, which is the opposite of what a listing is for.
-//
-// The subquery reads the link table on the leading column of its primary key, so
-// it is one indexed lookup per path and not a scan.
-const pathListSQL = "SELECT p.mastery_path_id, p.owner_session_id, p.state_json, " +
-	"COALESCE(p.version, 0) AS version, p.creat_time, p.update_time, " +
-	"m.goal, m.description, m.emoji, m.status, " +
-	"(SELECT MAX(s.last_seen_time) FROM mastery_path_sessions s " +
-	" WHERE s.path_id = p.mastery_path_id) AS last_seen " +
-	"FROM mastery_paths p LEFT JOIN mastery_topic_meta m ON m.path_id = p.mastery_path_id " +
-	"ORDER BY last_seen DESC, p.mastery_path_id ASC"
-
-// pathListOfSessionSQL is the same read narrowed to the paths one conversation
-// has touched.
-//
-// It is a join and not the same query with a filter bolted on: the question "the
-// paths this conversation has worked on" is asked *of the link table*, which is
-// where the answer is, and the paths are what it resolves to. Every row of this
-// read is linked by construction, so last_seen is a column here and not a
-// subquery.
-const pathListOfSessionSQL = "SELECT p.mastery_path_id, p.owner_session_id, p.state_json, " +
-	"COALESCE(p.version, 0) AS version, p.creat_time, p.update_time, " +
-	"m.goal, m.description, m.emoji, m.status, s.last_seen_time AS last_seen " +
-	"FROM mastery_path_sessions s JOIN mastery_paths p ON p.mastery_path_id = s.path_id " +
-	"LEFT JOIN mastery_topic_meta m ON m.path_id = p.mastery_path_id " +
-	"WHERE s.session_id = ? " +
-	"ORDER BY s.last_seen_time DESC, p.mastery_path_id ASC"
-
 // pathListRow is what both listing reads return. The metadata columns are
 // nullable because a path created before this version has no metadata row, and a
 // LEFT JOIN says so the same way the table does: with NULLs.
 type pathListRow struct {
 	ID             string     `gorm:"column:mastery_path_id"`
 	OwnerSessionID string     `gorm:"column:owner_session_id"`
+	OwnerID        *int64     `gorm:"column:owner_id"`
 	State          []byte     `gorm:"column:state_json"`
 	Version        int64      `gorm:"column:version"`
 	CreatedAt      time.Time  `gorm:"column:creat_time"`
@@ -130,20 +112,53 @@ type PathRow struct {
 
 // Paths reads every path, most recently worked on first, or only the paths one
 // conversation has touched when sessionID is set.
-func (r *GORMRepository) Paths(ctx context.Context, sessionID string) ([]PathRow, error) {
+//
+// The metadata is joined in rather than read per row, and the last-seen time is
+// a correlated subquery rather than a second pass, because a listing is the one
+// read in this domain that is naturally over *all* the rows: a list that made two
+// more calls per path would be a list whose cost grew with how much the person
+// reading it had studied, which is the opposite of what a listing is for. The
+// subquery reads the link table on the leading column of its primary key, so it
+// is one indexed lookup per path and not a scan.
+//
+// Both forms carry the caller's scope. The session form joins the link table to
+// the path and scopes on the path's owner — `p.owner_id` — because it is the path
+// that is owned and the link that is derived from it: a link row is visible only
+// when the path it points at is.
+func (r *GORMRepository) Paths(ctx context.Context, sessionID string, caller authz.Caller) ([]PathRow, error) {
 	if err := r.ready(); err != nil {
 		return nil, err
 	}
 	var (
-		rows []pathListRow
-		err  error
+		rows  []pathListRow
+		query *gorm.DB
 	)
+	columns := "p.mastery_path_id, p.owner_session_id, p.owner_id, p.state_json, " +
+		"COALESCE(p.version, 0) AS version, p.creat_time, p.update_time, " +
+		"m.goal, m.description, m.emoji, m.status, "
 	if sessionID == "" {
-		err = r.db.WithContext(ctx).Raw(pathListSQL).Scan(&rows).Error
+		query = data.OwnerScope(r.db.WithContext(ctx).Table("mastery_paths AS p"),
+			caller.UserID, caller.IsAdmin(), "p.owner_id").
+			Select(columns +
+				"(SELECT MAX(s.last_seen_time) FROM mastery_path_sessions s " +
+				"WHERE s.path_id = p.mastery_path_id) AS last_seen").
+			Joins("LEFT JOIN mastery_topic_meta AS m ON m.path_id = p.mastery_path_id").
+			Order("last_seen DESC, p.mastery_path_id ASC")
 	} else {
-		err = r.db.WithContext(ctx).Raw(pathListOfSessionSQL, sessionID).Scan(&rows).Error
+		// A join and not the same query with a filter bolted on: the question "the
+		// paths this conversation has worked on" is asked *of the link table*, which
+		// is where the answer is, and the paths are what it resolves to. Every row of
+		// this read is linked by construction, so last_seen is a column here and not
+		// a subquery.
+		query = data.OwnerScope(r.db.WithContext(ctx).Table("mastery_path_sessions AS s"),
+			caller.UserID, caller.IsAdmin(), "p.owner_id").
+			Select(columns+"s.last_seen_time AS last_seen").
+			Joins("JOIN mastery_paths AS p ON p.mastery_path_id = s.path_id").
+			Joins("LEFT JOIN mastery_topic_meta AS m ON m.path_id = p.mastery_path_id").
+			Where("s.session_id = ?", sessionID).
+			Order("s.last_seen_time DESC, p.mastery_path_id ASC")
 	}
-	if err != nil {
+	if err := query.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("read mastery paths: %w", err)
 	}
 
@@ -156,6 +171,7 @@ func (r *GORMRepository) Paths(ctx context.Context, sessionID string) ([]PathRow
 		path := Path{
 			ID:             row.ID,
 			OwnerSessionID: row.OwnerSessionID,
+			OwnerID:        ownerOf(row.OwnerID),
 			Tree:           tree,
 			Version:        row.Version,
 			CreatedAt:      row.CreatedAt,
@@ -197,9 +213,14 @@ func (r *GORMRepository) CreatePath(ctx context.Context, path Path) error {
 	record := models.MasteryPath{
 		MasteryPathID:  path.ID,
 		OwnerSessionID: path.OwnerSessionID,
-		State:          datatypes.JSON(state),
-		Version:        &version,
-		CreatedAt:      path.CreatedAt,
+		// The account is written through data.OwnerPointer and never as a bare
+		// zero: zero means "no account" here, which the column says with NULL, and
+		// writing 0 would put a literal zero in a column that a foreign key points
+		// at users — a row that looks owned by user 0 and belongs to nobody.
+		OwnerID:   data.OwnerPointer(path.OwnerID),
+		State:     datatypes.JSON(state),
+		Version:   &version,
+		CreatedAt: path.CreatedAt,
 	}
 	return duplicateOr(r.db.WithContext(ctx).Create(&record).Error, "create mastery path %s", path.ID)
 }
@@ -214,7 +235,7 @@ func (r *GORMRepository) CreatePath(ctx context.Context, path Path) error {
 // second writer's WHERE matches nothing, and zero rows affected is the answer
 // this whole path exists to be able to give — it is the difference between
 // "somebody changed the tree since you read it" and "your write failed".
-func (r *GORMRepository) SaveTree(ctx context.Context, pathID string, expected int64, tree Tree, now time.Time) (int64, error) {
+func (r *GORMRepository) SaveTree(ctx context.Context, pathID string, expected int64, tree Tree, now time.Time, caller authz.Caller) (int64, error) {
 	if err := r.ready(); err != nil {
 		return 0, err
 	}
@@ -222,7 +243,13 @@ func (r *GORMRepository) SaveTree(ctx context.Context, pathID string, expected i
 	if err != nil {
 		return 0, err
 	}
-	result := r.db.WithContext(ctx).Table("mastery_paths").
+	// The scope is in the statement with the version guard, so a stale id from
+	// another account matches nothing for the same reason a moved-on row does.
+	// The service reads the path under the caller's scope before it writes, so
+	// this is the second line rather than the first — but it is the one that holds
+	// when the read and the write are not the same instant.
+	result := data.OwnerScope(r.db.WithContext(ctx).Table("mastery_paths"),
+		caller.UserID, caller.IsAdmin(), "owner_id").
 		Where("mastery_path_id = ? AND COALESCE(version, 0) = ?", pathID, expected).
 		Updates(map[string]any{
 			"state_json":  state,
@@ -239,7 +266,11 @@ func (r *GORMRepository) SaveTree(ctx context.Context, pathID string, expected i
 }
 
 // Meta reads a path's topic metadata.
-func (r *GORMRepository) Meta(ctx context.Context, pathID string) (TopicMeta, error) {
+//
+// The table has no owner of its own, so the scope is a subquery over the paths
+// that are owned: metadata for a path the caller cannot see is not returned, and
+// the answer is ErrNotFound — the same answer a path with no metadata row gets.
+func (r *GORMRepository) Meta(ctx context.Context, pathID string, caller authz.Caller) (TopicMeta, error) {
 	if err := r.ready(); err != nil {
 		return TopicMeta{}, err
 	}
@@ -252,7 +283,9 @@ func (r *GORMRepository) Meta(ctx context.Context, pathID string) (TopicMeta, er
 	}
 	err := r.db.WithContext(ctx).Table("mastery_topic_meta").
 		Select("path_id, goal, description, emoji, status").
-		Where("path_id = ?", pathID).Take(&row).Error
+		Where("path_id = ?", pathID).
+		Where("path_id IN (?)", pathScope(r.db.WithContext(ctx), caller)).
+		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return TopicMeta{}, fmt.Errorf("%w: the topic metadata of path %s", ErrNotFound, pathID)
 	}
@@ -273,8 +306,14 @@ func (r *GORMRepository) Meta(ctx context.Context, pathID string) (TopicMeta, er
 // The columns are named one by one rather than derived from the model, and that
 // is the point: this statement must not touch path_id and must not write a
 // created time, because both belong to the row that is already there.
-func (r *GORMRepository) SaveMeta(ctx context.Context, meta TopicMeta, now time.Time) error {
+func (r *GORMRepository) SaveMeta(ctx context.Context, meta TopicMeta, now time.Time, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
+		return err
+	}
+	// The row hangs off a path and carries no owner of its own, so the path is
+	// read first: writing metadata for a path the caller does not own would be
+	// renaming somebody else's work.
+	if err := r.ownPath(ctx, meta.PathID, caller); err != nil {
 		return err
 	}
 	columns := map[string]any{
@@ -318,8 +357,14 @@ func (r *GORMRepository) SaveMeta(ctx context.Context, meta TopicMeta, now time.
 // only column that changes after the first write: "which conversations have
 // touched this path" and "when was the last time" are one row's two questions,
 // and the first one never stops being true.
-func (r *GORMRepository) TouchSession(ctx context.Context, pathID string, actor Actor, now time.Time) error {
+func (r *GORMRepository) TouchSession(ctx context.Context, pathID string, actor Actor, now time.Time, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
+		return err
+	}
+	// The link row is derived from the path and has no owner of its own, so the
+	// path is read first: linking a conversation to somebody else's path would be
+	// recording that they have been somewhere they have not.
+	if err := r.ownPath(ctx, pathID, caller); err != nil {
 		return err
 	}
 	result := r.db.WithContext(ctx).Table("mastery_path_sessions").

@@ -5,19 +5,31 @@ import (
 	"errors"
 	"fmt"
 
+	"backend/internal/authz"
+	"backend/internal/data"
 	"backend/internal/data/models"
 	"gorm.io/gorm"
 )
 
 // AddCategories files a question under the given names.
 //
-// A category is created under a key derived from its name, so two writers
-// creating the same category at the same moment collide on the primary key
-// instead of making two rows — and a collision is not an error here, because
+// A category is created under a key derived from its name and its owner, so two
+// writers creating the same category at the same moment collide on the primary
+// key instead of making two rows — and a collision is not an error here, because
 // the row that is there says exactly what the one being inserted would have
 // said. The join rows behave the same way: filing a question under a category
 // it is already filed under is a no-op that reports success.
-func (r *GORMRepository) AddCategories(ctx context.Context, entryID string, names []string) error {
+//
+// The owner takes part in the category key, which is a decision the schema
+// forced. Migration 00014 made a category name unique per owner rather than
+// globally — two accounts may each have a "数学" — so a key derived from the name
+// alone would make the second account's insert collide with the first account's
+// row, and the collision-tolerant insert below would read that as "the category
+// is already there": the second account's question would be filed under the
+// first account's category, and its name would be readable by the first. The
+// owner is in the hash so the collision means what it should — the same account
+// making the same category twice.
+func (r *GORMRepository) AddCategories(ctx context.Context, entryID string, names []string, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
 		return err
 	}
@@ -26,9 +38,16 @@ func (r *GORMRepository) AddCategories(ctx context.Context, entryID string, name
 		return nil
 	}
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// The filing names a row key and nothing else about it, so the row it
+		// names is checked against the caller before anything is filed under it.
+		// Without this a caller holding another account's row key could file that
+		// question under a label of its own.
+		if err := requireEntryRow(tx, entryID, caller); err != nil {
+			return err
+		}
 		for _, name := range cleaned {
-			id := categoryID(name)
-			if err := requireCategory(tx, id, name); err != nil {
+			id := categoryID(caller.UserID, name)
+			if err := requireCategory(tx, id, name, caller); err != nil {
 				return err
 			}
 			link := models.NotebookEntryCategory{
@@ -62,13 +81,16 @@ func (r *GORMRepository) AddCategories(ctx context.Context, entryID string, name
 // filed under it are still filed under it — and a name a question used to carry
 // is worth keeping, because the next question that carries it should find the
 // same label rather than a second row with the same text.
-func (r *GORMRepository) SetCategories(ctx context.Context, questionID string, names []string) error {
+func (r *GORMRepository) SetCategories(ctx context.Context, questionID string, names []string, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
 		return err
 	}
 	cleaned := cleanCategoryNames(names)
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		entryID, err := lockedEntryID(tx, questionID)
+		// The scoped lookup is what makes this a write to the caller's question
+		// and not to a row key that happened to be named: another account's
+		// question is not found, so its filings are neither removed nor replaced.
+		entryID, err := lockedEntryID(tx, questionID, caller)
 		if err != nil {
 			return err
 		}
@@ -80,8 +102,8 @@ func (r *GORMRepository) SetCategories(ctx context.Context, questionID string, n
 		// primary key; what it can meet is a category row another writer made
 		// between requireCategory and here, which requireCategory tolerates.
 		for _, name := range cleaned {
-			id := categoryID(name)
-			if err := requireCategory(tx, id, name); err != nil {
+			id := categoryID(caller.UserID, name)
+			if err := requireCategory(tx, id, name, caller); err != nil {
 				return err
 			}
 			link := models.NotebookEntryCategory{
@@ -103,7 +125,13 @@ func (r *GORMRepository) SetCategories(ctx context.Context, questionID string, n
 // something else is not a name the surface can offer anything under. The name
 // breaks ties in the order, so two labels with the same count do not swap places
 // between two identical requests.
-func (r *GORMRepository) Categories(ctx context.Context) ([]Category, error) {
+//
+// The caller narrows it through the category's own owner column, which is the
+// one place this table is filtered on directly. That is enough: a category row
+// belongs to the account that made it (§2.3, and the owner-aware key in
+// AddCategories), so the filings counted under it are that account's questions
+// and nobody else's.
+func (r *GORMRepository) Categories(ctx context.Context, caller authz.Caller) ([]Category, error) {
 	if err := r.ready(); err != nil {
 		return nil, err
 	}
@@ -115,8 +143,9 @@ func (r *GORMRepository) Categories(ctx context.Context) ([]Category, error) {
 		Name  string `gorm:"column:name"`
 		Count int    `gorm:"column:questions"`
 	}
-	err := r.db.WithContext(ctx).
-		Table("notebook_categories AS category").
+	query := data.OwnerScope(r.db.WithContext(ctx).Table("notebook_categories AS category"),
+		caller.UserID, caller.IsAdmin(), "category.owner_id")
+	err := query.
 		Select("category.name AS name, COUNT(filing.notebook_entries_id) AS questions").
 		Joins("JOIN notebook_entry_categories AS filing " +
 			"ON filing.notebook_categories_id = category.notebook_categories_id").
@@ -134,8 +163,16 @@ func (r *GORMRepository) Categories(ctx context.Context) ([]Category, error) {
 }
 
 // requireCategory makes sure a category row exists under the given key.
-func requireCategory(tx *gorm.DB, id, name string) error {
-	record := models.NotebookCategory{NotebookCategoriesID: id, Name: name}
+//
+// The owner is written on creation and matches the account whose key this is, so
+// the row that ends up there is the caller's — and a collision, when it happens,
+// is the same account's second write rather than another account's first.
+func requireCategory(tx *gorm.DB, id, name string, caller authz.Caller) error {
+	record := models.NotebookCategory{
+		NotebookCategoriesID: id,
+		Name:                 name,
+		OwnerID:              data.OwnerPointer(caller.UserID),
+	}
 	switch err := tx.Create(&record).Error; {
 	case err == nil:
 		return nil

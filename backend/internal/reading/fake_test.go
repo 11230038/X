@@ -18,7 +18,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"backend/internal/authz"
 )
+
+// testCaller is the account the service tests act as. What these tests are about
+// is what the service decides before storage is asked anything, and the account is
+// the same one throughout; the two-account cases — a material one account must not
+// see — live beside the real database, where the filter is actually applied.
+var testCaller = authz.Caller{UserID: 1, Role: authz.RoleUser}
 
 // fakeRepository is the catalogue, the positions and the marks, in memory.
 //
@@ -89,11 +97,11 @@ func (f *fakeRepository) findPosition(materialID, sessionID string) int {
 	return -1
 }
 
-func (f *fakeRepository) Materials(_ context.Context, _ string) ([]Material, error) {
+func (f *fakeRepository) Materials(_ context.Context, _ string, _ authz.Caller) ([]Material, error) {
 	return f.materials, f.materialErr
 }
 
-func (f *fakeRepository) Material(_ context.Context, materialID string) (Material, error) {
+func (f *fakeRepository) Material(_ context.Context, materialID string, _ authz.Caller) (Material, error) {
 	f.reads++
 	if f.materialErr != nil {
 		return Material{}, f.materialErr
@@ -106,7 +114,7 @@ func (f *fakeRepository) Material(_ context.Context, materialID string) (Materia
 	return Material{}, fmt.Errorf("%w: material %s", ErrNotFound, materialID)
 }
 
-func (f *fakeRepository) MaterialOfContent(_ context.Context, contentID string) (Material, error) {
+func (f *fakeRepository) MaterialOfContent(_ context.Context, contentID string, _ authz.Caller) (Material, error) {
 	if f.materialErr != nil {
 		return Material{}, f.materialErr
 	}
@@ -131,7 +139,7 @@ func (f *fakeRepository) CreateMaterial(_ context.Context, material Material) er
 	return nil
 }
 
-func (f *fakeRepository) Position(_ context.Context, materialID, sessionID string) (Position, error) {
+func (f *fakeRepository) Position(_ context.Context, materialID, sessionID string, _ authz.Caller) (Position, error) {
 	if index := f.findPosition(materialID, sessionID); index >= 0 {
 		return f.positions[index], nil
 	}
@@ -139,7 +147,7 @@ func (f *fakeRepository) Position(_ context.Context, materialID, sessionID strin
 		ErrNotFound, materialID, sessionID)
 }
 
-func (f *fakeRepository) CreatePosition(_ context.Context, position Position) error {
+func (f *fakeRepository) CreatePosition(_ context.Context, position Position, _ authz.Caller) error {
 	if f.positionErr != nil {
 		return f.positionErr
 	}
@@ -155,7 +163,7 @@ func (f *fakeRepository) CreatePosition(_ context.Context, position Position) er
 }
 
 func (f *fakeRepository) SavePosition(_ context.Context, materialID, sessionID string,
-	expected int64, locator Locator, now time.Time) (bool, error) {
+	expected int64, locator Locator, now time.Time, _ authz.Caller) (bool, error) {
 	if f.saveErr != nil {
 		return false, f.saveErr
 	}
@@ -170,7 +178,7 @@ func (f *fakeRepository) SavePosition(_ context.Context, materialID, sessionID s
 	return true, nil
 }
 
-func (f *fakeRepository) Marks(_ context.Context, materialID string) ([]Mark, error) {
+func (f *fakeRepository) Marks(_ context.Context, materialID string, _ authz.Caller) ([]Mark, error) {
 	if f.markErr != nil {
 		return nil, f.markErr
 	}
@@ -183,7 +191,7 @@ func (f *fakeRepository) Marks(_ context.Context, materialID string) ([]Mark, er
 	return found, nil
 }
 
-func (f *fakeRepository) Mark(_ context.Context, markID string) (Mark, error) {
+func (f *fakeRepository) Mark(_ context.Context, markID string, _ authz.Caller) (Mark, error) {
 	for _, mark := range f.marks {
 		if mark.MarkID == markID {
 			return mark, nil
@@ -192,7 +200,7 @@ func (f *fakeRepository) Mark(_ context.Context, markID string) (Mark, error) {
 	return Mark{}, fmt.Errorf("%w: mark %s", ErrNotFound, markID)
 }
 
-func (f *fakeRepository) CreateMark(_ context.Context, mark Mark) error {
+func (f *fakeRepository) CreateMark(_ context.Context, mark Mark, _ authz.Caller) error {
 	if f.markErr != nil {
 		return f.markErr
 	}
@@ -200,7 +208,7 @@ func (f *fakeRepository) CreateMark(_ context.Context, mark Mark) error {
 	return nil
 }
 
-func (f *fakeRepository) DeleteMark(_ context.Context, markID string) error {
+func (f *fakeRepository) DeleteMark(_ context.Context, markID string, _ authz.Caller) error {
 	if f.deleteMarkErr != nil {
 		return f.deleteMarkErr
 	}
@@ -217,7 +225,7 @@ func (f *fakeRepository) DeleteMark(_ context.Context, markID string) error {
 // The pairings, in memory. A confirm and a cancel are the only two writes there
 // are, and both are written down: a test that says a recommendation stored
 // nothing needs somewhere that would have noticed a row appearing.
-func (f *fakeRepository) PairingOf(_ context.Context, materialID string) (Pairing, error) {
+func (f *fakeRepository) PairingOf(_ context.Context, materialID string, _ authz.Caller) (Pairing, error) {
 	if f.pairingErr != nil {
 		return Pairing{}, f.pairingErr
 	}
@@ -229,7 +237,7 @@ func (f *fakeRepository) PairingOf(_ context.Context, materialID string) (Pairin
 	return Pairing{}, fmt.Errorf("%w: material %s is in no pairing", ErrNotFound, materialID)
 }
 
-func (f *fakeRepository) PairingBetween(_ context.Context, first, second string) (Pairing, error) {
+func (f *fakeRepository) PairingBetween(_ context.Context, first, second string, _ authz.Caller) (Pairing, error) {
 	if f.pairingErr != nil {
 		return Pairing{}, f.pairingErr
 	}
@@ -243,7 +251,7 @@ func (f *fakeRepository) PairingBetween(_ context.Context, first, second string)
 	return Pairing{}, fmt.Errorf("%w: materials %s and %s are not paired", ErrNotFound, first, second)
 }
 
-func (f *fakeRepository) CreatePairing(_ context.Context, pairing Pairing) error {
+func (f *fakeRepository) CreatePairing(_ context.Context, pairing Pairing, _ authz.Caller) error {
 	if f.createPairingErr != nil {
 		return f.createPairingErr
 	}
@@ -252,7 +260,7 @@ func (f *fakeRepository) CreatePairing(_ context.Context, pairing Pairing) error
 	return nil
 }
 
-func (f *fakeRepository) DeletePairing(_ context.Context, pairingID string) error {
+func (f *fakeRepository) DeletePairing(_ context.Context, pairingID string, _ authz.Caller) error {
 	if f.deletePairingErr != nil {
 		return f.deletePairingErr
 	}
@@ -312,7 +320,7 @@ func (f *fakeDocuments) withDocument(document Document, text string, spans ...Ch
 	return f
 }
 
-func (f *fakeDocuments) DocumentOfFile(_ context.Context, fileID string) (Document, error) {
+func (f *fakeDocuments) DocumentOfFile(_ context.Context, fileID string, _ authz.Caller) (Document, error) {
 	if f.documentErr != nil {
 		return Document{}, f.documentErr
 	}
@@ -324,7 +332,7 @@ func (f *fakeDocuments) DocumentOfFile(_ context.Context, fileID string) (Docume
 	return Document{}, fmt.Errorf("%w: no document was parsed from file %s", ErrNotFound, fileID)
 }
 
-func (f *fakeDocuments) Document(_ context.Context, documentID string) (Document, error) {
+func (f *fakeDocuments) Document(_ context.Context, documentID string, _ authz.Caller) (Document, error) {
 	if f.documentErr != nil {
 		return Document{}, f.documentErr
 	}
@@ -335,7 +343,7 @@ func (f *fakeDocuments) Document(_ context.Context, documentID string) (Document
 	return document, nil
 }
 
-func (f *fakeDocuments) ChunkSpans(_ context.Context, documentID string) ([]ChunkSpan, error) {
+func (f *fakeDocuments) ChunkSpans(_ context.Context, documentID string, _ authz.Caller) ([]ChunkSpan, error) {
 	if f.spansErr != nil {
 		return nil, f.spansErr
 	}
@@ -344,7 +352,7 @@ func (f *fakeDocuments) ChunkSpans(_ context.Context, documentID string) ([]Chun
 
 // Text cuts the window out of the document's text by characters rather than
 // bytes, the same unit the real read takes.
-func (f *fakeDocuments) Text(_ context.Context, documentID string, charStart, charEnd int64) (string, error) {
+func (f *fakeDocuments) Text(_ context.Context, documentID string, charStart, charEnd int64, _ authz.Caller) (string, error) {
 	if f.textErr != nil {
 		return "", f.textErr
 	}

@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"backend/internal/authz"
 )
 
 var (
@@ -263,6 +265,17 @@ type Filter struct {
 	// is a client asking for more than it should get, not an error it could fix.
 	Limit  int
 	Offset int
+	// Caller is the account this listing is for. It is not a filter a client
+	// writes — the surface has no parameter for it — but it is the one field
+	// every listing carries, because §2.3 makes ownership a filter rather than a
+	// check: the account goes into the statement, and a listing that forgot it
+	// would return another account's questions as though they were the caller's.
+	//
+	// It rides in the filter rather than beside it because the two are one
+	// question — "which questions" — and a second argument would be the same
+	// question asked twice. A method with no filter on it takes the caller as its
+	// last argument instead.
+	Caller authz.Caller
 }
 
 // Validate reports whether the filter can be acted on.
@@ -303,34 +316,47 @@ func (c Change) Empty() bool { return c.Bookmarked == nil && c.Resolved == nil }
 
 // Repository is the storage seam over the three tables of the question bank. It
 // reports what storage holds; what that means is decided above it.
+//
+// Every method here takes the caller last, and none of them decides anything
+// about it: §2.3 makes the account a filter rather than a check, so the id goes
+// into the statement and a row belonging to somebody else is simply not there —
+// answered as ErrNotFound, never as a refusal that would confirm it exists. A
+// method that already takes a Filter carries the caller inside it instead, for
+// the reason given on Filter.Caller.
 type Repository interface {
 	// UpsertQuestion writes the question face of the question identified by
 	// its content address, inserting the row under entryID if it is not there.
 	// It writes nothing else: not the answer face, not the conversation the
 	// question was first asked in, and not the row's update time.
-	UpsertQuestion(ctx context.Context, entryID string, question Question, now time.Time) (Upserted, error)
+	//
+	// The write is scoped, so a question whose address is another account's is
+	// not found to rewrite: the insert then meets the unique key on question_id
+	// (see the note in repository.go) and the scoped re-read that follows finds
+	// nothing, so the caller is told ErrNotFound — the same answer as a question
+	// that is nowhere at all.
+	UpsertQuestion(ctx context.Context, entryID string, question Question, now time.Time, caller authz.Caller) (Upserted, error)
 	// AddCategories files a question under the given names, creating the
 	// categories that do not exist yet. It never removes one: this is the write
 	// side of generating a question, and a category the user added by hand is
 	// not something a later generation of the same question gets to drop.
-	AddCategories(ctx context.Context, entryID string, names []string) error
+	AddCategories(ctx context.Context, entryID string, names []string, caller authz.Caller) error
 	// Entry reads one question by its content address, with its answer face and
 	// its categories.
-	Entry(ctx context.Context, questionID string) (Entry, error)
+	Entry(ctx context.Context, questionID string, caller authz.Caller) (Entry, error)
 	// List returns one page of the bank, newest first.
 	List(ctx context.Context, filter Filter) ([]Entry, error)
 	// Mark applies a property change and reports ErrNotFound when the question
 	// is not there.
-	Mark(ctx context.Context, questionID string, change Change) error
+	Mark(ctx context.Context, questionID string, change Change, caller authz.Caller) error
 	// SetCategories replaces the labels a question is filed under with exactly
 	// the given names, creating the ones that are not there yet. It removes,
 	// which is the difference between it and AddCategories: that one is the
 	// write side of generating a question, and this one is the write side of a
 	// user editing the filing.
-	SetCategories(ctx context.Context, questionID string, names []string) error
+	SetCategories(ctx context.Context, questionID string, names []string, caller authz.Caller) error
 	// Categories lists the labels the bank is filed under, each with how many
 	// questions carry it, most used first.
-	Categories(ctx context.Context) ([]Category, error)
+	Categories(ctx context.Context, caller authz.Caller) ([]Category, error)
 }
 
 // Listing defaults. A listing with no bound is a listing that grows without one.

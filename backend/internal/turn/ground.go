@@ -75,7 +75,7 @@ func (r *turnRun) ground(ctx context.Context, query string) (capability.Groundin
 		if query == "" {
 			continue
 		}
-		sources, err := r.runner.materials.Locate(ctx, attachment.DocumentID, query, 0)
+		sources, err := r.runner.materials.Locate(ctx, attachment.DocumentID, query, 0, r.caller)
 		if err != nil {
 			notes, err := r.surveyNotes(ctx, err, "附件「"+attachment.Label+"」")
 			if err != nil {
@@ -90,7 +90,7 @@ func (r *turnRun) ground(ctx context.Context, query string) (capability.Groundin
 
 	if len(r.material.KnowledgeBases) > 0 && query != "" {
 		retrieval, err := r.runner.materials.Retrieve(ctx, kb.RetrieveInput{
-			KBIDs: r.material.KnowledgeBases,
+			KBIDs: r.material.KnowledgeBases, Caller: r.caller,
 			Query: query,
 		})
 		if err != nil {

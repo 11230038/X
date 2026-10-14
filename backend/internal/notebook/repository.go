@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"backend/internal/authz"
+	"backend/internal/data"
 	"backend/internal/data/models"
 	"gorm.io/gorm"
 )
@@ -41,12 +43,24 @@ var _ Repository = (*GORMRepository)(nil)
 // reported from the caller's argument: the two are the same row, and a caller
 // that was handed back the key it made up would file the question's categories
 // under a row that is not there.
-func (r *GORMRepository) UpsertQuestion(ctx context.Context, entryID string, question Question, now time.Time) (Upserted, error) {
+//
+// Every statement here is narrowed to the caller, and the collision that makes
+// is the one worth writing down. A question's row is looked up by the caller,
+// because a question generated in somebody else's conversation is not this
+// caller's to rewrite. An account that imports another account's question hits
+// the update for nothing, then the insert meets the unique key question_id still
+// carries from migration 00003 — a global key, from when there was one account —
+// and the collision-tolerant re-read finds no row this caller may touch. The
+// answer is ErrNotFound: as far as this account is concerned the question is not
+// there, which is what §2.3 asks for, and the database-level collision says only
+// that the address is taken. That global key is a landmine the schema still
+// holds; it is reported and not papered over.
+func (r *GORMRepository) UpsertQuestion(ctx context.Context, entryID string, question Question, now time.Time, caller authz.Caller) (Upserted, error) {
 	if err := r.ready(); err != nil {
 		return Upserted{}, err
 	}
 
-	updated, err := r.writeQuestionFace(ctx, question)
+	updated, err := r.writeQuestionFace(ctx, question, caller)
 	if err != nil {
 		return Upserted{}, err
 	}
@@ -55,7 +69,7 @@ func (r *GORMRepository) UpsertQuestion(ctx context.Context, entryID string, que
 		// one that puts it there — unless somebody else got there between the two
 		// statements, which the unique key on question_id reports as a duplicate
 		// rather than as two rows.
-		created, err := r.insertQuestion(ctx, entryID, question, now)
+		created, err := r.insertQuestion(ctx, entryID, question, now, caller)
 		if err != nil {
 			return Upserted{}, err
 		}
@@ -64,7 +78,7 @@ func (r *GORMRepository) UpsertQuestion(ctx context.Context, entryID string, que
 		}
 	}
 
-	id, err := r.rowIDOf(ctx, question.QuestionID)
+	id, err := r.rowIDOf(ctx, question.QuestionID, caller)
 	if err != nil {
 		return Upserted{}, err
 	}
@@ -74,8 +88,8 @@ func (r *GORMRepository) UpsertQuestion(ctx context.Context, entryID string, que
 // insertQuestion inserts the row and reports whether this call is the one that
 // made it. A duplicate key is not a failure: it means somebody else inserted
 // this question between the update and this insert, and they were right.
-func (r *GORMRepository) insertQuestion(ctx context.Context, entryID string, question Question, now time.Time) (bool, error) {
-	model, err := questionModel(entryID, question, now)
+func (r *GORMRepository) insertQuestion(ctx context.Context, entryID string, question Question, now time.Time, caller authz.Caller) (bool, error) {
+	model, err := questionModel(entryID, question, now, caller)
 	if err != nil {
 		return false, err
 	}
@@ -86,8 +100,11 @@ func (r *GORMRepository) insertQuestion(ctx context.Context, entryID string, que
 		// The row is there, so this call rewrites it with the question face it was
 		// given: of two writes that arrived together this is the one that arrived
 		// second, and the fields that are not part of the address — the options,
-		// the explanation, where it came from — are not the same in both.
-		if _, err := r.writeQuestionFace(ctx, question); err != nil {
+		// the explanation, where it came from — are not the same in both. The
+		// rewrite is scoped, so a collision with another account's row changes
+		// nothing and is not an error here — the caller learns of it from the
+		// scoped rowIDOf below.
+		if _, err := r.writeQuestionFace(ctx, question, caller); err != nil {
 			return false, err
 		}
 		return false, nil
@@ -97,12 +114,11 @@ func (r *GORMRepository) insertQuestion(ctx context.Context, entryID string, que
 }
 
 // rowIDOf reads the key the row holding a question has.
-func (r *GORMRepository) rowIDOf(ctx context.Context, questionID string) (string, error) {
+func (r *GORMRepository) rowIDOf(ctx context.Context, questionID string, caller authz.Caller) (string, error) {
 	var ids []string
-	err := r.db.WithContext(ctx).
-		Table("notebook_entries").
-		Where("question_id = ?", questionID).
-		Pluck("notebook_entries_id", &ids).Error
+	query := data.OwnerScope(r.db.WithContext(ctx).Table("notebook_entries"),
+		caller.UserID, caller.IsAdmin(), "owner_id")
+	err := query.Where("question_id = ?", questionID).Pluck("notebook_entries_id", &ids).Error
 	if err != nil {
 		return "", fmt.Errorf("read the row key of question %s: %w", questionID, err)
 	}
@@ -120,7 +136,12 @@ func (r *GORMRepository) rowIDOf(ctx context.Context, questionID string) (string
 // not the conversation the question was first asked in, not the mastery
 // coordinate it was generated from, and not update_time. A list of columns is a
 // place where leaving something out is visible.
-func (r *GORMRepository) writeQuestionFace(ctx context.Context, question Question) (int64, error) {
+//
+// The owner is not among the columns, and that is deliberate: a rewrite belongs
+// to the row and does not re-own it. What the owner settles is which row this
+// statement is allowed to reach, and that is the WHERE clause — through
+// OwnerScope, so an account can rewrite its own question and no other.
+func (r *GORMRepository) writeQuestionFace(ctx context.Context, question Question, caller authz.Caller) (int64, error) {
 	options, err := jsonColumn(question.Options)
 	if err != nil {
 		return 0, fmt.Errorf("encode question options: %w", err)
@@ -129,7 +150,9 @@ func (r *GORMRepository) writeQuestionFace(ctx context.Context, question Questio
 	if err != nil {
 		return 0, fmt.Errorf("encode question knowledge points: %w", err)
 	}
-	result := r.db.WithContext(ctx).Table("notebook_entries").
+	query := data.OwnerScope(r.db.WithContext(ctx).Table("notebook_entries"),
+		caller.UserID, caller.IsAdmin(), "owner_id")
+	result := query.
 		Where("question_id = ?", question.QuestionID).
 		Updates(map[string]any{
 			"question":       question.Text,
@@ -152,7 +175,12 @@ func (r *GORMRepository) writeQuestionFace(ctx context.Context, question Questio
 // it was generated from, and the conversation it was first asked in. The answer
 // face is left for the review path, so a question nobody has answered has
 // nothing written on it.
-func questionModel(entryID string, question Question, now time.Time) (models.NotebookEntry, error) {
+//
+// The owner is written here and nowhere else, because a row is owned once, when
+// it is made. A caller with no account — a build nothing authenticates — writes
+// NULL, which is the same state the rows from before V5 are in: visible to the
+// administrator and to nobody else.
+func questionModel(entryID string, question Question, now time.Time, caller authz.Caller) (models.NotebookEntry, error) {
 	options, err := jsonColumn(question.Options)
 	if err != nil {
 		return models.NotebookEntry{}, fmt.Errorf("encode question options: %w", err)
@@ -173,6 +201,7 @@ func questionModel(entryID string, question Question, now time.Time) (models.Not
 		Source:            nullable(question.Source),
 		MaterialID:        nullable(question.MaterialID),
 		Extra:             extra,
+		OwnerID:           data.OwnerPointer(caller.UserID),
 		// The mastery coordinate is written here, on the way in, and only here:
 		// it is where the question came from (§2.2), which is a fact about the
 		// first write and not something a later one can improve on. Validate has

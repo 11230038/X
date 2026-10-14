@@ -22,6 +22,10 @@ const (
 	handlerInternal   = "private database details"
 	handlerUserJSON   = `"username":"alice"`
 	handlerBodyAccept = "application/json"
+	// handlerAccountID is the account the stub verifier's token stands for. Tests
+	// that assert the account reached the domain compare against it, so that
+	// changing it here is one edit rather than a hunt.
+	handlerAccountID int64 = 7
 )
 
 type authStub struct {
@@ -284,5 +288,5 @@ func (handlerVerifierStub) Authenticate(_ context.Context, token string) (auth.U
 	if token != handlerToken {
 		return auth.User{}, auth.ErrInvalidToken
 	}
-	return auth.User{UserID: 7, Username: "alice", Role: "user"}, nil
+	return auth.User{UserID: handlerAccountID, Username: "alice", Role: "user"}, nil
 }

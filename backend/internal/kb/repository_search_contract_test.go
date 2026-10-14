@@ -80,7 +80,7 @@ func TestDBAChunkRangeIsOneRevisionAndNoOther(t *testing.T) {
 		CreatedAt: atSecond(4), Text: "闭包是一个函数和它捕获的环境",
 		Chunks: []string{"闭包是一个函数和它捕获的环境"},
 	})
-	err := repo.ReplaceRevision(context.Background(), next, 1)
+	err := repo.ReplaceRevision(context.Background(), next, 1, testCaller())
 	if err != nil {
 		t.Fatalf("replace the revision: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestDBFullTextLeavesAnInactiveRevisionBehind(t *testing.T) {
 		ID: "doc_1", KBID: "kb_a", FileID: before.FileID, Revision: 2,
 		CreatedAt: atSecond(2), Text: "闭包是重建后的", Chunks: []string{"闭包是重建后的"},
 	})
-	if err := repo.ReplaceRevision(context.Background(), after, 1); err != nil {
+	if err := repo.ReplaceRevision(context.Background(), after, 1, testCaller()); err != nil {
 		t.Fatalf("replace the revision: %v", err)
 	}
 

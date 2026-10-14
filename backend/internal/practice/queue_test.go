@@ -17,18 +17,27 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/data"
 	"backend/internal/notebook"
 )
 
-// storeQuestionAt puts a question in the bank as of an instant. The instant is
-// the point of the helper: one of the three orders this query sorts by is when
-// a question was written, so a case about that order has to say when.
+// storeQuestionAt puts a question in the bank as of an instant, owned by the
+// account these tests act as. The instant is the point of the helper: one of the
+// three orders this query sorts by is when a question was written, so a case
+// about that order has to say when.
 func storeQuestionAt(t *testing.T, resource *data.Resource, entryID string, question notebook.Question, at time.Time) notebook.Question {
+	t.Helper()
+	return storeQuestionAtAs(t, resource, entryID, question, at, testCaller())
+}
+
+// storeQuestionAtAs is storeQuestionAt for a caller of the test's own choosing,
+// which is what a case about two accounts needs to seed the other one's bank.
+func storeQuestionAtAs(t *testing.T, resource *data.Resource, entryID string, question notebook.Question, at time.Time, caller authz.Caller) notebook.Question {
 	t.Helper()
 	question.QuestionID = notebook.QuestionID(question.Text, question.Type)
 	_, err := notebook.NewGORMRepository(resource.GORM()).UpsertQuestion(
-		context.Background(), entryID, question, at)
+		context.Background(), entryID, question, at, caller)
 	if err != nil {
 		t.Fatalf("store question %q: %v", question.Text, err)
 	}
@@ -44,7 +53,7 @@ func (h *harness) moveAt(instant time.Time) {
 
 func (h *harness) queue(t *testing.T, size int) []QueueItem {
 	t.Helper()
-	items, err := h.service.Queue(context.Background(), size)
+	items, err := h.service.Queue(context.Background(), size, testCaller())
 	if err != nil {
 		t.Fatalf("read the queue: %v", err)
 	}
@@ -250,7 +259,7 @@ func TestAMasteredQuestionLeavesTheQueue(t *testing.T) {
 	bank := notebook.NewGORMRepository(h.resource.GORM())
 	done := true
 	for _, question := range []notebook.Question{overdue, never} {
-		if err := bank.Mark(context.Background(), question.QuestionID, notebook.Change{Resolved: &done}); err != nil {
+		if err := bank.Mark(context.Background(), question.QuestionID, notebook.Change{Resolved: &done}, testCaller()); err != nil {
 			t.Fatalf("mark %s as resolved: %v", question.Text, err)
 		}
 	}
@@ -332,4 +341,15 @@ func TestAnEmptyBankHasAnEmptyQueue(t *testing.T) {
 	if len(items) != 0 {
 		t.Fatalf("an empty bank has a queue of %d", len(items))
 	}
+}
+
+// TestDBAnotherAccountsBankHasNoQueue is §7.2's acceptance for the queue: the
+// questions another account owns are never candidates for this account's queue,
+// because the owner is part of the SELECT rather than a check on what it returned.
+func TestDBAnotherAccountsBankHasNoQueue(t *testing.T) {
+	h := newHarness(t)
+	mine := storeQuestionAtAs(t, h.resource, "nbe_1", fillFor("我的题"), reviewsHappenAt, testCaller())
+	storeQuestionAtAs(t, h.resource, "nbe_2", choiceFor("别人的题"), reviewsHappenAt, otherCaller())
+
+	sameTexts(t, textsOf(h.queue(t, 0)), mine.Text)
 }

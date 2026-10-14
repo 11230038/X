@@ -21,7 +21,7 @@ func TestNewServiceNeedsARepository(t *testing.T) {
 func TestCreateStartsAnUntitledSession(t *testing.T) {
 	service, repository := newTestService(t)
 
-	created, err := service.Create(context.Background())
+	created, err := service.Create(context.Background(), testCaller())
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -48,11 +48,11 @@ func TestCreateStartsAnUntitledSession(t *testing.T) {
 func TestCreateGivesEachSessionItsOwnID(t *testing.T) {
 	service, _ := newTestService(t)
 
-	first, err := service.Create(context.Background())
+	first, err := service.Create(context.Background(), testCaller())
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	second, err := service.Create(context.Background())
+	second, err := service.Create(context.Background(), testCaller())
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -67,15 +67,15 @@ func TestGetHidesTheRecycleBin(t *testing.T) {
 	repository.seed(Session{ID: "sess_live"})
 	repository.seed(Session{ID: "sess_binned", DeletedAt: time.Now().UTC()})
 
-	if _, err := service.Get(ctx, "sess_live"); err != nil {
+	if _, err := service.Get(ctx, "sess_live", testCaller()); err != nil {
 		t.Fatalf("Get(live) error = %v", err)
 	}
 	// A session in the bin may not be started in or read, so as far as this
 	// operation is concerned it is not there.
-	if _, err := service.Get(ctx, "sess_binned"); !errors.Is(err, ErrNotFound) {
+	if _, err := service.Get(ctx, "sess_binned", testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get(binned) error = %v, want ErrNotFound", err)
 	}
-	if _, err := service.Get(ctx, "sess_missing"); !errors.Is(err, ErrNotFound) {
+	if _, err := service.Get(ctx, "sess_missing", testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get(missing) error = %v, want ErrNotFound", err)
 	}
 }
@@ -90,7 +90,7 @@ func TestRenameTitlesALiveSession(t *testing.T) {
 	service, repository := newTestService(t)
 	repository.seed(Session{ID: "sess_1"})
 
-	renamed, err := service.Rename(context.Background(), "sess_1", "  闭包与作用域  ")
+	renamed, err := service.Rename(context.Background(), "sess_1", "  闭包与作用域  ", testCaller())
 	if err != nil {
 		t.Fatalf("Rename() error = %v", err)
 	}
@@ -128,7 +128,7 @@ func TestRenameRejectsTitlesItCouldNotReadBack(t *testing.T) {
 			service, repository := newTestService(t)
 			repository.seed(Session{ID: "sess_1"})
 
-			if _, err := service.Rename(context.Background(), "sess_1", test.title); !errors.Is(err, ErrInvalidTitle) {
+			if _, err := service.Rename(context.Background(), "sess_1", test.title, testCaller()); !errors.Is(err, ErrInvalidTitle) {
 				t.Errorf("Rename() error = %v, want ErrInvalidTitle", err)
 			}
 			if len(repository.renames) != 0 {
@@ -143,7 +143,7 @@ func TestRenameAcceptsATitleAtTheLimit(t *testing.T) {
 	repository.seed(Session{ID: "sess_1"})
 
 	title := strings.Repeat("字", TitleMaxRunes)
-	if _, err := service.Rename(context.Background(), "sess_1", title); err != nil {
+	if _, err := service.Rename(context.Background(), "sess_1", title, testCaller()); err != nil {
 		t.Errorf("Rename() error = %v", err)
 	}
 }
@@ -152,7 +152,7 @@ func TestSoftDeleteMovesALiveSessionToTheBin(t *testing.T) {
 	service, repository := newTestService(t)
 	repository.seed(Session{ID: "sess_1"})
 
-	if err := service.SoftDelete(context.Background(), "sess_1"); err != nil {
+	if err := service.SoftDelete(context.Background(), "sess_1", testCaller()); err != nil {
 		t.Fatalf("SoftDelete() error = %v", err)
 	}
 
@@ -163,7 +163,7 @@ func TestSoftDeleteMovesALiveSessionToTheBin(t *testing.T) {
 		t.Error("the session is still live")
 	}
 	// A binned session is gone from the live listing straight away.
-	if _, err := service.Get(context.Background(), "sess_1"); !errors.Is(err, ErrNotFound) {
+	if _, err := service.Get(context.Background(), "sess_1", testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get() after deletion error = %v", err)
 	}
 }
@@ -172,7 +172,7 @@ func TestSoftDeleteRefusesASessionAlreadyInTheBin(t *testing.T) {
 	service, repository := newTestService(t)
 	repository.seed(Session{ID: "sess_1", DeletedAt: time.Now().UTC()})
 
-	if err := service.SoftDelete(context.Background(), "sess_1"); !errors.Is(err, ErrNotFound) {
+	if err := service.SoftDelete(context.Background(), "sess_1", testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("SoftDelete() error = %v, want ErrNotFound", err)
 	}
 	// Deleting twice would move deleted_at, and the bin is ordered by it.
@@ -185,7 +185,7 @@ func TestRestoreTakesASessionBackOutOfTheBin(t *testing.T) {
 	service, repository := newTestService(t)
 	repository.seed(Session{ID: "sess_1", DeletedAt: time.Now().UTC()})
 
-	if err := service.Restore(context.Background(), "sess_1"); err != nil {
+	if err := service.Restore(context.Background(), "sess_1", testCaller()); err != nil {
 		t.Fatalf("Restore() error = %v", err)
 	}
 
@@ -195,7 +195,7 @@ func TestRestoreTakesASessionBackOutOfTheBin(t *testing.T) {
 	if repository.sessions["sess_1"].Deleted() {
 		t.Error("the session is still in the bin")
 	}
-	if _, err := service.Get(context.Background(), "sess_1"); err != nil {
+	if _, err := service.Get(context.Background(), "sess_1", testCaller()); err != nil {
 		t.Errorf("Get() after restoring error = %v", err)
 	}
 }
@@ -204,7 +204,7 @@ func TestRestoreRefusesASessionThatIsNotInTheBin(t *testing.T) {
 	service, repository := newTestService(t)
 	repository.seed(Session{ID: "sess_1"})
 
-	if err := service.Restore(context.Background(), "sess_1"); !errors.Is(err, ErrNotFound) {
+	if err := service.Restore(context.Background(), "sess_1", testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Restore() error = %v, want ErrNotFound", err)
 	}
 	if len(repository.binCalls) != 0 {
@@ -217,7 +217,7 @@ func TestDeletePermanentlyRequiresTheBin(t *testing.T) {
 	repository.seed(Session{ID: "sess_binned", DeletedAt: time.Now().UTC()})
 	repository.seed(Session{ID: "sess_live"})
 
-	if err := service.DeletePermanently(context.Background(), "sess_binned"); err != nil {
+	if err := service.DeletePermanently(context.Background(), "sess_binned", testCaller()); err != nil {
 		t.Fatalf("DeletePermanently(binned) error = %v", err)
 	}
 	if len(repository.deleted) != 1 || repository.deleted[0] != "sess_binned" {
@@ -226,7 +226,7 @@ func TestDeletePermanentlyRequiresTheBin(t *testing.T) {
 
 	// A live session is one click from the user's point of view; it has to pass
 	// through the bin first (CHAT-06).
-	if err := service.DeletePermanently(context.Background(), "sess_live"); !errors.Is(err, ErrNotFound) {
+	if err := service.DeletePermanently(context.Background(), "sess_live", testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("DeletePermanently(live) error = %v, want ErrNotFound", err)
 	}
 	if len(repository.deleted) != 1 {
@@ -240,7 +240,7 @@ func TestAppendMessageRecordsWhoSaidWhat(t *testing.T) {
 
 	appended, err := service.AppendMessage(context.Background(), NewMessage{
 		SessionID: "sess_1", Role: RoleUser, Content: "什么是闭包？",
-	})
+	}, testCaller())
 	if err != nil {
 		t.Fatalf("AppendMessage() error = %v", err)
 	}
@@ -266,7 +266,7 @@ func TestAppendMessageRejectsARoleThisVersionDoesNotWrite(t *testing.T) {
 		service, repository := newTestService(t)
 		repository.seed(Session{ID: "sess_1"})
 
-		_, err := service.AppendMessage(context.Background(), NewMessage{SessionID: "sess_1", Role: role})
+		_, err := service.AppendMessage(context.Background(), NewMessage{SessionID: "sess_1", Role: role}, testCaller())
 		if !errors.Is(err, ErrInvalidMessage) {
 			t.Errorf("AppendMessage(role=%q) error = %v, want ErrInvalidMessage", role, err)
 		}
@@ -281,7 +281,7 @@ func TestAppendMessageReportsAnUnknownSession(t *testing.T) {
 	// error nobody can act on. The caller should hear that the session is gone.
 	service, _ := newTestService(t)
 
-	_, err := service.AppendMessage(context.Background(), NewMessage{SessionID: "sess_missing", Role: RoleUser})
+	_, err := service.AppendMessage(context.Background(), NewMessage{SessionID: "sess_missing", Role: RoleUser}, testCaller())
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("AppendMessage() error = %v, want ErrNotFound", err)
 	}
@@ -294,7 +294,7 @@ func TestMessagesReturnsHistoryForALiveSessionOnly(t *testing.T) {
 	repository.seed(Session{ID: "sess_binned", DeletedAt: time.Now().UTC()})
 	repository.messages["sess_live"] = []Message{{ID: "msg_1", SessionID: "sess_live", Role: RoleUser, Content: "hi"}}
 
-	messages, err := service.Messages(ctx, "sess_live")
+	messages, err := service.Messages(ctx, "sess_live", testCaller())
 	if err != nil {
 		t.Fatalf("Messages() error = %v", err)
 	}
@@ -304,7 +304,7 @@ func TestMessagesReturnsHistoryForALiveSessionOnly(t *testing.T) {
 
 	// A binned session's history reads as an empty conversation rather than
 	// missing, which is indistinguishable from a session nobody wrote in.
-	if _, err := service.Messages(ctx, "sess_binned"); !errors.Is(err, ErrNotFound) {
+	if _, err := service.Messages(ctx, "sess_binned", testCaller()); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Messages(binned) error = %v, want ErrNotFound", err)
 	}
 	if len(repository.read) != 1 {
@@ -322,17 +322,21 @@ func TestStorageFailuresReachTheCaller(t *testing.T) {
 	}
 
 	calls := map[string]func() error{
-		"Create":   func() error { _, err := service.Create(context.Background()); return err },
-		"List":     func() error { _, err := service.List(context.Background(), ListOptions{}); return err },
-		"Get":      func() error { _, err := service.Get(context.Background(), "sess_1"); return err },
-		"Messages": func() error { _, err := service.Messages(context.Background(), "sess_1"); return err },
-		"AppendMessage": func() error {
-			_, err := service.AppendMessage(context.Background(), NewMessage{SessionID: "sess_1", Role: RoleUser})
+		"Create": func() error { _, err := service.Create(context.Background(), testCaller()); return err },
+		"List": func() error {
+			_, err := service.List(context.Background(), ListOptions{Caller: testCaller()})
 			return err
 		},
-		"SoftDelete":        func() error { return service.SoftDelete(context.Background(), "sess_1") },
-		"Restore":           func() error { return service.Restore(context.Background(), "sess_1") },
-		"DeletePermanently": func() error { return service.DeletePermanently(context.Background(), "sess_1") },
+		"Get":      func() error { _, err := service.Get(context.Background(), "sess_1", testCaller()); return err },
+		"Messages": func() error { _, err := service.Messages(context.Background(), "sess_1", testCaller()); return err },
+		"AppendMessage": func() error {
+			_, err := service.AppendMessage(context.Background(), NewMessage{SessionID: "sess_1", Role: RoleUser}, testCaller())
+			return err
+		},
+		"Claim":             func() error { return service.Claim(context.Background(), "sess_1", testCaller()) },
+		"SoftDelete":        func() error { return service.SoftDelete(context.Background(), "sess_1", testCaller()) },
+		"Restore":           func() error { return service.Restore(context.Background(), "sess_1", testCaller()) },
+		"DeletePermanently": func() error { return service.DeletePermanently(context.Background(), "sess_1", testCaller()) },
 	}
 	for name, call := range calls {
 		if err := call(); !errors.Is(err, storageErr) {

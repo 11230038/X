@@ -57,6 +57,7 @@ func aFile() FileRecord {
 		MIMEType:    "application/pdf",
 		SizeBytes:   4096,
 		LibraryPath: "pdf/" + fileID + ".pdf",
+		OwnerID:     testOwnerID,
 		CreatedAt:   atSecond(1),
 		UpdatedAt:   atSecond(2),
 	}
@@ -87,7 +88,7 @@ func TestDBALibraryFileGoesInAndComesBackWhole(t *testing.T) {
 	// only way a caller ever sees this row again: the record a client gets after
 	// storing a file and the one it gets when it comes back for it are assembled
 	// from two different places, and this is that they agree.
-	found, err := repo.Find(context.Background(), fileID)
+	found, err := repo.Find(context.Background(), fileID, testCaller())
 	if err != nil {
 		t.Fatalf("read the stored file back: %v", err)
 	}
@@ -192,7 +193,7 @@ func TestDBAFileIsFoundByItsExactIdOrNotAtAll(t *testing.T) {
 		{"no id at all", ""},
 	}
 	for _, scenario := range missing {
-		_, err := repo.Find(context.Background(), scenario.id)
+		_, err := repo.Find(context.Background(), scenario.id, testCaller())
 		if !errors.Is(err, ErrNotFound) {
 			t.Errorf("%s: %v, want %v", scenario.name, err, ErrNotFound)
 		}
@@ -200,11 +201,59 @@ func TestDBAFileIsFoundByItsExactIdOrNotAtAll(t *testing.T) {
 
 	// The report is this package's own sentinel and nothing more, so a caller
 	// writing a 404 for it cannot leak what the storage layer said.
-	_, err := repo.Find(context.Background(), "nobody")
+	_, err := repo.Find(context.Background(), "nobody", testCaller())
 	if text := err.Error(); !strings.Contains(text, ErrNotFound.Error()) {
 		t.Errorf("the missing-file report reads %q, want it to name %q", text, ErrNotFound)
 	}
 	if got := countFiles(t, resource); got != 1 {
 		t.Errorf("%d files are stored, want the one that was uploaded", got)
+	}
+}
+
+// A file is looked up by an id that is in the URL and can be pasted, so the
+// ownership filter is the only thing standing between one account and another's
+// upload — and the answer to asking is not "no", it is the same 404 an id that
+// was never issued gets (AUTH-06). Tested here rather than in the service
+// because the filter is a WHERE clause, and a WHERE clause is not something a
+// double has an opinion about.
+func TestDBAnotherAccountsFileIsNotFound(t *testing.T) {
+	repo, _ := newDBRepository(t)
+	storeFile(t, repo, aFile())
+
+	found, err := repo.Find(context.Background(), fileID, testCaller())
+	if err != nil {
+		t.Fatalf("the uploader reading their own file: %v", err)
+	}
+	if found.OwnerID != testOwnerID {
+		t.Errorf("the stored file is owned by %d, want %d", found.OwnerID, testOwnerID)
+	}
+
+	if _, err := repo.Find(context.Background(), fileID, otherCaller()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a second account reading it: %v, want %v", err, ErrNotFound)
+	}
+	// The administrator is not a reader of other people's uploads either: the
+	// NULL rows are the ones the scope opens to them, and this row is not one.
+	if _, err := repo.Find(context.Background(), fileID, adminCaller()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the administrator reading somebody's file: %v, want %v", err, ErrNotFound)
+	}
+}
+
+// A file stored with no owner is one nobody can read back, because every read
+// is narrowed to an account and no account's scope matches NULL except the
+// administrator's. That is the shape the column is meant to have — an uploaded
+// file always has an uploader — and it is worth pinning, because the failure it
+// guards against is silent: the upload returns 201 and the file is then
+// unreachable.
+func TestDBAnOwnerlessFileIsTheAdministratorsAlone(t *testing.T) {
+	repo, _ := newDBRepository(t)
+	record := aFile()
+	record.OwnerID = 0
+	storeFile(t, repo, record)
+
+	if _, err := repo.Find(context.Background(), fileID, testCaller()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a user reading an ownerless file: %v, want %v", err, ErrNotFound)
+	}
+	if _, err := repo.Find(context.Background(), fileID, adminCaller()); err != nil {
+		t.Errorf("the administrator reading an ownerless file: %v", err)
 	}
 }

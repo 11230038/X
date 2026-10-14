@@ -1,6 +1,7 @@
 package turn
 
 import (
+	"backend/internal/authz"
 	"context"
 	"errors"
 	"strings"
@@ -24,7 +25,7 @@ type stubReadings struct {
 
 var _ Readings = (*stubReadings)(nil)
 
-func (r *stubReadings) Passage(_ context.Context, selection Selection) (event.Source, error) {
+func (r *stubReadings) Passage(_ context.Context, selection Selection, _ authz.Caller) (event.Source, error) {
 	r.asked = append(r.asked, selection)
 	if r.err != nil {
 		return event.Source{}, r.err

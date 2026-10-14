@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"backend/internal/authz"
 	"gorm.io/gorm"
 )
 
@@ -28,16 +29,20 @@ import (
 // A NULL last_seen_time sorts last under a DESC order on seekdb, which is the
 // reading this wants: a row written by a build that did not set the time is a
 // link nobody has confirmed, and the newest confirmed one is the answer.
-func (r *GORMRepository) PathOfSession(ctx context.Context, sessionID string) (string, error) {
+func (r *GORMRepository) PathOfSession(ctx context.Context, sessionID string, caller authz.Caller) (string, error) {
 	if err := r.ready(); err != nil {
 		return "", err
 	}
 	var row struct {
 		PathID string `gorm:"column:path_id"`
 	}
+	// A link is visible only when the path it points at is the caller's: the link
+	// has no owner of its own, so the subquery over owned paths is the whole of
+	// the narrowing.
 	err := r.db.WithContext(ctx).Table("mastery_path_sessions").
 		Select("path_id").
 		Where("session_id = ?", sessionID).
+		Where("path_id IN (?)", pathScope(r.db.WithContext(ctx), caller)).
 		Order("last_seen_time DESC, path_id ASC").
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -59,7 +64,7 @@ func (r *GORMRepository) PathOfSession(ctx context.Context, sessionID string) (s
 // else in this package (Service.Load reports such a path rather than refusing
 // it), and a count that quietly left those out would be a count of the wrong
 // thing.
-func (r *GORMRepository) ActivePathsOfSession(ctx context.Context, sessionID string) ([]string, error) {
+func (r *GORMRepository) ActivePathsOfSession(ctx context.Context, sessionID string, caller authz.Caller) ([]string, error) {
 	if err := r.ready(); err != nil {
 		return nil, err
 	}
@@ -70,6 +75,7 @@ func (r *GORMRepository) ActivePathsOfSession(ctx context.Context, sessionID str
 		Select("s.path_id AS path_id").
 		Joins("LEFT JOIN mastery_topic_meta AS m ON m.path_id = s.path_id").
 		Where("s.session_id = ? AND COALESCE(m.status, ?) = ?", sessionID, StatusActive, StatusActive).
+		Where("s.path_id IN (?)", pathScope(r.db.WithContext(ctx), caller)).
 		Order("s.last_seen_time DESC, s.path_id ASC").
 		Find(&rows).Error
 	if err != nil {
@@ -83,7 +89,7 @@ func (r *GORMRepository) ActivePathsOfSession(ctx context.Context, sessionID str
 }
 
 // SessionsOn reads the conversations linked to a path, most recently seen first.
-func (r *GORMRepository) SessionsOn(ctx context.Context, pathID string) ([]string, error) {
+func (r *GORMRepository) SessionsOn(ctx context.Context, pathID string, caller authz.Caller) ([]string, error) {
 	if err := r.ready(); err != nil {
 		return nil, err
 	}
@@ -93,6 +99,7 @@ func (r *GORMRepository) SessionsOn(ctx context.Context, pathID string) ([]strin
 	err := r.db.WithContext(ctx).Table("mastery_path_sessions").
 		Select("session_id").
 		Where("path_id = ?", pathID).
+		Where("path_id IN (?)", pathScope(r.db.WithContext(ctx), caller)).
 		Order("last_seen_time DESC, session_id ASC").
 		Find(&rows).Error
 	if err != nil {
@@ -106,7 +113,7 @@ func (r *GORMRepository) SessionsOn(ctx context.Context, pathID string) ([]strin
 }
 
 // SeenAt reads one link's last_seen_time.
-func (r *GORMRepository) SeenAt(ctx context.Context, pathID, sessionID string) (time.Time, error) {
+func (r *GORMRepository) SeenAt(ctx context.Context, pathID, sessionID string, caller authz.Caller) (time.Time, error) {
 	if err := r.ready(); err != nil {
 		return time.Time{}, err
 	}
@@ -116,6 +123,7 @@ func (r *GORMRepository) SeenAt(ctx context.Context, pathID, sessionID string) (
 	err := r.db.WithContext(ctx).Table("mastery_path_sessions").
 		Select("last_seen_time").
 		Where("path_id = ? AND session_id = ?", pathID, sessionID).
+		Where("path_id IN (?)", pathScope(r.db.WithContext(ctx), caller)).
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return time.Time{}, fmt.Errorf("%w: session %s is not on path %s", ErrNotFound, sessionID, pathID)

@@ -28,14 +28,14 @@ func TestDBTheFirstPositionForAPairIsOneRowAndTheSecondIsACollision(t *testing.T
 		Locator:   Locator{MaterialID: "rm_1", Ordinal: 2, CharStart: 10, CharEnd: 10},
 		UpdatedAt: atSecond(2),
 	}
-	if err := repo.CreatePosition(ctx, first); err != nil {
+	if err := repo.CreatePosition(ctx, first, dbCaller); err != nil {
 		t.Fatalf("create the first position: %v", err)
 	}
 	// The key is the pair, so a second first-write is the same row said twice —
 	// which is exactly the race the service turns into a conflict.
 	second := first
 	second.Locator = Locator{MaterialID: "rm_1", CharStart: 99, CharEnd: 99}
-	if err := repo.CreatePosition(ctx, second); !errors.Is(err, ErrDuplicate) {
+	if err := repo.CreatePosition(ctx, second, dbCaller); !errors.Is(err, ErrDuplicate) {
 		t.Fatalf("creating the same pair twice: %v, want %v", err, ErrDuplicate)
 	}
 	if got := countRows(t, resource, "reading_positions"); got != 1 {
@@ -44,7 +44,7 @@ func TestDBTheFirstPositionForAPairIsOneRowAndTheSecondIsACollision(t *testing.T
 
 	// What was stored is what was asked for, coordinate and all, decoded out of
 	// the JSON column rather than read back from the caller's value.
-	stored, err := repo.Position(ctx, "rm_1", "s_1")
+	stored, err := repo.Position(ctx, "rm_1", "s_1", dbCaller)
 	if err != nil {
 		t.Fatalf("read the position back: %v", err)
 	}
@@ -62,10 +62,10 @@ func TestDBTheFirstPositionForAPairIsOneRowAndTheSecondIsACollision(t *testing.T
 	if err := repo.CreatePosition(ctx, Position{
 		MaterialID: "rm_1", SessionID: "s_2", Revision: 1,
 		Locator: Locator{MaterialID: "rm_1", CharStart: 4, CharEnd: 4},
-	}); err != nil {
+	}, dbCaller); err != nil {
 		t.Fatalf("create a second reader's position: %v", err)
 	}
-	if _, err := repo.Position(ctx, "rm_1", "s_missing"); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.Position(ctx, "rm_1", "s_missing", dbCaller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a reader who has not scrolled: %v, want %v", err, ErrNotFound)
 	}
 }
@@ -79,19 +79,19 @@ func TestDBAPositionMovesOnlyFromTheRevisionItWasReadAt(t *testing.T) {
 	if err := repo.CreatePosition(ctx, Position{
 		MaterialID: "rm_1", SessionID: "s_1", Revision: 1,
 		Locator: Locator{MaterialID: "rm_1", CharStart: 10, CharEnd: 10},
-	}); err != nil {
+	}, dbCaller); err != nil {
 		t.Fatalf("create the position: %v", err)
 	}
 
 	moved, err := repo.SavePosition(ctx, "rm_1", "s_1", 1,
-		Locator{MaterialID: "rm_1", CharStart: 40, CharEnd: 40}, atSecond(3))
+		Locator{MaterialID: "rm_1", CharStart: 40, CharEnd: 40}, atSecond(3), dbCaller)
 	if err != nil {
 		t.Fatalf("move the position: %v", err)
 	}
 	if !moved {
 		t.Fatal("moving a position from the revision it was read at reported nothing moved")
 	}
-	stored, err := repo.Position(ctx, "rm_1", "s_1")
+	stored, err := repo.Position(ctx, "rm_1", "s_1", dbCaller)
 	if err != nil {
 		t.Fatalf("read the position back: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestDBAPositionMovesOnlyFromTheRevisionItWasReadAt(t *testing.T) {
 	// The same revision again is a row that has moved on: the answer is the
 	// false this whole path exists to be able to give, and nothing is written.
 	moved, err = repo.SavePosition(ctx, "rm_1", "s_1", 1,
-		Locator{MaterialID: "rm_1", CharStart: 80, CharEnd: 80}, atSecond(4))
+		Locator{MaterialID: "rm_1", CharStart: 80, CharEnd: 80}, atSecond(4), dbCaller)
 	if err != nil {
 		t.Fatalf("move the position from a stale revision: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestDBAPositionMovesOnlyFromTheRevisionItWasReadAt(t *testing.T) {
 		{"a pair with no position", "rm_1", "s_2", 1},
 	} {
 		moved, err = repo.SavePosition(ctx, scenario.material, scenario.session, scenario.expected,
-			Locator{MaterialID: scenario.material, CharStart: 1, CharEnd: 1}, atSecond(5))
+			Locator{MaterialID: scenario.material, CharStart: 1, CharEnd: 1}, atSecond(5), dbCaller)
 		if err != nil {
 			t.Fatalf("%s: %v", scenario.name, err)
 		}
@@ -133,7 +133,7 @@ func TestDBAPositionMovesOnlyFromTheRevisionItWasReadAt(t *testing.T) {
 			t.Errorf("%s reported a move", scenario.name)
 		}
 	}
-	stored, err = repo.Position(ctx, "rm_1", "s_1")
+	stored, err = repo.Position(ctx, "rm_1", "s_1", dbCaller)
 	if err != nil {
 		t.Fatalf("read the position back: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestDBDeletingAMaterialTakesItsPositionsWithIt(t *testing.T) {
 		if err := repo.CreatePosition(ctx, Position{
 			MaterialID: materialID, SessionID: "s_1", Revision: 1,
 			Locator: Locator{MaterialID: materialID, CharStart: 1, CharEnd: 1},
-		}); err != nil {
+		}, dbCaller); err != nil {
 			t.Fatalf("create the position of %s: %v", materialID, err)
 		}
 	}
@@ -194,7 +194,7 @@ func TestDBDeletingAMaterialTakesItsPositionsWithIt(t *testing.T) {
 	if got := countRows(t, resource, "reading_positions"); got != 1 {
 		t.Errorf("%d positions are left, want the other material's one", got)
 	}
-	if _, err := repo.Position(ctx, "rm_1", "s_1"); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.Position(ctx, "rm_1", "s_1", dbCaller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("the deleted material's position: %v, want %v", err, ErrNotFound)
 	}
 }
@@ -209,7 +209,7 @@ func TestDBDeletingAConversationTakesItsPositionsWithIt(t *testing.T) {
 		if err := repo.CreatePosition(ctx, Position{
 			MaterialID: "rm_1", SessionID: sessionID, Revision: 1,
 			Locator: Locator{MaterialID: "rm_1", CharStart: 1, CharEnd: 1},
-		}); err != nil {
+		}, dbCaller); err != nil {
 			t.Fatalf("create the position of %s: %v", sessionID, err)
 		}
 	}
@@ -221,7 +221,7 @@ func TestDBDeletingAConversationTakesItsPositionsWithIt(t *testing.T) {
 	if got := countRows(t, resource, "reading_positions"); got != 1 {
 		t.Errorf("%d positions are left, want the other conversation's one", got)
 	}
-	if _, err := repo.Position(ctx, "rm_1", "s_1"); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.Position(ctx, "rm_1", "s_1", dbCaller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("the deleted conversation's position: %v, want %v", err, ErrNotFound)
 	}
 }

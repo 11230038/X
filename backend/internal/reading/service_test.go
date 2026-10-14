@@ -35,7 +35,7 @@ func TestTheOutlineIsTheMaterialsUnitsAndHowLongItIs(t *testing.T) {
 		ID: "doc_1", FileID: "lib_1", Filename: "算法笔记.md", TextChars: 100, Revision: 2,
 	}, sampleText, ChunkSpan{CharStart: 0, CharEnd: 40}, ChunkSpan{CharStart: 40, CharEnd: 70})
 
-	outline, err := service.Outline(context.Background(), "rm_1")
+	outline, err := service.Outline(context.Background(), "rm_1", testCaller)
 	if err != nil {
 		t.Fatalf("Outline() error = %v", err)
 	}
@@ -64,7 +64,7 @@ func TestAnOutlineOfAMaterialWithNoDocumentIsAnEmptyOutline(t *testing.T) {
 	// The row is there and the catalogue should list it; what it lacks is a text
 	// to be a coordinate into. Saying so with an empty outline is truer than
 	// refusing to describe a row that exists.
-	outline, err := service.Outline(context.Background(), "rm_1")
+	outline, err := service.Outline(context.Background(), "rm_1", testCaller)
 	if err != nil {
 		t.Fatalf("Outline() error = %v", err)
 	}
@@ -82,7 +82,7 @@ func TestAnOutlineOfAMaterialWithNoDocumentIsAnEmptyOutline(t *testing.T) {
 func TestAnOutlineOfAMaterialThatIsNotThereIsNotFound(t *testing.T) {
 	service, _, _ := newFakeService(t, 100)
 
-	if _, err := service.Outline(context.Background(), "rm_missing"); !errors.Is(err, ErrNotFound) {
+	if _, err := service.Outline(context.Background(), "rm_missing", testCaller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Outline() error = %v, want a missing resource", err)
 	}
 }
@@ -91,7 +91,7 @@ func TestCreateOpensTheDocumentAFileWasParsedInto(t *testing.T) {
 	service, repository, documents := newFakeService(t, 100)
 	documents.withDocument(Document{ID: "doc_1", FileID: "lib_1", Filename: "算法笔记.md"}, sampleText)
 
-	material, err := service.Create(context.Background(), "lib_1", "library")
+	material, err := service.Create(context.Background(), "lib_1", "library", testCaller)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -115,7 +115,7 @@ func TestCreateOfAFileThatIsAlreadyOpenIsTheSameMaterial(t *testing.T) {
 
 	// "Open this file in the reader" clicked twice is one tab, so the second
 	// answer is the first row rather than a second one.
-	material, err := service.Create(context.Background(), "lib_1", "library")
+	material, err := service.Create(context.Background(), "lib_1", "library", testCaller)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -130,12 +130,12 @@ func TestCreateOfAFileThatIsAlreadyOpenIsTheSameMaterial(t *testing.T) {
 func TestCreateRefusesWhatItCannotActOn(t *testing.T) {
 	service, _, _ := newFakeService(t, 100)
 
-	if _, err := service.Create(context.Background(), "   ", "library"); !errors.Is(err, ErrInvalidRequest) {
+	if _, err := service.Create(context.Background(), "   ", "library", testCaller); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("Create() with no file error = %v, want an invalid request", err)
 	}
 	// A file no parse has reached yet is not a material and not an error of the
 	// caller's: the knowledge base says which of the two it is.
-	if _, err := service.Create(context.Background(), "lib_missing", "library"); !errors.Is(err, ErrNotFound) {
+	if _, err := service.Create(context.Background(), "lib_missing", "library", testCaller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Create() of an unparsed file error = %v, want a missing resource", err)
 	}
 }
@@ -150,7 +150,7 @@ func TestAPositionIsCreatedTheFirstTimeAndMovedAfterThat(t *testing.T) {
 	created, err := service.SavePosition(ctx, SavePositionRequest{
 		MaterialID: "rm_1", SessionID: "s_1",
 		Locator: Locator{MaterialID: "rm_1", CharStart: 10, CharEnd: 10},
-	})
+	}, testCaller)
 	if err != nil {
 		t.Fatalf("SavePosition() error = %v", err)
 	}
@@ -164,7 +164,7 @@ func TestAPositionIsCreatedTheFirstTimeAndMovedAfterThat(t *testing.T) {
 	moved, err := service.SavePosition(ctx, SavePositionRequest{
 		MaterialID: "rm_1", SessionID: "s_1", Revision: created.Revision,
 		Locator: Locator{MaterialID: "rm_1", CharStart: 40, CharEnd: 40},
-	})
+	}, testCaller)
 	if err != nil {
 		t.Fatalf("SavePosition() error = %v", err)
 	}
@@ -190,7 +190,7 @@ func TestAPositionWriteAgainstARevisionThatHasMovedIsAConflict(t *testing.T) {
 	_, err := service.SavePosition(context.Background(), SavePositionRequest{
 		MaterialID: "rm_1", SessionID: "s_1", Revision: 3,
 		Locator: Locator{MaterialID: "rm_1", CharStart: 10, CharEnd: 10},
-	})
+	}, testCaller)
 	if !errors.Is(err, ErrStalePosition) {
 		t.Fatalf("SavePosition() error = %v, want a stale position", err)
 	}
@@ -215,7 +215,7 @@ func TestAPositionThatIsGoneIsRefusedDifferentlyFromOneThatHasMoved(t *testing.T
 	_, err := service.SavePosition(context.Background(), SavePositionRequest{
 		MaterialID: "rm_1", SessionID: "s_1", Revision: 1,
 		Locator: Locator{MaterialID: "rm_1", CharStart: 10, CharEnd: 10},
-	})
+	}, testCaller)
 	if !errors.Is(err, ErrStalePosition) {
 		t.Fatalf("SavePosition() error = %v, want a stale position", err)
 	}
@@ -237,7 +237,7 @@ func TestTwoTabsCreatingTheSamePositionAtOnceIsAConflict(t *testing.T) {
 	_, err := service.SavePosition(context.Background(), SavePositionRequest{
 		MaterialID: "rm_1", SessionID: "s_1",
 		Locator: Locator{MaterialID: "rm_1", CharStart: 10, CharEnd: 10},
-	})
+	}, testCaller)
 	// A collision on the pair is a brand new conflict to the caller, not the
 	// storage error it arrived as: the way out is the same one — read and decide.
 	if !errors.Is(err, ErrStalePosition) {
@@ -288,7 +288,7 @@ func TestASavePositionRequestThatNamesTwoMaterialsIsRefused(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := service.SavePosition(context.Background(), test.request)
+			_, err := service.SavePosition(context.Background(), test.request, testCaller)
 			if !errors.Is(err, ErrInvalidRequest) {
 				t.Fatalf("SavePosition() error = %v, want an invalid request", err)
 			}
@@ -308,7 +308,7 @@ func TestAPositionIsNotSavedForAMaterialThatIsNotThere(t *testing.T) {
 	_, err := service.SavePosition(context.Background(), SavePositionRequest{
 		MaterialID: "rm_missing", SessionID: "s_1",
 		Locator: Locator{MaterialID: "rm_missing", CharStart: 1, CharEnd: 5},
-	})
+	}, testCaller)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("SavePosition() error = %v, want a missing resource", err)
 	}
@@ -323,7 +323,7 @@ func TestAPositionThatWasNeverSavedIsAnAnswerAndNotAnError(t *testing.T) {
 	ctx := context.Background()
 
 	// A reader who has not scrolled yet is not a reader with a problem.
-	_, found, err := service.Position(ctx, "rm_1", "s_1")
+	_, found, err := service.Position(ctx, "rm_1", "s_1", testCaller)
 	if err != nil {
 		t.Fatalf("Position() error = %v", err)
 	}
@@ -332,7 +332,7 @@ func TestAPositionThatWasNeverSavedIsAnAnswerAndNotAnError(t *testing.T) {
 	}
 	// A material that is not there is a different answer from a material nobody
 	// has read yet, and the two must not collapse.
-	if _, _, err := service.Position(ctx, "rm_missing", "s_1"); !errors.Is(err, ErrNotFound) {
+	if _, _, err := service.Position(ctx, "rm_missing", "s_1", testCaller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Position() of a missing material error = %v, want a missing resource", err)
 	}
 }

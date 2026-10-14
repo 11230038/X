@@ -21,10 +21,28 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/data"
 	"backend/internal/data/testdb"
 	"backend/internal/notebook"
 )
+
+// The account these tests act as, and the one that holds every question the
+// fixtures seed. A number rather than a name because owner_id holds a number, and
+// the point of the constant is that the seeded rows and the caller agree about it:
+// the review paths narrow the bank to this account, so a fixture that seeded rows
+// owned by nobody would leave every case reading an empty bank.
+const testOwnerID int64 = 7
+
+func testCaller() authz.Caller {
+	return authz.Caller{UserID: testOwnerID, Role: authz.RoleUser}
+}
+
+// otherCaller is a second account, for the one thing a single-account fixture
+// cannot show: that another account's questions are not in this account's bank.
+func otherCaller() authz.Caller {
+	return authz.Caller{UserID: testOwnerID + 1, Role: authz.RoleUser}
+}
 
 // reviewsHappenAt is the instant every review in this file happens at, spelled
 // out rather than read from the clock: a due time is the answer to a review, and
@@ -79,7 +97,7 @@ func (h *harness) restarted(t *testing.T) *Service {
 
 func (h *harness) submit(t *testing.T, review Review) ReviewResult {
 	t.Helper()
-	result, err := h.service.Review(context.Background(), review)
+	result, err := h.service.Review(context.Background(), review, testCaller())
 	if err != nil {
 		t.Fatalf("review %s: %v", review.RequestID, err)
 	}
@@ -88,7 +106,7 @@ func (h *harness) submit(t *testing.T, review Review) ReviewResult {
 
 func (h *harness) refuse(t *testing.T, review Review) error {
 	t.Helper()
-	result, err := h.service.Review(context.Background(), review)
+	result, err := h.service.Review(context.Background(), review, testCaller())
 	if err == nil {
 		t.Fatalf("review %s was accepted: %+v", review.RequestID, result)
 	}
@@ -109,7 +127,7 @@ func (h *harness) together(t *testing.T, reviews []Review) ([]ReviewResult, []er
 		go func() {
 			defer done.Done()
 			start.Wait()
-			results[index], errs[index] = h.service.Review(context.Background(), review)
+			results[index], errs[index] = h.service.Review(context.Background(), review, testCaller())
 		}()
 	}
 	start.Done()
@@ -291,7 +309,7 @@ func TestOneSubmissionArrivingThreeTimesIsRecordedOnce(t *testing.T) {
 
 	first := harness.submit(t, review)
 	for attempt := 2; attempt <= 3; attempt++ {
-		again, err := harness.service.Review(context.Background(), review)
+		again, err := harness.service.Review(context.Background(), review, testCaller())
 		if err != nil {
 			t.Fatalf("submission %d: %v", attempt, err)
 		}
@@ -322,7 +340,7 @@ func TestTheRecordAnswersARetryAfterEverythingIsForgotten(t *testing.T) {
 	review := Review{RequestID: "rev_1", QuestionID: question.QuestionID, UserAnswer: "A"}
 
 	first := harness.submit(t, review)
-	again, err := harness.restarted(t).Review(context.Background(), review)
+	again, err := harness.restarted(t).Review(context.Background(), review, testCaller())
 	if err != nil {
 		t.Fatalf("the retry after a restart: %v", err)
 	}
@@ -344,7 +362,7 @@ func TestTheAnswerIsWhatTheEventStores(t *testing.T) {
 	first := harness.submit(t, Review{RequestID: "rev_1", QuestionID: question.QuestionID,
 		UserAnswer: "A", Rating: &rating})
 
-	recorded, err := harness.repository.RecordedReview(context.Background(), "rev_1")
+	recorded, err := harness.repository.RecordedReview(context.Background(), "rev_1", testCaller())
 	if err != nil {
 		t.Fatalf("read the recorded review: %v", err)
 	}

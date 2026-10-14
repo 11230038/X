@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"backend/internal/authz"
 	"backend/internal/capability"
 	"backend/internal/llm"
 	"backend/internal/session"
@@ -20,11 +21,11 @@ import (
 // against a conversation without a database behind it, and so that what the
 // runtime may do to a conversation is a list someone can read.
 type Sessions interface {
-	Create(ctx context.Context) (session.Session, error)
-	Get(ctx context.Context, sessionID string) (session.Session, error)
-	Rename(ctx context.Context, sessionID, title string) (session.Session, error)
-	AppendMessage(ctx context.Context, input session.NewMessage) (session.Message, error)
-	Messages(ctx context.Context, sessionID string) ([]session.Message, error)
+	Create(ctx context.Context, caller authz.Caller) (session.Session, error)
+	Get(ctx context.Context, sessionID string, caller authz.Caller) (session.Session, error)
+	Rename(ctx context.Context, sessionID, title string, caller authz.Caller) (session.Session, error)
+	AppendMessage(ctx context.Context, input session.NewMessage, caller authz.Caller) (session.Message, error)
+	Messages(ctx context.Context, sessionID string, caller authz.Caller) ([]session.Message, error)
 }
 
 var _ Sessions = (*session.Service)(nil)
@@ -212,6 +213,13 @@ func (r *Runner) Start(ctx context.Context, request StartRequest) (Started, erro
 	if content == "" {
 		return Started{}, ErrEmptyMessage
 	}
+	// The account travels with the turn from here on, because everything the
+	// turn writes is one person's: the conversation it appends to, the questions
+	// it files (notebook_entries carries its own owner) and the path it claims.
+	// A turn started with no account is a turn whose work belongs to nobody, and
+	// nobody is the administrator — which is what a connection that was never
+	// signed in on gets, and what the ws boundary must therefore always fill in.
+	account := authz.Caller{UserID: request.OwnerID}
 	// A selection is checked before the turn exists, because what can be wrong
 	// with one is wrong with the request: a coordinate that cannot be a span of
 	// any text is the client's to fix, and a turn that starts and then reports it
@@ -235,7 +243,7 @@ func (r *Runner) Start(ctx context.Context, request StartRequest) (Started, erro
 		}
 	}
 
-	conversation, err := r.conversation(ctx, request.SessionID)
+	conversation, err := r.conversation(ctx, request.SessionID, account)
 	if err != nil {
 		return Started{}, err
 	}
@@ -244,7 +252,7 @@ func (r *Runner) Start(ctx context.Context, request StartRequest) (Started, erro
 		Role:       session.RoleUser,
 		Content:    content,
 		Capability: capabilityName,
-	}); err != nil {
+	}, account); err != nil {
 		return Started{}, err
 	}
 
@@ -283,7 +291,7 @@ func (r *Runner) Start(ctx context.Context, request StartRequest) (Started, erro
 		return Started{}, err
 	}
 
-	r.launch(r.newTurnRun(runCtx, cancel, record, conversation, content,
+	r.launch(r.newTurnRun(runCtx, cancel, record, conversation, account, content,
 		declarationOf(request.Attachments, request.KnowledgeBases, request.Selection), emitter, routed))
 	return Started{Session: conversation, Turn: record}, nil
 }
@@ -316,11 +324,16 @@ func (r *Runner) route(ctx context.Context, content string) (Routing, bool) {
 }
 
 // conversation continues one that exists, or starts one.
-func (r *Runner) conversation(ctx context.Context, sessionID string) (session.Session, error) {
+//
+// Either way the answer is one the caller may write in. Continuing somebody
+// else's conversation fails here, as a session that is not found, before the
+// turn row exists — a turn that started and then discovered it had no session
+// would be a stream the client subscribed to that could only report the problem.
+func (r *Runner) conversation(ctx context.Context, sessionID string, caller authz.Caller) (session.Session, error) {
 	if sessionID == "" {
-		return r.sessions.Create(ctx)
+		return r.sessions.Create(ctx, caller)
 	}
-	return r.sessions.Get(ctx, sessionID)
+	return r.sessions.Get(ctx, sessionID, caller)
 }
 
 // launch puts a turn in the table and starts its goroutine.
