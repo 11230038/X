@@ -37,6 +37,12 @@ type Repository interface {
 	// Path reads one path, tree and version together. ErrNotFound when there is
 	// no such path.
 	Path(ctx context.Context, pathID string) (Path, error)
+	// Paths reads a listing: every path, most recently worked on first, or only
+	// the paths one conversation has touched when sessionID is set. Each row
+	// carries its tree, its metadata and when it was last worked on, because a
+	// listing that read those per row would cost more the more there was to
+	// list.
+	Paths(ctx context.Context, sessionID string) ([]PathRow, error)
 	// Meta reads a path's topic metadata. ErrNotFound when the path has none,
 	// which a path created before this version may not.
 	Meta(ctx context.Context, pathID string) (TopicMeta, error)
@@ -314,6 +320,16 @@ func nullable(value string) *string {
 func text(value *string) string {
 	if value == nil {
 		return ""
+	}
+	return *value
+}
+
+// deref reads a nullable time as the zero time, which is how a column a LEFT
+// JOIN found nothing for comes back: "there is no such row", said in the one
+// value of this type that means nothing rather than 1970.
+func deref(value *time.Time) time.Time {
+	if value == nil {
+		return time.Time{}
 	}
 	return *value
 }

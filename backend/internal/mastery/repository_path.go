@@ -64,6 +64,120 @@ func (r *GORMRepository) Path(ctx context.Context, pathID string) (Path, error) 
 	return path, nil
 }
 
+// pathListSQL reads every path with its topic metadata and the last time a
+// conversation touched it.
+//
+// The metadata is joined in rather than read per row, and the last-seen time is
+// a correlated subquery rather than a second pass, because a listing is the one
+// read in this domain that is naturally over *all* the rows: a list that made
+// two more calls per path would be a list whose cost grew with how much the
+// person reading it had studied, which is the opposite of what a listing is for.
+//
+// The subquery reads the link table on the leading column of its primary key, so
+// it is one indexed lookup per path and not a scan.
+const pathListSQL = "SELECT p.mastery_path_id, p.owner_session_id, p.state_json, " +
+	"COALESCE(p.version, 0) AS version, p.creat_time, p.update_time, " +
+	"m.goal, m.description, m.emoji, m.status, " +
+	"(SELECT MAX(s.last_seen_time) FROM mastery_path_sessions s " +
+	" WHERE s.path_id = p.mastery_path_id) AS last_seen " +
+	"FROM mastery_paths p LEFT JOIN mastery_topic_meta m ON m.path_id = p.mastery_path_id " +
+	"ORDER BY last_seen DESC, p.mastery_path_id ASC"
+
+// pathListOfSessionSQL is the same read narrowed to the paths one conversation
+// has touched.
+//
+// It is a join and not the same query with a filter bolted on: the question "the
+// paths this conversation has worked on" is asked *of the link table*, which is
+// where the answer is, and the paths are what it resolves to. Every row of this
+// read is linked by construction, so last_seen is a column here and not a
+// subquery.
+const pathListOfSessionSQL = "SELECT p.mastery_path_id, p.owner_session_id, p.state_json, " +
+	"COALESCE(p.version, 0) AS version, p.creat_time, p.update_time, " +
+	"m.goal, m.description, m.emoji, m.status, s.last_seen_time AS last_seen " +
+	"FROM mastery_path_sessions s JOIN mastery_paths p ON p.mastery_path_id = s.path_id " +
+	"LEFT JOIN mastery_topic_meta m ON m.path_id = p.mastery_path_id " +
+	"WHERE s.session_id = ? " +
+	"ORDER BY s.last_seen_time DESC, p.mastery_path_id ASC"
+
+// pathListRow is what both listing reads return. The metadata columns are
+// nullable because a path created before this version has no metadata row, and a
+// LEFT JOIN says so the same way the table does: with NULLs.
+type pathListRow struct {
+	ID             string     `gorm:"column:mastery_path_id"`
+	OwnerSessionID string     `gorm:"column:owner_session_id"`
+	State          []byte     `gorm:"column:state_json"`
+	Version        int64      `gorm:"column:version"`
+	CreatedAt      time.Time  `gorm:"column:creat_time"`
+	UpdatedAt      *time.Time `gorm:"column:update_time"`
+	Goal           *string    `gorm:"column:goal"`
+	Description    *string    `gorm:"column:description"`
+	Emoji          *string    `gorm:"column:emoji"`
+	Status         *string    `gorm:"column:status"`
+	LastSeen       *time.Time `gorm:"column:last_seen"`
+}
+
+// PathRow is one path as a listing read returns it: the tree with its version,
+// the metadata that names it, and when a conversation last worked on it.
+//
+// The last-seen time is zero for a path no conversation has touched, which is a
+// path that exists and has not been worked on rather than a path that is
+// missing.
+type PathRow struct {
+	Path       Path
+	Meta       TopicMeta
+	LastSeenAt time.Time
+}
+
+// Paths reads every path, most recently worked on first, or only the paths one
+// conversation has touched when sessionID is set.
+func (r *GORMRepository) Paths(ctx context.Context, sessionID string) ([]PathRow, error) {
+	if err := r.ready(); err != nil {
+		return nil, err
+	}
+	var (
+		rows []pathListRow
+		err  error
+	)
+	if sessionID == "" {
+		err = r.db.WithContext(ctx).Raw(pathListSQL).Scan(&rows).Error
+	} else {
+		err = r.db.WithContext(ctx).Raw(pathListOfSessionSQL, sessionID).Scan(&rows).Error
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read mastery paths: %w", err)
+	}
+
+	listed := make([]PathRow, 0, len(rows))
+	for _, row := range rows {
+		tree, err := DecodeTree(row.State)
+		if err != nil {
+			return nil, fmt.Errorf("path %s: %w", row.ID, err)
+		}
+		path := Path{
+			ID:             row.ID,
+			OwnerSessionID: row.OwnerSessionID,
+			Tree:           tree,
+			Version:        row.Version,
+			CreatedAt:      row.CreatedAt,
+		}
+		if row.UpdatedAt != nil {
+			path.UpdatedAt = *row.UpdatedAt
+		}
+		listed = append(listed, PathRow{
+			Path: path,
+			Meta: TopicMeta{
+				PathID:      row.ID,
+				Goal:        text(row.Goal),
+				Description: text(row.Description),
+				Emoji:       text(row.Emoji),
+				Status:      text(row.Status),
+			},
+			LastSeenAt: deref(row.LastSeen),
+		})
+	}
+	return listed, nil
+}
+
 // CreatePath inserts the path row at version 1.
 //
 // Version 1 and not 0: the schema's CHECK refuses a version below one, and the
