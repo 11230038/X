@@ -9,6 +9,7 @@ package authz
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 )
@@ -19,6 +20,7 @@ import (
 // the rule's sake rather than the double's cleverness.
 type fakeStore struct {
 	presets map[int64]string
+	names   map[int64]string
 	links   map[string]Link
 	grants  map[int64][]Assignment
 	nextID  int
@@ -28,6 +30,7 @@ type fakeStore struct {
 func newFakeStore() *fakeStore {
 	return &fakeStore{
 		presets: map[int64]string{},
+		names:   map[int64]string{},
 		links:   map[string]Link{},
 		grants:  map[int64][]Assignment{},
 	}
@@ -44,6 +47,38 @@ func (f *fakeStore) Preset(_ context.Context, userID int64) (string, error) {
 		return "", ErrUnknownUser
 	}
 	return preset, nil
+}
+
+func (f *fakeStore) SavePreset(_ context.Context, userID int64, preset string) error {
+	if f.fail != nil {
+		return f.fail
+	}
+	if _, ok := f.presets[userID]; !ok {
+		return ErrUnknownUser
+	}
+	f.presets[userID] = preset
+	return nil
+}
+
+func (f *fakeStore) Accounts(_ context.Context) ([]Account, error) {
+	if f.fail != nil {
+		return nil, f.fail
+	}
+	ids := make([]int64, 0, len(f.presets))
+	for id := range f.presets {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	accounts := make([]Account, 0, len(ids))
+	for _, id := range ids {
+		accounts = append(accounts, Account{
+			UserID:   id,
+			Username: f.names[id],
+			Role:     RoleUser,
+			Preset:   f.presets[id],
+		})
+	}
+	return accounts, nil
 }
 
 func (f *fakeStore) Link(_ context.Context, guardianID, learnerID int64) (Link, error) {
@@ -78,6 +113,27 @@ func (f *fakeStore) Links(_ context.Context, guardianID int64) ([]Link, error) {
 			links = append(links, link)
 		}
 	}
+	return links, nil
+}
+
+func (f *fakeStore) AllLinks(_ context.Context) ([]Link, error) {
+	if f.fail != nil {
+		return nil, f.fail
+	}
+	links := make([]Link, 0, len(f.links))
+	for _, link := range f.links {
+		links = append(links, link)
+	}
+	slices.SortFunc(links, func(a, b Link) int {
+		switch {
+		case a.ID < b.ID:
+			return -1
+		case a.ID > b.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
 	return links, nil
 }
 

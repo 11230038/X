@@ -184,9 +184,28 @@ func (s *Service) RevokePermission(ctx context.Context, linkID string, permissio
 	return s.store.DeletePermission(ctx, linkID, permission)
 }
 
+// LinkByID reads one relationship by its own id.
+//
+// It is exported for the routes that name a relationship in a path — reading its
+// permissions and granting one — where the id is all the request has and the two
+// accounts are what the answer has to carry so the caller can see whose
+// relationship it just read.
+func (s *Service) LinkByID(ctx context.Context, linkID string) (Link, error) {
+	return s.store.LinkByID(ctx, linkID)
+}
+
 // Relationships lists the relationships an account holds as guardian.
 func (s *Service) Relationships(ctx context.Context, guardianID int64) ([]Link, error) {
 	return s.store.Links(ctx, guardianID)
+}
+
+// AllRelationships lists every relationship in the instance.
+//
+// Like Accounts it answers whoever asks: what makes it administrative is the
+// route in front of it, and a second filter here would be a second answer to
+// the same question.
+func (s *Service) AllRelationships(ctx context.Context) ([]Link, error) {
+	return s.store.AllLinks(ctx)
 }
 
 // Assign records one decision about one item, or refuses to.
@@ -238,6 +257,40 @@ func (s *Service) Withdraw(ctx context.Context, userID int64, item Item) error {
 // Assignments lists the decisions recorded about one account.
 func (s *Service) Assignments(ctx context.Context, userID int64) ([]Assignment, error) {
 	return s.store.Assignments(ctx, userID)
+}
+
+// SetPreset moves one account between presets, or refuses to.
+//
+// The refusal is the point, and it is asked as a question about a *state*
+// rather than about a column: the grants stay where they are and only the
+// baseline under them moves, so what has to be survivable is the combination
+// the account arrives at. Asking it here rather than leaving it to the write is
+// what makes "a learner whose policy means nothing" something this build cannot
+// be talked into (§2.2).
+//
+// The caller is checked for validity and not for authority: authority is
+// Decide's answer, given by the route, and a second check here would be a
+// second reading of the same rules.
+func (s *Service) SetPreset(ctx context.Context, caller Caller, userID int64, preset string) error {
+	if !KnownPreset(preset) {
+		return fmt.Errorf("%w: %q", ErrUnknownPreset, preset)
+	}
+	if !caller.Valid() {
+		return fmt.Errorf("%w: caller names no account", ErrUnknownUser)
+	}
+	assignments, err := s.store.Assignments(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if err := CheckGrants(preset, s.policy.Baseline(), Grants(assignments)); err != nil {
+		return err
+	}
+	return s.store.SavePreset(ctx, userID, preset)
+}
+
+// Accounts lists the instance's accounts with the two layers each carries.
+func (s *Service) Accounts(ctx context.Context) ([]Account, error) {
+	return s.store.Accounts(ctx)
 }
 
 // Self is an account's own picture of itself: which preset it carries, every

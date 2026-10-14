@@ -125,6 +125,12 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		Memory:        handler.NewMemoryHandler(ai.memory, logger),
 		Capabilities:  handler.NewCapabilityHandler(ai.capabilities),
 		Permissions:   handler.NewPermissionsHandler(ai.authorization, logger),
+		// Governance and the guardian's own view are the same service asked two
+		// questions: the administrator reads every account and every
+		// relationship, and a guardian reads the ones it holds. Both are mounted
+		// behind the surface that decides who may ask at all.
+		Admin:         handler.NewAdminHandler(ai.authorization, ai.authorization, logger),
+		Guardians:     handler.NewGuardianHandler(ai.authorization, logger),
 		WebSocket:     ai.socket,
 		TokenVerifier: authService,
 		Authorizer:    ai.authorization,

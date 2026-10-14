@@ -139,6 +139,12 @@ const (
 	SurfaceSystem = "system"
 	// SurfaceAdmin is the governance routes: grants, relationships, audits.
 	SurfaceAdmin = "admin"
+	// SurfaceGuardian is the other side of a relationship: what an account
+	// holds over somebody it watches. It is separate from admin because the two
+	// are different accounts — an administrator governs the instance, a guardian
+	// has been given one learner — and a single surface would make "may this
+	// account be here at all" answer both.
+	SurfaceGuardian = "guardian"
 )
 
 // Surfaces is every area this build has a route for. It is the list §5's
@@ -147,7 +153,7 @@ const (
 var Surfaces = []string{
 	SurfaceChat, SurfaceLibrary, SurfaceKnowledgeBase, SurfaceNotebook,
 	SurfacePractice, SurfaceMastery, SurfaceReading, SurfaceDashboard,
-	SurfaceMemory, SurfaceSystem, SurfaceAdmin,
+	SurfaceMemory, SurfaceSystem, SurfaceAdmin, SurfaceGuardian,
 }
 
 // KnownSurface reports whether a name is a surface registered by this build.
@@ -175,6 +181,16 @@ func NormalizePreset(preset string) string {
 		return PresetStandard
 	}
 }
+
+// Presets is every preset this build writes down, in the order the model lists
+// them. NormalizePreset answers a *read* — anything it does not recognise is
+// standard, because that is what such an account can in fact do — so it cannot
+// be used to validate a write, where an unknown name is a caller inventing
+// vocabulary rather than a historical row to be read charitably.
+var Presets = []string{PresetStandard, PresetLearner, PresetCustom}
+
+// KnownPreset reports whether a name is one this build writes to users.preset.
+func KnownPreset(preset string) bool { return contains(Presets, preset) }
 
 // Permission is one of the four things a guardian link may allow (AUTH-05).
 // The row's existence is the permission: there is no boolean to be read the
@@ -306,6 +322,26 @@ func Grants(assignments []Assignment) []Grant {
 	return grants
 }
 
+// Account is one row of the governance list: which account, and the two
+// identity layers it carries.
+//
+// Username and Disabled are the account's own columns rather than this
+// package's, and they travel here because the list is drawn a row at a time: an
+// administrator choosing whom to set a preset for is reading a name, and a list
+// of ids is a list nothing can be decided from. The password hash is not here
+// and never will be (§12).
+type Account struct {
+	UserID   int64
+	Username string
+	Role     string
+	Preset   string
+	Disabled bool
+}
+
+// PresetOf is the preset as the policy reads it, which is not the stored string
+// for an account that predates V5.
+func (a Account) PresetOf() string { return NormalizePreset(a.Preset) }
+
 // The refusals the store and the service answer with. They are sentinels
 // because each of them is a different sentence to a caller — a link that
 // already exists is not the same mistake as an account that is not a learner —
@@ -337,4 +373,11 @@ var (
 	ErrUnknownPermission = errors.New("authz: not a permission this build recognises")
 	// ErrUnknownUser reports an account id the users table does not have.
 	ErrUnknownUser = errors.New("authz: no such account")
+	// ErrUnknownPreset reports a preset being written that this build does not
+	// define. It is a write-path refusal only: a preset read back that this
+	// build does not recognise is read as standard (NormalizePreset), because
+	// that is what such an account can in fact do, but a name being written has
+	// to be one of the three or nothing stops a typo from becoming a preset
+	// nobody defined.
+	ErrUnknownPreset = errors.New("authz: not a preset this build writes")
 )

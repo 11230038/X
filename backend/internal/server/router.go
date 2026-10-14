@@ -26,6 +26,8 @@ type Handlers struct {
 	Memory        *handler.MemoryHandler
 	Capabilities  *handler.CapabilityHandler
 	Permissions   *handler.PermissionsHandler
+	Admin         *handler.AdminHandler
+	Guardians     *handler.GuardianHandler
 	WebSocket     *ws.Handler
 	TokenVerifier middleware.TokenVerifier
 	// Authorizer answers what an account may reach. It is what the routes below
@@ -205,6 +207,40 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	memory.GET("/memory/synthesis", handlers.Memory.Synthesis)
 	memory.GET("/memory/audit", handlers.Memory.Audit)
 	memory.GET("/memory/export", handlers.Memory.Export)
+	// Governance is the one area no preset opens: what may reach it is decided by
+	// the role layer and nothing else (§2.1). It is written after every surface
+	// group because it is the only one whose reach depends on *who* is asking
+	// rather than on what they are doing, and reading this function top to bottom
+	// is meant to be the product's own summary of itself.
+	//
+	// These routes are also the only way a grant or a relationship is ever
+	// written at runtime. Without them the four-layer model would be correct and
+	// unusable — a preset settable only by hand in the database and a grant only
+	// by a migration (§2.16).
+	admin := reach(authz.SurfaceAdmin)
+	admin.GET("/admin/users", handlers.Admin.ListUsers)
+	admin.PATCH("/admin/users/:userID", handlers.Admin.UpdateUser)
+	// A grant is one row per (account, item) and the item is two values — a kind
+	// and an id, half of which are the empty id that means "every item of this
+	// kind" — so the read is under the account and the write names the item in
+	// its body rather than in a path segment that cannot hold the empty one.
+	admin.GET("/admin/users/:userID/grants", handlers.Admin.ListGrants)
+	admin.POST("/admin/users/:userID/grants", handlers.Admin.SetGrant)
+	admin.DELETE("/admin/users/:userID/grants", handlers.Admin.WithdrawGrant)
+	admin.GET("/admin/guardians", handlers.Guardians.ListRelationships)
+	admin.POST("/admin/guardians", handlers.Guardians.CreateRelationship)
+	admin.DELETE("/admin/guardians", handlers.Guardians.RevokeRelationship)
+	admin.GET("/admin/guardians/:linkID/permissions", handlers.Guardians.ListPermissions)
+	admin.POST("/admin/guardians/:linkID/permissions", handlers.Guardians.GrantPermission)
+	admin.DELETE("/admin/guardians/:linkID/permissions", handlers.Guardians.RevokePermission)
+	// A guardian's own view, and a different surface from the administrator's:
+	// the two are different accounts with different reasons for being here, and
+	// the standard baseline reaches both while a learner reaches neither. It is
+	// the one route whose answer is narrowed after the fact — the list is the
+	// relationships this caller holds, so an account with none is told it has
+	// none rather than refused.
+	guardian := reach(authz.SurfaceGuardian)
+	guardian.GET("/guardian/learners", handlers.Guardians.ListLearners)
 	// The socket is authenticated by the middleware above before it is
 	// upgraded, so an unauthenticated request is answered as an HTTP request
 	// rather than becoming a connection (WS-06).

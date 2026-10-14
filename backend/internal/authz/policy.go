@@ -15,7 +15,10 @@ package authz
 // testable without a database — which is the point of doing policy before
 // repository (§6, stage 5).
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Floor is the part of a learner's baseline that no grant may take away.
 //
@@ -147,6 +150,18 @@ var NeverForLearners = []Item{
 	{Kind: KindSurface, ID: "cli"},
 }
 
+// Administrative is the part of the product no preset opens: the governance
+// routes. It is reached through the role layer and nothing else.
+//
+// Without this the administrative area would be open to every ordinary account,
+// because the standard baseline is the whole product (§2.2) and the surface
+// layer alone cannot tell "the product" from "the product's controls". It is
+// checked before the grants for the same reason the never-list is: a grant that
+// named this surface would otherwise be a way to promote an account without
+// saying so, and a refusal at the point of writing it is a sentence rather than
+// a row that quietly does nothing.
+var Administrative = []Item{{Kind: KindSurface, ID: SurfaceAdmin}}
+
 // Errors the policy refuses with. They are sentinels because a caller maps them
 // onto a status, a response code and an audit reason, and three callers reading
 // three different strings is how those three drift apart.
@@ -163,6 +178,12 @@ var (
 	// ErrNeverForLearners is what a grant that tries to open one of
 	// NeverForLearners is refused with.
 	ErrNeverForLearners = errors.New("authz: a learner may not be given this")
+	// ErrItemNotGrantable is what a grant that tries to open an item no preset
+	// opens is refused with — the administrative area, which is the role
+	// layer's. It is a separate sentence from ErrNeverForLearners because the
+	// two rules are about different accounts: one is about a learner, and this
+	// one is about everybody who is not the administrator.
+	ErrItemNotGrantable = errors.New("authz: this item cannot be given by a grant")
 )
 
 // The reason codes a Decision carries. They are codes rather than sentences
@@ -186,6 +207,12 @@ const (
 	// may reach. The error ErrUnknownItem is for the write path, where the same
 	// kind means a caller is inventing vocabulary.
 	ReasonUnknownItem = "unknown_item"
+	// ReasonNotAdministrator is what an administrative item is refused with
+	// when the account is not the instance's administrator. It is its own code
+	// rather than "baseline_closed" because the two are different sentences: a
+	// closed baseline is a policy somebody set, and this is a door no preset
+	// opens.
+	ReasonNotAdministrator = "not_administrator"
 )
 
 // Decision is the answer to one question, and which layer gave it.
@@ -328,6 +355,14 @@ func Reach(preset string, baseline Baseline, grants []Grant, item Item) Decision
 	}
 	preset = NormalizePreset(preset)
 
+	// The administrative area first, and before the grants: it is not a preset's
+	// to give and not an administrator's to hand out one item at a time, so
+	// nothing below may open it. An administrator never asks this question —
+	// Decide answers the role layer first — which is why a refusal here is a
+	// refusal to everybody else.
+	if isAdministrative(item) {
+		return Decision{Item: item, Allowed: false, Layer: LayerRole, Reason: ReasonNotAdministrator}
+	}
 	// The never-list is checked before the grants so that the refusal names the
 	// rule rather than looking like a baseline that happened to be closed, and
 	// before the floor so that a floor containing a forbidden item could not
@@ -402,6 +437,12 @@ func CheckGrants(preset string, baseline Baseline, grants []Grant) error {
 		switch {
 		case !KnownKind(grant.Item.Kind):
 			return ErrUnknownItem
+		case grant.Allowed && isAdministrative(grant.Item):
+			// Writing it is refused rather than ignored: an administrator who
+			// tried to hand out a governance route believes something about the
+			// account that the answer has to correct, and the row would have
+			// looked written while deciding nothing.
+			return fmt.Errorf("%w: %s", ErrItemNotGrantable, grant.Item.ID)
 		case preset != PresetLearner:
 			continue
 		case grant.Allowed && neverForLearners(grant.Item):
@@ -425,6 +466,24 @@ func CheckGrants(preset string, baseline Baseline, grants []Grant) error {
 		}
 	}
 	return ErrPolicyWouldBeEmpty
+}
+
+// isAdministrative reports whether an item is one no preset opens, and which
+// only the role layer answers.
+//
+// It is written as a scan of the list rather than as a comparison against the
+// one name, so that a second administrative area is added where it is declared
+// rather than where it is enforced.
+func isAdministrative(item Item) bool {
+	for _, reserved := range Administrative {
+		if reserved.Kind != item.Kind {
+			continue
+		}
+		if reserved.ID == "" || reserved.ID == item.ID {
+			return true
+		}
+	}
+	return false
 }
 
 // neverForLearners reports whether an item is under a rule no grant may lift.

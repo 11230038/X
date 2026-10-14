@@ -30,6 +30,15 @@ type Store interface {
 	// and "this account has no preset" are the same string in the column and
 	// two very different things to a caller.
 	Preset(ctx context.Context, userID int64) (string, error)
+	// SavePreset writes one account's preset. It is the only column of the
+	// users table this package writes: role and preset are the two identity
+	// layers, and the preset is the one an administrator may move.
+	SavePreset(ctx context.Context, userID int64, preset string) error
+	// Accounts lists every account with the two identity layers it carries.
+	// There is no filter and no page: this is the governance list, the
+	// instance's accounts are what it is, and a partial list of them would
+	// answer "which accounts exist" with a subset nobody chose.
+	Accounts(ctx context.Context) ([]Account, error)
 	// Link reads one relationship with the permissions it carries.
 	Link(ctx context.Context, guardianID, learnerID int64) (Link, error)
 	// LinkByID reads one relationship by its own id, which is what the routes
@@ -37,6 +46,12 @@ type Store interface {
 	LinkByID(ctx context.Context, linkID string) (Link, error)
 	// Links lists the relationships one account holds as guardian.
 	Links(ctx context.Context, guardianID int64) ([]Link, error)
+	// AllLinks lists every relationship in the instance, which is what the
+	// administrative view reads. It is a separate method rather than a zero
+	// meaning "no filter": a caller that passed an id of zero by mistake would
+	// otherwise be handed every relationship there is, and that mistake is one
+	// integer away in the caller that reads an id out of a request.
+	AllLinks(ctx context.Context) ([]Link, error)
 	// SaveLink writes a relationship and its permissions together, or neither.
 	SaveLink(ctx context.Context, link Link) error
 	// DeleteLink removes a relationship. The permissions go with it through the
@@ -90,6 +105,70 @@ func (s *GORMStore) Preset(ctx context.Context, userID int64) (string, error) {
 	return user.Preset, nil
 }
 
+// SavePreset writes one account's preset.
+//
+// The update is guarded by the row count rather than by a read first: an update
+// that matched nothing and one that wrote the value already there are the same
+// number, so the second is looked up only when the count is zero — which is the
+// only case where the two can be told apart, and the only case where the answer
+// matters.
+func (s *GORMStore) SavePreset(ctx context.Context, userID int64, preset string) error {
+	if err := s.ready(); err != nil {
+		return err
+	}
+	result := s.db.WithContext(ctx).Model(&models.User{}).
+		Where("user_id = ?", userID).
+		Update("preset", preset)
+	if result.Error != nil {
+		return fmt.Errorf("write account preset: %w", result.Error)
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+	// Zero rows: either the account is not there, or the preset was already this
+	// one. Only the first is an error, and asking is the only way to know.
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&models.User{}).
+		Where("user_id = ?", userID).Count(&count).Error; err != nil {
+		return fmt.Errorf("read account for preset write: %w", err)
+	}
+	if count == 0 {
+		return fmt.Errorf("%w: %d", ErrUnknownUser, userID)
+	}
+	return nil
+}
+
+// Accounts lists every account with the two identity layers it carries.
+//
+// It is ordered by the primary key so that two lists a page apart are the same
+// list, and it selects columns by name rather than reading the whole row,
+// because the whole row carries the password hash and this projection is the one
+// that travels (§12).
+func (s *GORMStore) Accounts(ctx context.Context) ([]Account, error) {
+	if err := s.ready(); err != nil {
+		return nil, err
+	}
+	var rows []models.User
+	err := s.db.WithContext(ctx).
+		Select("user_id", "username", "role", "preset", "disable").
+		Order("user_id ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("list accounts: %w", err)
+	}
+	accounts := make([]Account, 0, len(rows))
+	for _, row := range rows {
+		accounts = append(accounts, Account{
+			UserID:   row.UserID,
+			Username: row.Username,
+			Role:     row.Role,
+			Preset:   row.Preset,
+			Disabled: row.Disable,
+		})
+	}
+	return accounts, nil
+}
+
 // Link reads one relationship with the permissions it carries.
 func (s *GORMStore) Link(ctx context.Context, guardianID, learnerID int64) (Link, error) {
 	if err := s.ready(); err != nil {
@@ -125,6 +204,23 @@ func (s *GORMStore) Links(ctx context.Context, guardianID int64) ([]Link, error)
 	return s.links(ctx, "guardian_id = ?", guardianID)
 }
 
+// AllLinks lists every relationship.
+//
+// The ordering matches Links' — written first, and then by id — so that the
+// administrative list and a guardian's own list are the same list wherever they
+// overlap.
+func (s *GORMStore) AllLinks(ctx context.Context) ([]Link, error) {
+	return s.links(ctx, "1 = 1")
+}
+
+// links is the one read all three of the above are, so that a link cannot come
+// back with its permissions through one path and without them through another.
+//
+// The where clause is passed whole rather than assembled here, and the
+// "everything" case is written as a predicate that is true rather than as an
+// empty string: an empty condition is not "no filter" to the query builder, it
+// is a syntax error, and the difference only shows up in the one call that
+// passes nothing.
 // LinkByID reads one relationship by its own id.
 func (s *GORMStore) LinkByID(ctx context.Context, linkID string) (Link, error) {
 	links, err := s.links(ctx, "link_id = ?", linkID)
@@ -137,15 +233,21 @@ func (s *GORMStore) LinkByID(ctx context.Context, linkID string) (Link, error) {
 	return links[0], nil
 }
 
-// links is the one read both of the above are, so that a link cannot come back
-// with its permissions through one path and without them through the other.
-func (s *GORMStore) links(ctx context.Context, where string, value any) ([]Link, error) {
+// links is the one read all three of the above are, so that a link cannot come
+// back with its permissions through one path and without them through another.
+//
+// The where clause is passed whole rather than assembled here, and the
+// "everything" case is written as a predicate that is true rather than as an
+// empty string: an empty condition is not "no filter" to the query builder, it
+// is a syntax error, and the difference would only show up in the one call that
+// passes nothing.
+func (s *GORMStore) links(ctx context.Context, where string, args ...any) ([]Link, error) {
 	if err := s.ready(); err != nil {
 		return nil, err
 	}
 	var rows []models.GuardianLink
 	err := s.db.WithContext(ctx).
-		Where(where, value).
+		Where(where, args...).
 		Order("creat_time ASC, link_id ASC").Find(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("list guardian links: %w", err)

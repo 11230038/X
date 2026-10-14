@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -61,6 +62,8 @@ func newTestRouterWithAuthorizer(
 		Questions:     handler.NewQuestionHandler(routerQuestionsStub{}, logger),
 		Practice:      handler.NewPracticeHandler(routerPracticeStub{err: practiceErr}, routerQueueSize, logger),
 		Permissions:   handler.NewPermissionsHandler(routerPermissionsStub{}, logger),
+		Admin:         handler.NewAdminHandler(routerAdminStub{}, routerAdminStub{}, logger),
+		Guardians:     handler.NewGuardianHandler(routerGuardianStub{}, logger),
 		TokenVerifier: authenticator,
 		Authorizer:    authorizer,
 		// KnowledgeBase is deliberately left out. This file is about which
@@ -128,6 +131,61 @@ func (routerPermissionsStub) Self(context.Context, authz.Caller) (authz.Self, er
 			Item: authz.Item{Kind: authz.KindSurface, ID: authz.SurfaceChat}, Allowed: true,
 		}},
 	}, nil
+}
+
+// routerAdminStub serves both halves of the governance handler — the accounts
+// and the grants — with answers that are recognisable as this stub's, so that a
+// governance route registered against the wrong handler is a failing assertion
+// rather than a plausible body. What the answers *say* is
+// handler/admin_test.go's business.
+type routerAdminStub struct{}
+
+func (routerAdminStub) Accounts(context.Context) ([]authz.Account, error) {
+	return []authz.Account{{UserID: 1, Username: "root", Role: authz.RoleAdmin}}, nil
+}
+
+func (routerAdminStub) SetPreset(context.Context, authz.Caller, int64, string) error { return nil }
+
+func (routerAdminStub) Assignments(context.Context, int64) ([]authz.Assignment, error) {
+	return []authz.Assignment{{
+		Item: authz.Item{Kind: authz.KindSurface, ID: authz.SurfaceReading}, Allowed: true,
+	}}, nil
+}
+
+func (routerAdminStub) Assign(context.Context, authz.Caller, int64, authz.Item, bool) error {
+	return nil
+}
+
+func (routerAdminStub) Withdraw(context.Context, int64, authz.Item) error { return nil }
+
+// routerGuardianStub answers the relationship routes.
+type routerGuardianStub struct{}
+
+func (routerGuardianStub) AllRelationships(context.Context) ([]authz.Link, error) {
+	return []authz.Link{{ID: "lnk_1", GuardianID: 7, LearnerID: 42}}, nil
+}
+
+func (routerGuardianStub) Relationships(context.Context, int64) ([]authz.Link, error) {
+	return []authz.Link{{ID: "lnk_1", GuardianID: 7, LearnerID: 42,
+		Permissions: []authz.Permission{authz.PermViewReports}}}, nil
+}
+
+func (routerGuardianStub) Link(context.Context, authz.Caller, int64, int64, []authz.Permission) (authz.Link, error) {
+	return authz.Link{ID: "lnk_1", GuardianID: 7, LearnerID: 42}, nil
+}
+
+func (routerGuardianStub) Revoke(context.Context, string) error { return nil }
+
+func (routerGuardianStub) LinkByID(_ context.Context, linkID string) (authz.Link, error) {
+	return authz.Link{ID: linkID, GuardianID: 7, LearnerID: 42}, nil
+}
+
+func (routerGuardianStub) GrantPermission(context.Context, authz.Caller, string, authz.Permission) error {
+	return nil
+}
+
+func (routerGuardianStub) RevokePermission(context.Context, string, authz.Permission) error {
+	return nil
 }
 
 // routerAuthStub accepts exactly one token and rejects everything else.
@@ -519,6 +577,94 @@ func TestRouterRegistersThePermissionsRoute(t *testing.T) {
 			t.Fatalf("body = %s", recorder.Body.String())
 		}
 	})
+}
+
+// TestRouterRegistersGovernanceUnderTheAdministrativeSurface pins the routes
+// that make the authorization model reachable at all.
+//
+// They matter out of proportion to their number: a preset can be moved and a
+// grant or a relationship written *only* here, so a missing mount would leave
+// the four layers correct and unusable, with the failure showing up as an
+// administrator who cannot govern rather than as an error anywhere.
+//
+// The surface in the refusal is what these assert on, and not the status: the
+// status only says the authorizer was consulted, while `"surface":"admin"` says
+// *which group* the route is in — which is the thing a mis-edited line in the
+// router would change, plausibly and silently, by registering one of these on
+// `authenticated` or under another surface.
+func TestRouterRegistersGovernanceUnderTheAdministrativeSurface(t *testing.T) {
+	denied := newTestRouterWithAuthorizer(t, readyChecker{}, nil, routerAuthorizerStub{deny: true})
+
+	cases := []struct {
+		method  string
+		path    string
+		body    string
+		surface string
+	}{
+		{http.MethodGet, "/api/v1/admin/users", "", authz.SurfaceAdmin},
+		{http.MethodPatch, "/api/v1/admin/users/42", `{"preset":"learner"}`, authz.SurfaceAdmin},
+		{http.MethodGet, "/api/v1/admin/users/42/grants", "", authz.SurfaceAdmin},
+		{http.MethodPost, "/api/v1/admin/users/42/grants", `{"kind":"surface","id":"reading","allowed":true}`, authz.SurfaceAdmin},
+		{http.MethodDelete, "/api/v1/admin/users/42/grants", `{"kind":"surface","id":"reading"}`, authz.SurfaceAdmin},
+		{http.MethodGet, "/api/v1/admin/guardians", "", authz.SurfaceAdmin},
+		{http.MethodPost, "/api/v1/admin/guardians", `{"guardian_id":7,"learner_id":42}`, authz.SurfaceAdmin},
+		{http.MethodDelete, "/api/v1/admin/guardians", `{"link_id":"lnk_1"}`, authz.SurfaceAdmin},
+		{http.MethodGet, "/api/v1/admin/guardians/lnk_1/permissions", "", authz.SurfaceAdmin},
+		{http.MethodPost, "/api/v1/admin/guardians/lnk_1/permissions", `{"permission":"view_reports"}`, authz.SurfaceAdmin},
+		{http.MethodDelete, "/api/v1/admin/guardians/lnk_1/permissions", `{"permission":"view_reports"}`, authz.SurfaceAdmin},
+		// A guardian's own view is a different surface from the administrator's,
+		// because the two are different accounts: the standard baseline reaches
+		// both, and a learner reaches neither.
+		{http.MethodGet, "/api/v1/guardian/learners", "", authz.SurfaceGuardian},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.method+" "+testCase.path, func(t *testing.T) {
+			t.Run("without a token it is unauthenticated", func(t *testing.T) {
+				recorder := httptest.NewRecorder()
+				router := newTestRouterWithAuthorizer(t, readyChecker{}, nil, routerAuthorizerStub{})
+				router.ServeHTTP(recorder, routerRequest(testCase.method, testCase.path, testCase.body, false))
+				if recorder.Code != http.StatusUnauthorized {
+					t.Fatalf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
+				}
+			})
+
+			t.Run("a denial names the surface it is in", func(t *testing.T) {
+				recorder := httptest.NewRecorder()
+				denied.ServeHTTP(recorder, routerRequest(testCase.method, testCase.path, testCase.body, true))
+				if recorder.Code != http.StatusForbidden {
+					t.Fatalf("status = %d, want 403; body=%s", recorder.Code, recorder.Body.String())
+				}
+				if want := `"surface":"` + testCase.surface + `"`; !strings.Contains(recorder.Body.String(), want) {
+					t.Errorf("body = %s, want it to carry %s", recorder.Body.String(), want)
+				}
+			})
+
+			t.Run("an allowed account reaches it", func(t *testing.T) {
+				recorder := httptest.NewRecorder()
+				router := newTestRouterWithAuthorizer(t, readyChecker{}, nil, routerAuthorizerStub{})
+				router.ServeHTTP(recorder, routerRequest(testCase.method, testCase.path, testCase.body, true))
+				if recorder.Code != http.StatusOK && recorder.Code != http.StatusCreated {
+					t.Fatalf("status = %d, want 200 or 201; body=%s", recorder.Code, recorder.Body.String())
+				}
+			})
+		})
+	}
+}
+
+// routerRequest builds one request, optionally bearing the stub's token.
+func routerRequest(method, path, body string, authenticated bool) *http.Request {
+	var reader io.Reader
+	if body != "" {
+		reader = strings.NewReader(body)
+	}
+	request := httptest.NewRequest(method, path, reader)
+	if body != "" {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	if authenticated {
+		request.Header.Set("Authorization", "Bearer "+routerAcceptedToken)
+	}
+	return request
 }
 
 func TestRouterRecoversFromPanic(t *testing.T) {
