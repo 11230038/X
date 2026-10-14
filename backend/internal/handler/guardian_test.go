@@ -124,13 +124,17 @@ func aRelationship() authz.Link {
 	}
 }
 
-// relationshipBody is the answer shape, for the cases that read it back.
+// relationshipBody is the answer shape of the one write that answers with a
+// relationship: the row is under its own name inside the envelope, because the
+// route that made it is not the route that lists them.
 type relationshipBody struct {
 	Data struct {
-		LinkID      string   `json:"link_id"`
-		GuardianID  int64    `json:"guardian_id"`
-		LearnerID   int64    `json:"learner_id"`
-		Permissions []string `json:"permissions"`
+		Guardian struct {
+			LinkID      string   `json:"link_id"`
+			GuardianID  int64    `json:"guardian_id"`
+			LearnerID   int64    `json:"learner_id"`
+			Permissions []string `json:"permissions"`
+		} `json:"guardian"`
 	} `json:"data"`
 }
 
@@ -203,8 +207,8 @@ func TestGuardianCreatesARelationshipWithItsPermissions(t *testing.T) {
 	}
 	var body relationshipBody
 	decodeBody(t, recorder, &body)
-	if body.Data.LinkID != "lnk_1" {
-		t.Errorf("link_id = %q, want the one the service returned", body.Data.LinkID)
+	if body.Data.Guardian.LinkID != "lnk_1" {
+		t.Errorf("link_id = %q, want the one the service returned", body.Data.Guardian.LinkID)
 	}
 }
 

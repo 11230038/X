@@ -29,8 +29,21 @@ import (
 func newDBRepository(t *testing.T) (*GORMRepository, *data.Resource) {
 	t.Helper()
 	resource := testdb.Open(t, "library")
-	testdb.Reset(t, resource, "library_files")
+	// users last: migration 00014 made a file's owner a foreign key into it, so
+	// emptying the accounts before the files that point at them would be refused.
+	testdb.Reset(t, resource, "library_files", "users")
+	seedAccounts(t, resource)
 	return NewGORMRepository(resource.GORM()), resource
+}
+
+// seedAccounts writes the accounts the owner column points at: the one every
+// fixture here stores under, and the second account the two-account cases read
+// as. The library's own admin caller is not seeded because it owns nothing and
+// the scope admits a row only by its owner or by having none.
+func seedAccounts(t *testing.T, resource *data.Resource) {
+	t.Helper()
+	testdb.Account(t, resource, testOwnerID, "library_owner")
+	testdb.Account(t, resource, testOwnerID+1, "library_other")
 }
 
 // atSecond is a whole second on a fixed day. DATETIME keeps whole seconds, so a

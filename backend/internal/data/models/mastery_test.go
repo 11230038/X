@@ -18,7 +18,7 @@ func TestMasteryModelMappings(t *testing.T) {
 		primaryKey []string
 		columns    []string
 	}{
-		{"path", &MasteryPath{}, "mastery_paths", []string{"mastery_path_id"}, []string{"mastery_path_id", "owner_session_id", "state_json", "version", "creat_time", "update_time"}},
+		{"path", &MasteryPath{}, "mastery_paths", []string{"mastery_path_id"}, []string{"mastery_path_id", "owner_session_id", "owner_id", "state_json", "version", "creat_time", "update_time"}},
 		{"evidence", &MasteryLearningEvidence{}, "mastery_learning_evidences", []string{"mle_id"}, []string{"mle_id", "session_id", "turn_id", "path_id", "extra", "result", "creat_time", "source", "quality", "assessment_type"}},
 		{"lease", &MasteryPathLease{}, "mastery_path_leases", []string{"path_id"}, []string{"path_id", "session_id", "turn_id", "creat_time"}},
 		{"interaction", &MasteryInteraction{}, "mastery_interactions", []string{"interaction_id"}, []string{"interaction_id", "path_id", "turn_id", "session_id", "user_answer", "result_json", "question_json", "creat_time", "update_time"}},

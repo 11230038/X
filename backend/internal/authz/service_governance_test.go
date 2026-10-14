@@ -55,24 +55,25 @@ func TestSetPresetRefusesAPresetThisBuildDoesNotWrite(t *testing.T) {
 }
 
 func TestSetPresetRefusesToLeaveALearnerReachingNothing(t *testing.T) {
-	// A learner whose whole floor is closed reaches nothing, and this build has
-	// no meaning for that account. The refusal is the whole of AUTH-03's "must
-	// not be emptied": the alternative is a preset move that quietly produces an
-	// account nobody can describe.
+	// The one row that means "this account reaches nothing" is a whole-kind
+	// denial of the learning policy, and a standard account can hold it: the
+	// rules that refuse to write it are the learner's, so nothing stops an
+	// ordinary account having it. Moving that account to learner is where the
+	// refusal belongs, and this is the case for it — a preset move is the moment
+	// the row becomes a statement about a child.
 	store := newFakeStore()
 	service := newService(t, store)
-	// The floor is what survives every grant, so it is the one thing to close.
+	store.presets[childID] = PresetStandard
 	store.grants[childID] = []Assignment{
-		{UserID: childID, Item: Item{Kind: KindCapability, ID: "chat"}, Allowed: false},
-		{UserID: childID, Item: Item{Kind: KindSurface, ID: SurfaceChat}, Allowed: false},
+		{UserID: childID, Item: Whole(KindLearningPolicy), Allowed: false},
 	}
 
-	err := service.SetPreset(context.Background(), admin(), childID, PresetCustom)
+	err := service.SetPreset(context.Background(), admin(), childID, PresetLearner)
 	if !errors.Is(err, ErrPolicyWouldBeEmpty) {
 		t.Fatalf("SetPreset = %v, want ErrPolicyWouldBeEmpty", err)
 	}
-	if store.presets[childID] != PresetLearner {
-		t.Errorf("preset = %q, want it left at learner", store.presets[childID])
+	if store.presets[childID] != PresetStandard {
+		t.Errorf("preset = %q, want it left where it was", store.presets[childID])
 	}
 }
 
@@ -135,8 +136,11 @@ func TestAccountsCarryThePresetAsStoredAndAsRead(t *testing.T) {
 	// The two differ for exactly the accounts that predate the column, and a
 	// client drawing the raw string would show them as having no preset at all.
 	store := newFakeStore()
-	store.presets[strangerID] = ""
 	service := newService(t, store)
+	// After the harness and not before: newService gives every account a preset,
+	// and a case about a row written before the column existed has to be the one
+	// that empties it.
+	store.presets[strangerID] = ""
 
 	accounts, err := service.Accounts(context.Background())
 	if err != nil {

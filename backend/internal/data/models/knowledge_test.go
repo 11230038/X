@@ -24,7 +24,7 @@ func TestKnowledgeModelMappings(t *testing.T) {
 			primary: []string{"kb_id"},
 			columns: []string{
 				"kb_id", "name", "description", "provider", "embedding_model",
-				"is_default", "creat_time", "update_time",
+				"is_default", "owner_id", "creat_time", "update_time",
 			},
 		},
 		{

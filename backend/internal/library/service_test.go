@@ -293,8 +293,11 @@ func TestOpenRefusesAPathItWouldNotHaveWritten(t *testing.T) {
 		{name: "empty category", path: "/md/file.md"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			// Owned by the caller, so that the path is the only thing wrong with the
+			// row: a record with no owner is not the caller's, and the read would stop
+			// there for a reason this case is not about.
 			repository := &recordingRepository{stored: map[string]FileRecord{
-				"lib_odd": {ID: "lib_odd", Filename: "odd.md", LibraryPath: tt.path},
+				"lib_odd": {ID: "lib_odd", Filename: "odd.md", LibraryPath: tt.path, OwnerID: testOwnerID},
 			}}
 			service, err := NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024, Auditor: &auditRecorder{}}, repository)
 			if err != nil {

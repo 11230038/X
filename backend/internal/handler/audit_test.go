@@ -215,7 +215,10 @@ func TestAuditRefusesANarrowingItCannotRead(t *testing.T) {
 		{name: "an account id that is a word", query: "actor_id=wei"},
 		{name: "an account id of zero", query: "actor_id=0"},
 		{name: "a negative account id", query: "actor_id=-1"},
-		{name: "a subject that is not an account", query: "subject_id=the learner"},
+		// Percent-encoded because it has to arrive as the word it is: a raw space
+		// in a request target is not a URL, and the request line would be read as
+		// a malformed one rather than reaching the handler at all.
+		{name: "a subject that is not an account", query: "subject_id=the%20learner"},
 		{name: "an action nobody records", query: "action=authorization.denied"},
 		{name: "an action spelled differently", query: "action=Session.Claimed"},
 		{name: "a target kind nobody records", query: "target_kind=prompt"},

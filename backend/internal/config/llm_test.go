@@ -200,7 +200,11 @@ func TestLoadRefusesAKeyListItCannotUse(t *testing.T) {
 		value string
 		want  string
 	}{
-		{name: "nothing at all", value: " ", want: "at least one key"},
+		// A blank list is a key that is not there, and it is reported as one by the
+		// breadth check every other required key goes through — not by the list's own
+		// validation, which sees a blank value as the empty list it is and never gets
+		// the chance to say so.
+		{name: "nothing at all", value: " ", want: "LLM_API_KEYS is required"},
 		// A trailing comma is a list somebody was still editing. Reading it as one
 		// key would be answering a question the file did not ask.
 		{name: "a trailing comma", value: testLLMAPIKey + ",", want: "position 2"},

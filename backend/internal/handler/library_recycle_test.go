@@ -194,8 +194,10 @@ func TestLibraryLifecycleHandlerRejectsAListingQueryItCannotRead(t *testing.T) {
 
 func TestLibraryLifecycleHandlerDownloadsAFileNamedAndTyped(t *testing.T) {
 	content := "保修期是两年。"
+	// An ASCII name, so that the header this pins is the plain one. A name that is
+	// not ASCII cannot travel as itself at all, and that case is the one below.
 	opener := &openerStub{file: library.StoredFile{
-		ID: "lib_1", Filename: "手册.pdf", MIMEType: "application/pdf",
+		ID: "lib_1", Filename: "manual.pdf", MIMEType: "application/pdf",
 		SizeBytes: int64(len(content)), Content: io.NopCloser(strings.NewReader(content)),
 	}}
 	recorder := callAs(t, newLifecycleRouter(&lifecycleStub{}, opener), http.MethodGet,
@@ -215,8 +217,7 @@ func TestLibraryLifecycleHandlerDownloadsAFileNamedAndTyped(t *testing.T) {
 	if got := recorder.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
 	}
-	if got := recorder.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "attachment") ||
-		!strings.Contains(got, "手册.pdf") {
+	if got := recorder.Header().Get("Content-Disposition"); got != "attachment; filename=manual.pdf" {
 		t.Errorf("Content-Disposition = %q, want an attachment named what the user named it", got)
 	}
 	if !opener.opened || opener.target != "lib_1" {
@@ -476,7 +477,11 @@ func TestLibraryLifecycleHandlerRefusesToActWithoutAnAccount(t *testing.T) {
 			router := gin.New()
 			router.Handle(mount.method, mount.pattern, mount.route)
 			recorder := httptest.NewRecorder()
-			router.ServeHTTP(recorder, httptest.NewRequest(mount.method, "/library/files/lib_1", nil))
+			// The path is the pattern with its one parameter filled in, rather than
+			// one path for every mount: a request to a route that is not mounted is
+			// a 404, which would pass for the wrong reason.
+			path := strings.Replace(mount.pattern, ":fileID", "lib_1", 1)
+			router.ServeHTTP(recorder, httptest.NewRequest(mount.method, path, nil))
 			if recorder.Code != http.StatusUnauthorized {
 				t.Errorf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
 			}

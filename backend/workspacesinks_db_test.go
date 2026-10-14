@@ -168,7 +168,7 @@ func TestDBTheSessionSinkWritesWhatThePackageHeldAndTakesItBack(t *testing.T) {
 	if len(landed) != 1 || landed[0] != (workspace.Written{Kind: workspace.KindSession, ID: ref.ID}) {
 		t.Fatalf("Write() reported %+v", landed)
 	}
-	if rows := rowsIn(t, fixture.resource, "messages", "session_id = ?", ref.ID); rows != 2 {
+	if rows := rowsIn(t, fixture.resource, "messages", "session_id", ref.ID); rows != 2 {
 		t.Errorf("the conversation holds %d messages, want the two the package carried", rows)
 	}
 	// The owner is the caller's and not the payload's: a package names the work,
@@ -247,7 +247,7 @@ func TestDBTheMaterialSinkWritesAndTakesBackAMaterial(t *testing.T) {
 		"(mark_id, material_id, session_id, kind, locator_json, body, revision, creat_time) "+
 		"VALUES (?, ?, NULL, ?, ?, ?, ?, ?)",
 		"mark_1", ref.ID, "note", `{"start":0,"end":3}`, "here", 1, atSecond(0))
-	if rows := rowsIn(t, fixture.resource, "reading_materials", "material_id = ?", ref.ID); rows != 1 {
+	if rows := rowsIn(t, fixture.resource, "reading_materials", "material_id", ref.ID); rows != 1 {
 		t.Fatalf("the material landed %d times, want once", rows)
 	}
 	if err := fixture.materials.Undo(context.Background(), fixture.caller, landed); err != nil {
@@ -289,7 +289,7 @@ func TestDBTheQuestionSinkFilesTheQuestionUnderItsOwnAddress(t *testing.T) {
 	if len(landed) != 1 || landed[0].ID != address {
 		t.Fatalf("Write() reported %+v, want the address %s", landed, address)
 	}
-	if rows := rowsIn(t, fixture.resource, "notebook_entries", "question_id = ?", address); rows != 1 {
+	if rows := rowsIn(t, fixture.resource, "notebook_entries", "question_id", address); rows != 1 {
 		t.Fatalf("the question landed %d times, want once", rows)
 	}
 	// The bookmark travels: it is the user's own filing, and a notebook that
@@ -450,7 +450,8 @@ func TestDBAPlanSaysConflictForWhatIsHereAndCreateForWhatIsNot(t *testing.T) {
 			questionPayload{Entry: notebook.Entry{Question: question}}),
 		workspace.KindKnowledgeBase: objectOf(t, workspace.Ref{Kind: workspace.KindKnowledgeBase, ID: "kb_1"},
 			knowledgeBasePayload{KnowledgeBase: kb.KnowledgeBase{
-				ID: "kb_1", Name: "操作系统", Provider: kb.ProviderNative, CreatedAt: atSecond(0)}}),
+				ID: "kb_1", Name: "操作系统", Provider: kb.ProviderNative,
+				EmbeddingModel: "test-embed", CreatedAt: atSecond(0)}}),
 	}
 	fresh := map[workspace.Kind]workspace.Object{
 		workspace.KindSession: objectOf(t, workspace.Ref{Kind: workspace.KindSession, ID: "sess_test2"},
@@ -462,7 +463,8 @@ func TestDBAPlanSaysConflictForWhatIsHereAndCreateForWhatIsNot(t *testing.T) {
 				Text: "什么是装饰器", Type: notebook.QuestionChoice}}}),
 		workspace.KindKnowledgeBase: objectOf(t, workspace.Ref{Kind: workspace.KindKnowledgeBase, ID: "kb_2"},
 			knowledgeBasePayload{KnowledgeBase: kb.KnowledgeBase{
-				ID: "kb_2", Name: "编译原理", Provider: kb.ProviderNative, CreatedAt: atSecond(0)}}),
+				ID: "kb_2", Name: "编译原理", Provider: kb.ProviderNative,
+				EmbeddingModel: "test-embed", CreatedAt: atSecond(0)}}),
 	}
 	for _, kind := range workspace.Kinds {
 		if _, err := fixture.write(caller, kind, present[kind]); err != nil {
@@ -536,18 +538,23 @@ func (f *sinkFixture) counts(t *testing.T) map[string]int64 {
 func TestDBTheBusyPortCountsTheTurnsInFlight(t *testing.T) {
 	fixture := newSinkFixture(t)
 	store := session.NewGORMRepository(fixture.resource.GORM())
-	if err := store.Create(context.Background(), session.Session{ID: "sess_busy", OwnerID: fixture.owner}); err != nil {
-		t.Fatalf("write the conversation the turns hang off: %v", err)
-	}
-	// A turn hangs off a conversation by a foreign key (00002), so the four
-	// below are four states of one conversation rather than four fixtures.
+	// One conversation per turn, and that is 00009 rather than tidiness: an
+	// unfinished turn takes its conversation's one slot in a unique index over a
+	// generated column, so a second unfinished turn in the same conversation is
+	// refused by the database — which is the rule the count below is about. A turn
+	// also hangs off a conversation by a foreign key (00002), so the conversation
+	// has to be written first either way.
 	for index, status := range []turn.Status{
 		turn.StatusQueued, turn.StatusRunning, turn.StatusWaitingInput,
 		turn.StatusCompleted, turn.StatusFailed, turn.StatusCancelled,
 	} {
+		sessionID := fmt.Sprintf("sess_busy_%d", index)
+		if err := store.Create(context.Background(), session.Session{ID: sessionID, OwnerID: fixture.owner}); err != nil {
+			t.Fatalf("write the conversation turn %d hangs off: %v", index, err)
+		}
 		testdb.Exec(t, fixture.resource, "INSERT INTO turns "+
 			"(turn_id, session_id, status, state_version, creat_time) VALUES (?, ?, ?, 1, ?)",
-			fmt.Sprintf("turn_%d", index), "sess_busy", string(status), atSecond(index))
+			fmt.Sprintf("turn_%d", index), sessionID, string(status), atSecond(index))
 	}
 
 	running, err := runningTurns{db: fixture.resource.GORM()}.Running(context.Background())

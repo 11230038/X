@@ -22,7 +22,7 @@ func TestLibraryFileModelMapping(t *testing.T) {
 	}
 	wantColumns := []string{
 		"id", "sha256", "filename", "mime_type", "size_bytes", "library_path",
-		"created_at", "updated_at", "is_deleted", "deleted_at",
+		"owner_id", "created_at", "updated_at", "is_deleted", "deleted_at",
 	}
 	if got := sortedColumnNames(parsed); !reflect.DeepEqual(got, sortedCopy(wantColumns)) {
 		t.Errorf("columns = %v, want %v", got, sortedCopy(wantColumns))

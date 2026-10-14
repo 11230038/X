@@ -32,7 +32,8 @@ var recycleTables = []string{"reading_materials", "document_chunks", "documents"
 func newRecycleDB(t *testing.T) (*GORMRepository, *data.Resource) {
 	t.Helper()
 	resource := testdb.Open(t, "library")
-	testdb.Reset(t, resource, recycleTables...)
+	testdb.Reset(t, resource, append(recycleTables, "users")...)
+	seedAccounts(t, resource)
 	return NewGORMRepository(resource.GORM()), resource
 }
 

@@ -20,6 +20,7 @@ import (
 	"backend/internal/data"
 	"backend/internal/data/models"
 	"backend/internal/data/testdb"
+	"gorm.io/datatypes"
 )
 
 // atSecond is a whole second on a fixed day. DATETIME keeps whole seconds, so a
@@ -49,11 +50,14 @@ func newDBStore(t *testing.T) (*GORMStore, *data.Resource) {
 // hashes that no test may hold.
 func seedAccounts(t *testing.T, resource *data.Resource) {
 	t.Helper()
+	// The two JSON columns are written as empty documents rather than left zero:
+	// migration 00001 makes them NOT NULL, and a nil datatypes.JSON is a NULL.
+	empty := datatypes.JSON("{}")
 	accounts := []models.User{
-		{UserID: adminUser, Username: "admin", PasswordHash: "x", Role: RoleAdmin, Preset: PresetStandard},
-		{UserID: parentUser, Username: "parent", PasswordHash: "x", Role: RoleUser, Preset: PresetStandard},
-		{UserID: childUser, Username: "child", PasswordHash: "x", Role: RoleUser, Preset: PresetLearner},
-		{UserID: otherUser, Username: "other", PasswordHash: "x", Role: RoleUser, Preset: PresetStandard},
+		{UserID: adminUser, Username: "admin", PasswordHash: "x", Role: RoleAdmin, Preset: PresetStandard, LearnerProfile: empty, Extra: empty},
+		{UserID: parentUser, Username: "parent", PasswordHash: "x", Role: RoleUser, Preset: PresetStandard, LearnerProfile: empty, Extra: empty},
+		{UserID: childUser, Username: "child", PasswordHash: "x", Role: RoleUser, Preset: PresetLearner, LearnerProfile: empty, Extra: empty},
+		{UserID: otherUser, Username: "other", PasswordHash: "x", Role: RoleUser, Preset: PresetStandard, LearnerProfile: empty, Extra: empty},
 	}
 	for _, account := range accounts {
 		if err := resource.GORM().Create(&account).Error; err != nil {
@@ -314,8 +318,13 @@ func TestDBAssignRefusesWhatThePolicyRefuses(t *testing.T) {
 	// is refused from has to be the state the database actually holds.
 	service, store, resource := newDBService(t)
 	ctx := context.Background()
-	if err := service.Assign(ctx, admin(), childUser, Item{Kind: KindCapability, ID: "chat"}, false); err != nil {
-		t.Fatalf("close a baseline item: %v", err)
+	// A whole-kind denial rather than one named item, because this is the storage
+	// half of the policy's own case: an administrator closing every capability at
+	// once, with the floor as the only thing left standing. A denial of one item
+	// would leave the floor assertion true for the wrong reason — no grant would
+	// have reached chat at all.
+	if err := service.Assign(ctx, admin(), childUser, Whole(KindCapability), false); err != nil {
+		t.Fatalf("close every capability: %v", err)
 	}
 	assignments, err := store.Assignments(ctx, childUser)
 	if err != nil {

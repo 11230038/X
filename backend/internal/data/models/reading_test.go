@@ -17,7 +17,7 @@ func TestReadingModelMappings(t *testing.T) {
 		primaryKey []string
 		columns    []string
 	}{
-		{"material", &ReadingMaterial{}, "reading_materials", []string{"material_id"}, []string{"material_id", "content_id", "filename", "source_type", "creat_time", "update_time"}},
+		{"material", &ReadingMaterial{}, "reading_materials", []string{"material_id"}, []string{"material_id", "content_id", "filename", "source_type", "owner_id", "creat_time", "update_time"}},
 		{"workspace", &ReadingWorkspace{}, "reading_workspaces", []string{"workspace_id"}, []string{"workspace_id", "active_material_id", "title", "description", "creat_time", "update_time"}},
 		{"workspace session", &ReadingWorkspaceSession{}, "reading_workspace_sessions", []string{"workspace_id", "session_id"}, []string{"workspace_id", "session_id", "active_material_id", "creat_time", "update_time"}},
 		{"workspace material", &ReadingWorkspaceMaterial{}, "reading_workspace_materials", []string{"workspace_id", "material_id"}, []string{"workspace_id", "material_id", "tab_order", "pinned", "opened", "creat_time"}},

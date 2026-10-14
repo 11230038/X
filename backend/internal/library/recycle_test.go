@@ -615,7 +615,10 @@ func TestSearchListsOneHalfOfTheLibraryAtATime(t *testing.T) {
 func TestSearchNarrowsByAllFourFilters(t *testing.T) {
 	service, _, _ := newRecycler(t)
 	first := store(t, service, "Linear-Algebra.md", "a")
-	store(t, service, "notes.pdf", "b")
+	// The second file is in another category, and its bytes are a PDF because the
+	// upload reads them to decide what the file is: a name alone is a claim, and
+	// "b" is not a document any more than it is a song.
+	store(t, service, "notes.pdf", "%PDF-1.4 " + strings.Repeat("x", 16) + " %%EOF")
 
 	tests := []struct {
 		name  string
@@ -686,6 +689,10 @@ func TestSearchIsNarrowedToOneAccount(t *testing.T) {
 // clamped; an offset past the end is an empty page and not a failure.
 func TestTheListingPagesAndClamps(t *testing.T) {
 	service, repository, _ := newRecycler(t)
+	// The five are written straight into the double's table rather than uploaded,
+	// because the ids have to be known for the assertion about which page starts
+	// where — and the table is made here, since Create is what makes it.
+	repository.stored = make(map[string]FileRecord, 5)
 	for index := 0; index < 5; index++ {
 		id := fmt.Sprintf("lib_%032d", index)
 		repository.stored[id] = FileRecord{
