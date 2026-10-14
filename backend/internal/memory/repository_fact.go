@@ -82,6 +82,11 @@ func (r *GORMRepository) Facts(ctx context.Context, query FactQuery) ([]Fact, er
 	if query.Surface != "" {
 		statement = statement.Where("surface = ?", string(query.Surface))
 	}
+	if !query.Before.IsZero() {
+		// `creat_time` and not the column the ordering uses: see FactQuery.Before
+		// for why the cutoff reads the admission.
+		statement = statement.Where("creat_time < ?", query.Before)
+	}
 	if query.Limit > 0 {
 		statement = statement.Limit(query.Limit)
 	}
@@ -230,6 +235,30 @@ func (r *GORMRepository) AttachSource(ctx context.Context, factID, traceID strin
 		return nil
 	}
 	return fmt.Errorf("attach trace %s to fact %s: %w", traceID, factID, err)
+}
+
+// PurgeFacts removes the named facts of one account, and the evidence rows under
+// them by the foreign key.
+//
+// The list is checked before it is used, and that is not politeness: `IN ()` with
+// nothing in it is the statement GORM refuses to run without a WHERE clause at
+// all, and the guard that stops a delete from being a delete-everything is exactly
+// what an empty list would slip past. An empty list is a cleanup that found
+// nothing, which is nothing to do rather than a failure.
+func (r *GORMRepository) PurgeFacts(ctx context.Context, ownerID int64, factIDs []string) (int, error) {
+	if err := r.ready(); err != nil {
+		return 0, err
+	}
+	if len(factIDs) == 0 {
+		return 0, nil
+	}
+	removed := r.db.WithContext(ctx).
+		Where("owner_id = ? AND fact_id IN ?", ownerID, factIDs).
+		Delete(&models.MemoryFact{})
+	if removed.Error != nil {
+		return 0, fmt.Errorf("purge the facts of account %d: %w", ownerID, removed.Error)
+	}
+	return int(removed.RowsAffected), nil
 }
 
 // MoveSources re-points every piece of evidence from one fact to another.

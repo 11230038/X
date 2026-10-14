@@ -383,7 +383,7 @@ type TraceQuery struct {
 }
 
 // FactQuery is a listing of L2: one account's facts, optionally of the given
-// statuses and surface.
+// statuses and surface and up to a moment.
 type FactQuery struct {
 	OwnerID int64
 	// Statuses filters the read; empty means every status. It is a slice because
@@ -391,5 +391,14 @@ type FactQuery struct {
 	// "what have I ever had", which is three.
 	Statuses []Status
 	Surface  Surface
-	Limit    int
+	// Before bounds the read by when a fact was *admitted*, keeping the ones
+	// strictly before it. A zero time is unbounded.
+	//
+	// It is the cleanup's filter (cleanup.go) and it reads the admission and not
+	// the last edit on purpose: what a cleanup forgets is what the system took on
+	// before that date, and a fact admitted last year whose wording was fixed
+	// yesterday is not yesterday's fact. The other column would let an edit draw a
+	// row out of a cleanup that had already been previewed over it.
+	Before time.Time
+	Limit  int
 }

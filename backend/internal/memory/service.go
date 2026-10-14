@@ -136,6 +136,24 @@ func (s *Service) Observe(ctx context.Context, observation Observation) (Observe
 	if err := observation.Validate(); err != nil {
 		return Observed{}, err
 	}
+	var observed Observed
+	err := s.repository.Within(ctx, func(tx Repository) error {
+		var err error
+		observed, err = s.admit(ctx, tx, observation)
+		return err
+	})
+	if err != nil {
+		return Observed{}, err
+	}
+	return observed, nil
+}
+
+// admit is the body of Observe, and it is a function of its own because the user
+// stating something takes the same road (lifecycle.go's State): the two differ in
+// who the observation is attributed to and in what is recorded afterwards, and
+// the road between them has to be one code path — a second copy of this would be
+// a second answer to what it takes for something to become a fact.
+func (s *Service) admit(ctx context.Context, tx Repository, observation Observation) (Observed, error) {
 	traceID, err := newID(traceIDPrefix)
 	if err != nil {
 		return Observed{}, err
@@ -147,72 +165,64 @@ func (s *Service) Observe(ctx context.Context, observation Observation) (Observe
 	fingerprint := Fingerprint(observation.Statement)
 	observed := Observed{TraceID: traceID, Proposed: true}
 
-	err = s.repository.Within(ctx, func(tx Repository) error {
-		trace := Trace{
-			ID:          traceID,
-			OwnerID:     observation.OwnerID,
-			Surface:     observation.Surface,
-			Kind:        observation.Kind,
-			SessionID:   observation.SessionID,
-			TurnID:      observation.TurnID,
-			Statement:   observation.Statement,
-			Fingerprint: fingerprint,
-			Payload:     observation.Payload,
-			CreatedAt:   s.clock(),
-		}
-		if err := tx.AppendTrace(ctx, trace); err != nil {
-			return err
-		}
+	trace := Trace{
+		ID:          traceID,
+		OwnerID:     observation.OwnerID,
+		Surface:     observation.Surface,
+		Kind:        observation.Kind,
+		SessionID:   observation.SessionID,
+		TurnID:      observation.TurnID,
+		Statement:   observation.Statement,
+		Fingerprint: fingerprint,
+		Payload:     observation.Payload,
+		CreatedAt:   s.clock(),
+	}
+	if err := tx.AppendTrace(ctx, trace); err != nil {
+		return Observed{}, err
+	}
 
-		believed, err := tx.ActiveFact(ctx, observation.OwnerID, fingerprint)
-		if err == nil {
-			if err := tx.AttachSource(ctx, believed.ID, traceID, s.clock()); err != nil {
-				return err
-			}
-			observed = Observed{TraceID: traceID, FactID: believed.ID, Admitted: true}
-			return nil
+	believed, err := tx.ActiveFact(ctx, observation.OwnerID, fingerprint)
+	if err == nil {
+		if err := tx.AttachSource(ctx, believed.ID, traceID, s.clock()); err != nil {
+			return Observed{}, err
 		}
-		if !errors.Is(err, ErrNotFound) {
-			return err
-		}
+		return Observed{TraceID: traceID, FactID: believed.ID, Admitted: true}, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return Observed{}, err
+	}
 
-		stored, err := tx.Traces(ctx, TraceQuery{OwnerID: observation.OwnerID, Fingerprint: fingerprint})
-		if err != nil {
-			return err
-		}
-		decision := decide(observation, stored, s.options)
-		if !decision.admitted {
-			return nil
-		}
-		fact := Fact{
-			ID:          factID,
-			OwnerID:     observation.OwnerID,
-			Surface:     observation.Surface,
-			Scope:       observation.Scope,
-			Statement:   observation.Statement,
-			Fingerprint: fingerprint,
-			Confidence:  decision.confidence,
-			Status:      StatusActive,
-			Sensitive:   decision.sensitive,
-			ConfirmedBy: decision.confirmedBy,
-			Version:     1,
-			CreatedAt:   s.clock(),
-		}
-		if err := tx.CreateFact(ctx, fact); err != nil {
-			return err
-		}
-		for _, source := range decision.sources {
-			if err := tx.AttachSource(ctx, fact.ID, source, s.clock()); err != nil {
-				return err
-			}
-		}
-		observed = Observed{TraceID: traceID, FactID: fact.ID, Admitted: true}
-		return nil
-	})
+	stored, err := tx.Traces(ctx, TraceQuery{OwnerID: observation.OwnerID, Fingerprint: fingerprint})
 	if err != nil {
 		return Observed{}, err
 	}
-	return observed, nil
+	decision := decide(observation, stored, s.options)
+	if !decision.admitted {
+		return observed, nil
+	}
+	fact := Fact{
+		ID:          factID,
+		OwnerID:     observation.OwnerID,
+		Surface:     observation.Surface,
+		Scope:       observation.Scope,
+		Statement:   observation.Statement,
+		Fingerprint: fingerprint,
+		Confidence:  decision.confidence,
+		Status:      StatusActive,
+		Sensitive:   decision.sensitive,
+		ConfirmedBy: decision.confirmedBy,
+		Version:     1,
+		CreatedAt:   s.clock(),
+	}
+	if err := tx.CreateFact(ctx, fact); err != nil {
+		return Observed{}, err
+	}
+	for _, source := range decision.sources {
+		if err := tx.AttachSource(ctx, fact.ID, source, s.clock()); err != nil {
+			return Observed{}, err
+		}
+	}
+	return Observed{TraceID: traceID, FactID: fact.ID, Admitted: true}, nil
 }
 
 // Traces reads one account's L1.

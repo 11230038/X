@@ -36,6 +36,7 @@ type fakeRepository struct {
 	createFactErr      error
 	saveFactErr        error
 	attachSourceErr    error
+	purgeFactsErr      error
 	moveSourcesErr     error
 	appendAuditErr     error
 	auditsErr          error
@@ -44,6 +45,9 @@ type fakeRepository struct {
 	// given its evidence" is told from "the fact was given one row".
 	attached []FactSource
 	moved    []FactSource
+	// purged records the ids a purge removed, in the order they went, which is
+	// what a cleanup's two runs are compared on.
+	purged []string
 	// expires records positions a listing was asked for.
 	traceReads []TraceQuery
 }
@@ -163,6 +167,9 @@ func (f *fakeRepository) Facts(_ context.Context, query FactQuery) ([]Fact, erro
 		if query.Surface != "" && fact.Surface != query.Surface {
 			continue
 		}
+		if !query.Before.IsZero() && !fact.CreatedAt.Before(query.Before) {
+			continue
+		}
 		found = append(found, fact)
 	}
 	slices.SortFunc(found, func(left, right Fact) int {
@@ -256,6 +263,33 @@ func (f *fakeRepository) AttachSource(_ context.Context, factID, traceID string,
 	f.sources = append(f.sources, source)
 	f.attached = append(f.attached, source)
 	return nil
+}
+
+func (f *fakeRepository) PurgeFacts(_ context.Context, ownerID int64, factIDs []string) (int, error) {
+	if f.purgeFactsErr != nil {
+		return 0, f.purgeFactsErr
+	}
+	var kept []Fact
+	removed := 0
+	for _, fact := range f.facts {
+		if fact.OwnerID == ownerID && slices.Contains(factIDs, fact.ID) {
+			f.purged = append(f.purged, fact.ID)
+			removed++
+			continue
+		}
+		kept = append(kept, fact)
+	}
+	f.facts = kept
+	// The evidence goes with the fact, the way the foreign key does it: a purge
+	// here that left the rows behind would make the fake kinder than the engine.
+	var surviving []FactSource
+	for _, source := range f.sources {
+		if slices.ContainsFunc(kept, func(fact Fact) bool { return fact.ID == source.FactID }) {
+			surviving = append(surviving, source)
+		}
+	}
+	f.sources = surviving
+	return removed, nil
 }
 
 func (f *fakeRepository) MoveSources(_ context.Context, fromFactID, toFactID string) error {

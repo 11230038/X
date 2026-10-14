@@ -53,7 +53,11 @@ const (
 	ActionFactRestored Action = "fact.restored"
 	// ActionFactMerged is a dedupe folding one fact into another.
 	ActionFactMerged Action = "fact.merged"
-	// ActionFactPurged is a cleanup removing a fact outright.
+	// ActionFactPurged is a cleanup removing a fact outright, and it is the word
+	// for a batch: one row per cleanup run, naming the rows it removed in its
+	// detail (cleanup.go). It is singular for the reason the table's comment gives
+	// — what a purge removes is facts, one or many — and there is no word for
+	// removing observations at all, because nothing does.
 	ActionFactPurged Action = "fact.purged"
 	// ActionMemoryExported is the account being handed its memory.
 	ActionMemoryExported Action = "memory.exported"
@@ -76,9 +80,10 @@ type TargetKind string
 const (
 	// TargetFact is one fact, named by id.
 	TargetFact TargetKind = "fact"
-	// TargetMemory is the account's memory as a whole — an export, which names no
-	// row. It is why TargetID is nullable: an action about everything has no one
-	// id to point at.
+	// TargetMemory is the account's memory as a whole: an export, and a cleanup —
+	// which is why TargetID is nullable. An export names nothing because it takes
+	// everything, and a cleanup names nothing because what it named is a batch,
+	// whose ids are in the row's detail rather than in one column that holds one id.
 	TargetMemory TargetKind = "memory"
 )
 

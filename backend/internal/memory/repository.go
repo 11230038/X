@@ -80,6 +80,21 @@ type Repository interface {
 	// the same pair twice is not an error: it is already recorded, which is the
 	// answer the caller wanted.
 	AttachSource(ctx context.Context, factID, traceID string, now time.Time) error
+	// PurgeFacts removes facts outright, and the evidence under them with them.
+	//
+	// It is the only deletion this package has, and it exists because cleanup is a
+	// batch a user previews and then runs (cleanup.go) — everything else MEM-02
+	// asks for is a state change with a row left behind, which is why nothing else
+	// here removes anything. The observations stay: L1 is append-only (PRD §11.3),
+	// and a fact going away says nothing about whether a surface said it. What the
+	// evidence rows point at is therefore still there to read; it is the fact that
+	// is gone.
+	//
+	// The owner is part of the WHERE clause, as everywhere else here: a caller
+	// cannot name another account's rows into a deletion any more than it can read
+	// them. An empty list removes nothing and is not an error — it is a cleanup
+	// that found nothing to clean.
+	PurgeFacts(ctx context.Context, ownerID int64, factIDs []string) (int, error)
 	// MoveSources re-points every piece of evidence from one fact to another,
 	// which is what a merge is on the evidence side.
 	MoveSources(ctx context.Context, fromFactID, toFactID string) error
