@@ -500,17 +500,22 @@ func TestEffectiveIsComputedByTheSameFunctionThatAnswers(t *testing.T) {
 		t.Fatalf("effective: %v", err)
 	}
 	byItem := map[Item]Decision{}
-	for index, item := range service.policy.Baseline().Items() {
-		byItem[item] = decisions[index]
+	for _, decision := range decisions {
+		byItem[decision.Item] = decision
 	}
 	if decision := byItem[Item{Kind: KindCapability, ID: "chat"}]; !decision.Allowed {
 		t.Errorf("the floor was reported as unreachable: %s", decision.Reason)
 	}
+	// The granted capability is not in the baseline, and this is the case that
+	// says the list has to be the baseline plus what the grants name: an answer
+	// that only listed the baseline would pin roadmap at index len(baseline) or
+	// not at all, and the screen would draw a learner unable to reach the thing
+	// the grant just opened.
 	if decision := byItem[Item{Kind: KindCapability, ID: "roadmap"}]; !decision.Allowed {
 		t.Errorf("a granted capability was reported as unreachable: %s", decision.Reason)
 	}
-	if len(decisions) != len(service.policy.Baseline().Items()) {
-		t.Errorf("Effective reported %d items, want %d", len(decisions), len(service.policy.Baseline().Items()))
+	if len(decisions) != len(service.policy.Baseline().Items())+1 {
+		t.Errorf("Effective reported %d items, want the baseline plus the one grant", len(decisions))
 	}
 }
 

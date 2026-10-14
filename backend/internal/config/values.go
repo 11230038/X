@@ -80,3 +80,24 @@ func parseNonNegativeDuration(values map[string]string, key string) (time.Durati
 	}
 	return value, nil
 }
+
+// parseList reads a comma-separated list.
+//
+// Entries are trimmed and none is dropped: a list with a trailing comma is a
+// list somebody was still editing, and reading `preference,` as `preference`
+// would be answering a question the file did not ask — the same rule the query
+// parameters follow. Each section's Validate refuses the blank entry by name, so
+// the mistake is a startup failure naming the key rather than a value that
+// quietly is not one. A blank input is no entries at all rather than one blank
+// one, so that a section handed a list it never got says so in those words.
+func parseList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	pieces := strings.Split(raw, ",")
+	entries := make([]string, 0, len(pieces))
+	for _, piece := range pieces {
+		entries = append(entries, strings.TrimSpace(piece))
+	}
+	return entries
+}

@@ -90,6 +90,9 @@ var requiredKeys = []string{
 	"MEMORY_SENSITIVE_KINDS",
 	"MEMORY_SYNTHESIS_WINDOW_DAYS",
 	"MEMORY_MAX_FACTS_PER_SURFACE",
+	"AUTHZ_DEFAULT_PRESET",
+	"AUTHZ_LEARNER_CAPABILITIES",
+	"AUTHZ_LEARNER_SURFACES",
 }
 
 // Config contains all settings required to run the service.
@@ -111,6 +114,7 @@ type Config struct {
 	Dashboard       DashboardConfig
 	Reading         ReadingConfig
 	Memory          MemoryConfig
+	Authz           AuthzConfig
 }
 
 // Load reads configuration exclusively from the dotenv file at path. The path
@@ -185,6 +189,10 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	authorization, err := loadAuthzConfig(values)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
 		HTTPAddr:        strings.TrimSpace(values["HTTP_ADDR"]),
@@ -204,6 +212,7 @@ func Load(path string) (Config, error) {
 		Dashboard:       dashboard,
 		Reading:         reading,
 		Memory:          memory,
+		Authz:           authorization,
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -263,5 +272,8 @@ func (c Config) Validate() error {
 	if err := c.Reading.Validate(); err != nil {
 		return err
 	}
-	return c.Memory.Validate()
+	if err := c.Memory.Validate(); err != nil {
+		return err
+	}
+	return c.Authz.Validate()
 }

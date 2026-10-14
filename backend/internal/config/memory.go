@@ -126,19 +126,8 @@ func parsePercent(values map[string]string, key string) (int, error) {
 	return value, nil
 }
 
-// parseKinds reads a comma-separated set of memory kinds.
-//
-// Entries are trimmed and none is dropped: a list with a trailing comma is a
-// list somebody was still editing, and reading `preference,` as `preference`
-// would be answering a question the file did not ask — the same rule the query
-// parameters follow. Validate refuses the blank entry, so the mistake is a
-// startup failure naming the key rather than a sensitive kind that quietly is
-// not one.
-func parseKinds(raw string) []string {
-	pieces := strings.Split(raw, ",")
-	kinds := make([]string, 0, len(pieces))
-	for _, piece := range pieces {
-		kinds = append(kinds, strings.TrimSpace(piece))
-	}
-	return kinds
-}
+// parseKinds reads a comma-separated set of memory kinds. It is parseList, and
+// it is named for its key here because that is the only thing the call site is
+// about; the reading itself is shared so that two keys of the same shape cannot
+// come to disagree about a trailing comma.
+func parseKinds(raw string) []string { return parseList(raw) }

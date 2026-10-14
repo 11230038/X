@@ -16,6 +16,7 @@ import (
 	"backend/internal/handler"
 	"backend/internal/kb"
 	"backend/internal/library"
+	"backend/internal/middleware"
 	"github.com/gin-gonic/gin"
 )
 
@@ -38,6 +39,16 @@ func newTestRouter(t *testing.T, checker readyChecker) *gin.Engine {
 // handler is a failing assertion rather than a plausible body.
 func newTestRouterWith(t *testing.T, checker readyChecker, practiceErr error) *gin.Engine {
 	t.Helper()
+	return newTestRouterWithAuthorizer(t, checker, practiceErr, routerAuthorizerStub{})
+}
+
+// newTestRouterWithAuthorizer is the same router over a chosen authorizer, so
+// that a case about a refusal can hand one in without every other case in this
+// file having to describe a policy it is not about.
+func newTestRouterWithAuthorizer(
+	t *testing.T, checker readyChecker, practiceErr error, authorizer middleware.Authorizer,
+) *gin.Engine {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(&strings.Builder{}, nil))
 	system := handler.NewSystemHandler(checker, 50*time.Millisecond, logger)
 	libraryFiles := handler.NewLibraryFilesHandler(routerUploaderStub{}, 1024, logger)
@@ -49,7 +60,9 @@ func newTestRouterWith(t *testing.T, checker readyChecker, practiceErr error) *g
 		Auth:          handler.NewAuthHandler(authenticator, logger),
 		Questions:     handler.NewQuestionHandler(routerQuestionsStub{}, logger),
 		Practice:      handler.NewPracticeHandler(routerPracticeStub{err: practiceErr}, routerQueueSize, logger),
+		Permissions:   handler.NewPermissionsHandler(routerPermissionsStub{}, logger),
 		TokenVerifier: authenticator,
+		Authorizer:    authorizer,
 		// KnowledgeBase is deliberately left out. This file is about which
 		// routes exist and which group they sit in; what a knowledge base
 		// endpoint answers is handler/kb_test.go's business, and wiring a stub
@@ -58,6 +71,25 @@ func newTestRouterWith(t *testing.T, checker readyChecker, practiceErr error) *g
 }
 
 type routerFileStub struct{}
+
+// routerAuthorizerStub is the policy as most cases in this file need it: every
+// request allowed. A case about a route being registered is not also a case
+// about what the policy says about it, and the two questions have their own
+// files — internal/authz for the second, this one for the first.
+type routerAuthorizerStub struct {
+	// deny makes every decision a refusal, which is what the case about the 403
+	// boundary hands in.
+	deny bool
+}
+
+func (s routerAuthorizerStub) Decide(
+	context.Context, authz.Caller, authz.Action, int64,
+) (authz.Decision, error) {
+	if s.deny {
+		return authz.Decision{Layer: authz.LayerPreset, Reason: authz.ReasonBaselineClosed}, nil
+	}
+	return authz.Decision{Allowed: true, Layer: authz.LayerSelf, Reason: authz.ReasonOwnMaterial}, nil
+}
 
 func (routerFileStub) Find(context.Context, string, authz.Caller) (library.UploadResult, error) {
 	return library.UploadResult{ID: "lib_1", SHA256: strings.Repeat("a", 64), Filename: "手册.pdf"}, nil
@@ -81,6 +113,21 @@ type routerUploaderStub struct{}
 
 func (routerUploaderStub) Upload(context.Context, library.UploadInput) (library.UploadResult, error) {
 	return library.UploadResult{}, nil
+}
+
+// routerPermissionsStub answers a picture of the caller's reach. This file is
+// about the route being reachable at all, so what the picture *says* is
+// handler/permissions_test.go's business; all that matters here is that the
+// route is mounted and answers behind a token.
+type routerPermissionsStub struct{}
+
+func (routerPermissionsStub) Self(context.Context, authz.Caller) (authz.Self, error) {
+	return authz.Self{
+		Preset: authz.PresetStandard,
+		Items: []authz.Decision{{
+			Item: authz.Item{Kind: authz.KindSurface, ID: authz.SurfaceChat}, Allowed: true,
+		}},
+	}, nil
 }
 
 // routerAuthStub accepts exactly one token and rejects everything else.
@@ -378,6 +425,100 @@ func TestRouterReadsAFileForWhoeverHoldsTheToken(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRouterRefusesAnAccountThePolicyDenies pins the 403/401 boundary on a real
+// mounted route (§2.16).
+//
+// The two are deliberately not collapsed, and the only place that can be shown
+// is here: the middleware answering them is written per route, so a route that
+// mounted the authorizer without the token guard would answer 403 to a stranger
+// — telling somebody who is not logged in what they may not do — and a route that
+// mounted neither would serve them.
+func TestRouterRefusesAnAccountThePolicyDenies(t *testing.T) {
+	router := newTestRouterWithAuthorizer(t, readyChecker{}, nil, routerAuthorizerStub{deny: true})
+	const path = "/api/v1/library/files/lib_1"
+
+	t.Run("with a token it is forbidden and says why", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer "+routerAcceptedToken)
+		router.ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403; body=%s", recorder.Code, recorder.Body.String())
+		}
+		if !strings.Contains(recorder.Body.String(), `"code":"permission_denied"`) {
+			t.Fatalf("body = %s", recorder.Body.String())
+		}
+		// Which layer said no, and why, are in the body because they are what a
+		// screen has to say instead of "no".
+		for _, want := range []string{`"surface":"library"`, `"layer":"preset"`, `"reason":"baseline_closed"`} {
+			if !strings.Contains(recorder.Body.String(), want) {
+				t.Errorf("body = %s, want it to carry %s", recorder.Body.String(), want)
+			}
+		}
+	})
+
+	t.Run("without a token it is unauthenticated instead", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
+		}
+		if !strings.Contains(recorder.Body.String(), `"code":"authorization_required"`) {
+			t.Fatalf("body = %s", recorder.Body.String())
+		}
+	})
+
+	t.Run("registering is not behind the policy", func(t *testing.T) {
+		// A policy that refuses everything must not lock a person out of the two
+		// routes that make an account. They are mounted outside both middlewares,
+		// and this is the case that would catch one of them moving inside.
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register",
+			strings.NewReader(`{"username":"alice","password":"correct-horse"}`))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201; body=%s", recorder.Code, recorder.Body.String())
+		}
+	})
+}
+
+// TestRouterRegistersThePermissionsRoute pins the one route an account can reach
+// with nothing else.
+//
+// It is mounted without a surface requirement on purpose: an account restricted
+// out of every area must still be able to ask what it may reach, otherwise the
+// screen that explains the refusal is itself refused.
+func TestRouterRegistersThePermissionsRoute(t *testing.T) {
+	router := newTestRouterWithAuthorizer(t, readyChecker{}, nil, routerAuthorizerStub{deny: true})
+	const path = "/api/v1/me/permissions"
+
+	t.Run("without a token", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
+		}
+	})
+
+	t.Run("a denial elsewhere does not close it", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer "+routerAcceptedToken)
+		router.ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+		}
+		if !strings.Contains(recorder.Body.String(), `"preset":"standard"`) {
+			t.Fatalf("body = %s", recorder.Body.String())
+		}
+	})
 }
 
 func TestRouterRecoversFromPanic(t *testing.T) {

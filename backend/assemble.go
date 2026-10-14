@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"backend/internal/authz"
 	"backend/internal/capability"
 	"backend/internal/chat"
 	"backend/internal/config"
@@ -61,6 +62,11 @@ type ai struct {
 	// selection through, kept here because the routes that open a material, save
 	// a position and run an extension are built beside the other handlers.
 	immersive *readingLayer
+	// authorization is the one place the four layers are combined (§2.1). It is
+	// here rather than built beside the router because the routes are not its
+	// only consumer: the audit records what it decided, and the governance
+	// routes write the rows it reads.
+	authorization *authz.Service
 }
 
 // assemble builds the turn runtime from configuration.
@@ -129,6 +135,22 @@ func assemble(
 
 	if err := checkDrift(capabilities, policy, tools.Names(), capabilityConfig(cfg)); err != nil {
 		return nil, err
+	}
+
+	// The authorization service is the one place the four layers are combined
+	// (§2.1), and the baseline it is built with is where the deployment's two
+	// lists meet the floor that is not configurable. Both are checked against
+	// this build before anything is served: a capability or surface name that
+	// this process has no implementation for has to fail here, where the message
+	// can name it, rather than at a learner's first request.
+	if err := checkAuthzDrift(cfg.Authz, capabilities); err != nil {
+		return nil, err
+	}
+	authorization, err := authz.NewService(authz.NewGORMStore(db), authz.New(
+		authz.NewBaseline(authz.DefaultFloor(), cfg.Authz.LearnerCapabilities, cfg.Authz.LearnerSurfaces),
+	))
+	if err != nil {
+		return nil, fmt.Errorf("initialize authorization: %w", err)
 	}
 
 	parsers, err := parse.NewRegistry(parse.Options{
@@ -275,6 +297,7 @@ func assemble(
 		materials: materials, indexing: worker,
 		questions: questions, reviews: reviews, mastery: paths.service,
 		dashboard: overview, immersive: immersive, memory: memories,
+		authorization: authorization,
 	}, nil
 }
 

@@ -3,6 +3,7 @@ package server
 import (
 	"log/slog"
 
+	"backend/internal/authz"
 	"backend/internal/handler"
 	"backend/internal/middleware"
 	"backend/internal/ws"
@@ -24,8 +25,13 @@ type Handlers struct {
 	Dashboard     *handler.DashboardHandler
 	Memory        *handler.MemoryHandler
 	Capabilities  *handler.CapabilityHandler
+	Permissions   *handler.PermissionsHandler
 	WebSocket     *ws.Handler
 	TokenVerifier middleware.TokenVerifier
+	// Authorizer answers what an account may reach. It is what the routes below
+	// are narrowed by, and it is required: a router built without one refuses
+	// every authenticated request rather than serving them unchecked.
+	Authorizer middleware.Authorizer
 }
 
 // NewRouter builds the application router without binding a network port.
@@ -53,75 +59,106 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	router.GET("/healthz", handlers.System.Liveness)
 	router.GET("/readyz", handlers.System.Readiness)
 	apiV1 := router.Group("/api/v1")
-	// The file library has no ownership model yet, so its upload route stays public
-	// until a later slice adds one. Reading a file back is a different request:
-	// what it answers with is the material a turn was grounded on, and the
-	// knowledge base endpoints beside it are the collections that material lives
-	// in, so both are behind the token.
-	apiV1.POST("/library/files", handlers.LibraryFiles.Upload)
 	apiV1.POST("/auth/register", handlers.Auth.Register)
 	apiV1.POST("/auth/login", handlers.Auth.Login)
 	authenticated := apiV1.Group("", middleware.RequireAuth(handlers.TokenVerifier, logger))
-	authenticated.GET("/library/files/:fileID", handlers.LibraryReads.Get)
-	authenticated.GET("/library/files/:fileID/text", handlers.LibraryReads.Text)
-	authenticated.POST("/knowledge-bases", handlers.KnowledgeBase.Create)
-	authenticated.GET("/knowledge-bases", handlers.KnowledgeBase.List)
-	authenticated.GET("/knowledge-bases/:kbID", handlers.KnowledgeBase.Get)
-	authenticated.DELETE("/knowledge-bases/:kbID", handlers.KnowledgeBase.Delete)
-	authenticated.POST("/knowledge-bases/:kbID/documents", handlers.KnowledgeBase.AddDocument)
-	authenticated.DELETE("/knowledge-bases/:kbID/documents/:documentID", handlers.KnowledgeBase.RemoveDocument)
+	// reach is the second gate: everything below is grouped by the area of the
+	// product it belongs to, and every request to one has to reach that area
+	// before its handler runs (§2.1). The grouping is what makes the check
+	// total — a route added inside one of these groups is covered by
+	// construction, and the only way to leave a route unchecked is to register
+	// it on `authenticated` instead, which is a visible thing to do in review.
+	reach := func(surface string) *gin.RouterGroup {
+		return authenticated.Group("",
+			middleware.Authorize(handlers.Authorizer, middleware.Surface(surface), logger))
+	}
+	// What this account is, and what it may reach, before anything else: it is
+	// mounted without a surface so that an account restricted out of every area
+	// can still ask why, and it is what a client reads to draw the refusals it
+	// has not been given yet (§2.16).
+	authenticated.GET("/me/permissions", handlers.Permissions.Get)
+	system := reach(authz.SurfaceSystem)
+	system.GET("/auth/me", handlers.Auth.Me)
+	system.GET("/capabilities", handlers.Capabilities.List)
+	// The file library is behind the token from the upload onwards. It used to be
+	// the one public write in this API, because a file had no owner: what you
+	// uploaded was stored for whoever came back for the id. That made every stored
+	// file everybody's, which is a state that reads as working until there is a
+	// second account. A file now belongs to the account that uploaded it, and
+	// every read of one is narrowed to that account, so both of these are here.
+	library := reach(authz.SurfaceLibrary)
+	library.POST("/library/files", handlers.LibraryFiles.Upload)
+	library.GET("/library/files/:fileID", handlers.LibraryReads.Get)
+	library.GET("/library/files/:fileID/text", handlers.LibraryReads.Text)
+	knowledgeBase := reach(authz.SurfaceKnowledgeBase)
+	knowledgeBase.POST("/knowledge-bases", handlers.KnowledgeBase.Create)
+	knowledgeBase.GET("/knowledge-bases", handlers.KnowledgeBase.List)
+	knowledgeBase.GET("/knowledge-bases/:kbID", handlers.KnowledgeBase.Get)
+	knowledgeBase.DELETE("/knowledge-bases/:kbID", handlers.KnowledgeBase.Delete)
+	knowledgeBase.POST("/knowledge-bases/:kbID/documents", handlers.KnowledgeBase.AddDocument)
+	knowledgeBase.DELETE("/knowledge-bases/:kbID/documents/:documentID", handlers.KnowledgeBase.RemoveDocument)
 	// Rebuilding is per document: the path says which collection the request is
 	// about, and the body says which document in it to re-read.
-	authenticated.POST("/knowledge-bases/:kbID/rebuild", handlers.KnowledgeBase.Rebuild)
-	authenticated.POST("/knowledge-bases/:kbID/search", handlers.KnowledgeBase.Search)
-	authenticated.POST("/knowledge-bases/:kbID/default", handlers.KnowledgeBase.SetDefault)
-	authenticated.GET("/auth/me", handlers.Auth.Me)
-	authenticated.GET("/capabilities", handlers.Capabilities.List)
-	authenticated.POST("/sessions", handlers.Sessions.Create)
-	authenticated.GET("/sessions", handlers.Sessions.List)
-	authenticated.GET("/sessions/:sessionID", handlers.Sessions.Get)
-	authenticated.PATCH("/sessions/:sessionID", handlers.Sessions.Rename)
-	authenticated.DELETE("/sessions/:sessionID", handlers.Sessions.SoftDelete)
-	authenticated.POST("/sessions/:sessionID/restore", handlers.Sessions.Restore)
-	authenticated.DELETE("/sessions/:sessionID/permanent", handlers.Sessions.DeletePermanently)
-	authenticated.GET("/sessions/:sessionID/messages", handlers.Sessions.Messages)
+	knowledgeBase.POST("/knowledge-bases/:kbID/rebuild", handlers.KnowledgeBase.Rebuild)
+	knowledgeBase.POST("/knowledge-bases/:kbID/search", handlers.KnowledgeBase.Search)
+	knowledgeBase.POST("/knowledge-bases/:kbID/default", handlers.KnowledgeBase.SetDefault)
+	chat := reach(authz.SurfaceChat)
+	chat.POST("/sessions", handlers.Sessions.Create)
+	chat.GET("/sessions", handlers.Sessions.List)
+	chat.GET("/sessions/:sessionID", handlers.Sessions.Get)
+	chat.PATCH("/sessions/:sessionID", handlers.Sessions.Rename)
+	chat.DELETE("/sessions/:sessionID", handlers.Sessions.SoftDelete)
+	chat.POST("/sessions/:sessionID/restore", handlers.Sessions.Restore)
+	// Claiming is the exit from the state every session written before V5 is in
+	// (§2.5). Without it, an upgraded deployment would hold a set of conversations
+	// that only the administrator can see and nobody can act on. It is a POST
+	// because it changes the row, and it takes no body because the session and the
+	// account are both already named — the id in the path and the account in the
+	// token.
+	chat.POST("/sessions/:sessionID/claim", handlers.Sessions.Claim)
+	chat.DELETE("/sessions/:sessionID/permanent", handlers.Sessions.DeletePermanently)
+	chat.GET("/sessions/:sessionID/messages", handlers.Sessions.Messages)
 	// The question bank and reviewing are behind the token along with everything
 	// else a person's own material goes through: what these answer is what this
 	// user has been asked, answered and got wrong.
-	authenticated.GET("/questions", handlers.Questions.List)
+	notebook := reach(authz.SurfaceNotebook)
+	notebook.GET("/questions", handlers.Questions.List)
 	// The batch import is one route in two modes: `dry_run=true` reports what
 	// writing the file would do and writes nothing, and the same route without it
 	// does what the report said (§2.13).
-	authenticated.POST("/questions/import", handlers.Questions.Import)
-	authenticated.GET("/questions/:questionID", handlers.Questions.Get)
-	authenticated.PATCH("/questions/:questionID", handlers.Questions.Patch)
-	authenticated.GET("/question-categories", handlers.Questions.Categories)
-	authenticated.GET("/practice/queue", handlers.Practice.Queue)
-	authenticated.POST("/practice/reviews", handlers.Practice.Submit)
-	authenticated.GET("/practice/reviews/:requestID", handlers.Practice.Read)
-	authenticated.GET("/practice/stats", handlers.Practice.Stats)
+	notebook.POST("/questions/import", handlers.Questions.Import)
+	notebook.GET("/questions/:questionID", handlers.Questions.Get)
+	notebook.PATCH("/questions/:questionID", handlers.Questions.Patch)
+	notebook.GET("/question-categories", handlers.Questions.Categories)
+	practice := reach(authz.SurfacePractice)
+	practice.GET("/practice/queue", handlers.Practice.Queue)
+	practice.POST("/practice/reviews", handlers.Practice.Submit)
+	practice.GET("/practice/reviews/:requestID", handlers.Practice.Read)
+	practice.GET("/practice/stats", handlers.Practice.Stats)
 	// Mastery paths are read and named here, and built through the socket: a
 	// path is created inside the turn that was asked to work on it (§2.1), so
 	// there is no POST among these. The two lease endpoints are the exception to
 	// "a turn's state is a turn's business", and the reason is written where they
 	// are handled: a claim left behind by a turn that died is a person's to drop.
-	authenticated.GET("/mastery/paths", handlers.Mastery.List)
-	authenticated.GET("/mastery/paths/:pathID", handlers.Mastery.Get)
-	authenticated.PATCH("/mastery/paths/:pathID", handlers.Mastery.Patch)
-	authenticated.GET("/mastery/paths/:pathID/insight", handlers.Mastery.Insight)
-	authenticated.GET("/mastery/paths/:pathID/lease", handlers.Mastery.Lease)
-	authenticated.DELETE("/mastery/paths/:pathID/lease", handlers.Mastery.ReleaseLease)
+	mastery := reach(authz.SurfaceMastery)
+	mastery.GET("/mastery/paths", handlers.Mastery.List)
+	mastery.GET("/mastery/paths/:pathID", handlers.Mastery.Get)
+	mastery.PATCH("/mastery/paths/:pathID", handlers.Mastery.Patch)
+	mastery.GET("/mastery/paths/:pathID/insight", handlers.Mastery.Insight)
+	mastery.GET("/mastery/paths/:pathID/lease", handlers.Mastery.Lease)
+	mastery.DELETE("/mastery/paths/:pathID/lease", handlers.Mastery.ReleaseLease)
 	// Reading is where the reader is, and every route here is one reader's own
 	// material: what they have opened, where they stopped in it, and what they
 	// wrote. A material is a row pointing at a document the knowledge base
 	// parsed, so the words come back through these routes and never as a file.
-	authenticated.GET("/reading/materials", handlers.Reading.List)
-	authenticated.POST("/reading/materials", handlers.Reading.Create)
-	authenticated.GET("/reading/materials/:materialID", handlers.Reading.Get)
-	authenticated.GET("/reading/materials/:materialID/content", handlers.Reading.Content)
-	authenticated.GET("/reading/materials/:materialID/marks", handlers.Reading.Marks)
-	authenticated.POST("/reading/materials/:materialID/marks", handlers.Reading.AddMark)
-	authenticated.POST("/reading/materials/:materialID/position", handlers.Reading.SavePosition)
+	reading := reach(authz.SurfaceReading)
+	reading.GET("/reading/materials", handlers.Reading.List)
+	reading.POST("/reading/materials", handlers.Reading.Create)
+	reading.GET("/reading/materials/:materialID", handlers.Reading.Get)
+	reading.GET("/reading/materials/:materialID/content", handlers.Reading.Content)
+	reading.GET("/reading/materials/:materialID/marks", handlers.Reading.Marks)
+	reading.POST("/reading/materials/:materialID/marks", handlers.Reading.AddMark)
+	reading.POST("/reading/materials/:materialID/position", handlers.Reading.SavePosition)
 	// The two extension routes are the closed set of reading aids this build has
 	// and the run of one of them over one passage. The list is a read of the
 	// build; the run is the reader asking a question about the text in front of
@@ -131,14 +168,15 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// writes nothing; the write is the confirmation itself; and the cancel is the
 	// same row removed (§2.10). Nothing downstream behaves bilingually until that
 	// row is there, which is why the list carries the enabled state and its reason.
-	authenticated.GET("/reading/materials/:materialID/pairings", handlers.Reading.Pairings)
-	authenticated.POST("/reading/materials/:materialID/pairings", handlers.Reading.ConfirmPairing)
-	authenticated.DELETE("/reading/pairings/:pairingID", handlers.Reading.CancelPairing)
-	authenticated.GET("/reading/materials/:materialID/extensions", handlers.Reading.Extensions)
-	authenticated.POST("/reading/materials/:materialID/extensions/:name", handlers.Reading.RunExtension)
+	reading.GET("/reading/materials/:materialID/pairings", handlers.Reading.Pairings)
+	reading.POST("/reading/materials/:materialID/pairings", handlers.Reading.ConfirmPairing)
+	reading.DELETE("/reading/pairings/:pairingID", handlers.Reading.CancelPairing)
+	reading.GET("/reading/materials/:materialID/extensions", handlers.Reading.Extensions)
+	reading.POST("/reading/materials/:materialID/extensions/:name", handlers.Reading.RunExtension)
 	// The dashboard is the one read that spans the domains, and it sits beside
 	// the resources it reads rather than under any of them (COURSE-03).
-	authenticated.GET("/dashboard", handlers.Dashboard.Get)
+	dashboard := reach(authz.SurfaceDashboard)
+	dashboard.GET("/dashboard", handlers.Dashboard.Get)
 	// Memory is what the system has been told about an account and what it
 	// admitted from it (§2.14). Every route here is the caller's own memory: the
 	// account comes from the token and there is no owner in any body or query.
@@ -154,22 +192,23 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// something this API removes. `POST /memory/facts/dedupe` and
 	// `/memory/facts/:factID/retract` are different routes at different depths, so
 	// the static `dedupe` does not shadow the parameter.
-	authenticated.GET("/memory/traces", handlers.Memory.Traces)
-	authenticated.GET("/memory/facts", handlers.Memory.Facts)
-	authenticated.GET("/memory/facts/:factID", handlers.Memory.Fact)
-	authenticated.PATCH("/memory/facts/:factID", handlers.Memory.EditFact)
-	authenticated.POST("/memory/facts", handlers.Memory.StateFact)
-	authenticated.POST("/memory/facts/:factID/retract", handlers.Memory.RetractFact)
-	authenticated.POST("/memory/facts/:factID/restore", handlers.Memory.RestoreFact)
-	authenticated.POST("/memory/facts/dedupe", handlers.Memory.Dedupe)
-	authenticated.POST("/memory/cleanup", handlers.Memory.Cleanup)
-	authenticated.GET("/memory/synthesis", handlers.Memory.Synthesis)
-	authenticated.GET("/memory/audit", handlers.Memory.Audit)
-	authenticated.GET("/memory/export", handlers.Memory.Export)
+	memory := reach(authz.SurfaceMemory)
+	memory.GET("/memory/traces", handlers.Memory.Traces)
+	memory.GET("/memory/facts", handlers.Memory.Facts)
+	memory.GET("/memory/facts/:factID", handlers.Memory.Fact)
+	memory.PATCH("/memory/facts/:factID", handlers.Memory.EditFact)
+	memory.POST("/memory/facts", handlers.Memory.StateFact)
+	memory.POST("/memory/facts/:factID/retract", handlers.Memory.RetractFact)
+	memory.POST("/memory/facts/:factID/restore", handlers.Memory.RestoreFact)
+	memory.POST("/memory/facts/dedupe", handlers.Memory.Dedupe)
+	memory.POST("/memory/cleanup", handlers.Memory.Cleanup)
+	memory.GET("/memory/synthesis", handlers.Memory.Synthesis)
+	memory.GET("/memory/audit", handlers.Memory.Audit)
+	memory.GET("/memory/export", handlers.Memory.Export)
 	// The socket is authenticated by the middleware above before it is
 	// upgraded, so an unauthenticated request is answered as an HTTP request
 	// rather than becoming a connection (WS-06).
-	authenticated.GET("/ws", handlers.WebSocket.Serve)
+	chat.GET("/ws", handlers.WebSocket.Serve)
 	router.NoRoute(handlers.System.NotFound)
 	router.NoMethod(handlers.System.MethodNotAllowed)
 

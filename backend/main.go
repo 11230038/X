@@ -124,8 +124,10 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		Dashboard:     handler.NewDashboardHandler(ai.dashboard, logger),
 		Memory:        handler.NewMemoryHandler(ai.memory, logger),
 		Capabilities:  handler.NewCapabilityHandler(ai.capabilities),
+		Permissions:   handler.NewPermissionsHandler(ai.authorization, logger),
 		WebSocket:     ai.socket,
 		TokenVerifier: authService,
+		Authorizer:    ai.authorization,
 	})
 	httpServer := server.NewHTTPServer(cfg, router)
 

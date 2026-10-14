@@ -34,7 +34,7 @@ type Floor struct {
 // widens the baseline above it (see Baseline), which is a superset — so there
 // is no value of any variable that removes this from a learner's reach.
 func DefaultFloor() Floor {
-	return Floor{Capabilities: []string{"chat"}, Surfaces: []string{"chat"}}
+	return Floor{Capabilities: []string{"chat"}, Surfaces: []string{SurfaceChat}}
 }
 
 // Items lists the floor as items — what a learner reaches even when an
@@ -194,7 +194,14 @@ const (
 // different consumers: a handler reads Allowed, an audit entry records Layer
 // and Reason. An answer that said only "no" would leave the audit asking the
 // same question a second time to find out why.
+//
+// Item is carried for the reason a single answer does not need it and a list of
+// them does: Effective and Self return decisions in a batch, and a batch whose
+// entries do not say what they are about can only be read positionally against
+// the baseline — which stopped being the whole set the moment a grant was
+// allowed to open something the baseline never mentioned (§2.2).
 type Decision struct {
+	Item    Item
 	Allowed bool
 	Layer   Layer
 	Reason  string
@@ -294,12 +301,17 @@ func Validate(baseline Baseline) error {
 // baseline with the grants on top.
 func (d Decider) Decide(actor Actor, action Action, target Target) Decision {
 	if actor.IsAdmin() {
-		return Decision{Allowed: true, Layer: LayerRole, Reason: ReasonAdministrator}
+		return Decision{Item: action.Item, Allowed: true, Layer: LayerRole, Reason: ReasonAdministrator}
 	}
 	if target.Subject == 0 || target.Subject == actor.UserID {
 		return Reach(actor.Preset, d.baseline, actor.Grants, action.Item)
 	}
-	return CrossAccount(target.Link, target.Permissions, action.Permission)
+	// CrossAccount answers a question about a permission rather than about an
+	// item, so it returns a decision with none; the item is what was being
+	// attempted, which is the caller's to supply and belongs on the answer.
+	decision := CrossAccount(target.Link, target.Permissions, action.Permission)
+	decision.Item = action.Item
+	return decision
 }
 
 // Reach answers what an account's own two layers allow about one item: the
@@ -312,7 +324,7 @@ func (d Decider) Decide(actor Actor, action Action, target Target) Decision {
 // whose material was meant.
 func Reach(preset string, baseline Baseline, grants []Grant, item Item) Decision {
 	if !KnownKind(item.Kind) {
-		return Decision{Allowed: false, Layer: LayerPreset, Reason: ReasonUnknownItem}
+		return Decision{Item: item, Allowed: false, Layer: LayerPreset, Reason: ReasonUnknownItem}
 	}
 	preset = NormalizePreset(preset)
 
@@ -321,7 +333,7 @@ func Reach(preset string, baseline Baseline, grants []Grant, item Item) Decision
 	// before the floor so that a floor containing a forbidden item could not
 	// open one by accident.
 	if preset == PresetLearner && neverForLearners(item) {
-		return Decision{Allowed: false, Layer: LayerFloor, Reason: ReasonLearnerNever}
+		return Decision{Item: item, Allowed: false, Layer: LayerFloor, Reason: ReasonLearnerNever}
 	}
 	if grant, found := mostSpecific(grants, item); found {
 		// A grant may turn something off. It may not turn off the floor: the
@@ -329,23 +341,23 @@ func Reach(preset string, baseline Baseline, grants []Grant, item Item) Decision
 		// closing everything closable, and a grant that reached past it would
 		// make "the policy cannot be emptied" a statement about nothing.
 		if !grant.Allowed && preset == PresetLearner && baseline.Floor.Holds(item) {
-			return Decision{Allowed: true, Layer: LayerFloor, Reason: ReasonFloorProtected}
+			return Decision{Item: item, Allowed: true, Layer: LayerFloor, Reason: ReasonFloorProtected}
 		}
 		if grant.Allowed {
-			return Decision{Allowed: true, Layer: LayerGrant, Reason: ReasonGrantAllows}
+			return Decision{Item: item, Allowed: true, Layer: LayerGrant, Reason: ReasonGrantAllows}
 		}
-		return Decision{Allowed: false, Layer: LayerGrant, Reason: ReasonGrantDenies}
+		return Decision{Item: item, Allowed: false, Layer: LayerGrant, Reason: ReasonGrantDenies}
 	}
 	if preset == PresetLearner {
 		if baseline.Holds(item) {
-			return Decision{Allowed: true, Layer: LayerPreset, Reason: ReasonBaselineAllows}
+			return Decision{Item: item, Allowed: true, Layer: LayerPreset, Reason: ReasonBaselineAllows}
 		}
-		return Decision{Allowed: false, Layer: LayerPreset, Reason: ReasonBaselineClosed}
+		return Decision{Item: item, Allowed: false, Layer: LayerPreset, Reason: ReasonBaselineClosed}
 	}
 	// standard and custom start from everything and are narrowed per item. The
 	// learner is the only preset with a closed baseline (§2.2), and a custom
 	// account that was meant to be restricted is restricted by its grants.
-	return Decision{Allowed: true, Layer: LayerPreset, Reason: ReasonBaselineUnrestricted}
+	return Decision{Item: item, Allowed: true, Layer: LayerPreset, Reason: ReasonBaselineUnrestricted}
 }
 
 // CrossAccount answers whether an account may reach another's material.

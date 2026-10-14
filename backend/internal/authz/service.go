@@ -240,6 +240,48 @@ func (s *Service) Assignments(ctx context.Context, userID int64) ([]Assignment, 
 	return s.store.Assignments(ctx, userID)
 }
 
+// Self is an account's own picture of itself: which preset it carries, every
+// item it has an answer about, and the relationships it holds as guardian.
+//
+// The three travel together because they are read together — a screen asking
+// "what may I reach" draws the preset, the items and the learners it watches on
+// the same frame — and reading them one at a time would let the picture be
+// assembled from three different moments (§2.16).
+type Self struct {
+	Preset   string
+	Items    []Decision
+	Guardian []Link
+}
+
+// Self reads the caller's own picture.
+//
+// It takes a Caller and not a user id: the id comes from the token, and a
+// version that took one would be a route for reading somebody else's reach, which
+// is exactly what the guardian permission check exists to be asked about rather
+// than assumed.
+func (s *Service) Self(ctx context.Context, caller Caller) (Self, error) {
+	if !caller.Valid() {
+		return Self{}, fmt.Errorf("%w: caller names no account", ErrUnknownUser)
+	}
+	preset, err := s.store.Preset(ctx, caller.UserID)
+	if err != nil {
+		return Self{}, err
+	}
+	assignments, err := s.store.Assignments(ctx, caller.UserID)
+	if err != nil {
+		return Self{}, err
+	}
+	links, err := s.store.Links(ctx, caller.UserID)
+	if err != nil {
+		return Self{}, err
+	}
+	return Self{
+		Preset:   NormalizePreset(preset),
+		Items:    s.reach(preset, assignments),
+		Guardian: links,
+	}, nil
+}
+
 // Effective lists what one account may reach, as the policy answers it.
 //
 // It is what an administrator is shown when they ask what a learner can do,
@@ -254,13 +296,63 @@ func (s *Service) Effective(ctx context.Context, userID int64) ([]Decision, erro
 	if err != nil {
 		return nil, err
 	}
+	return s.reach(preset, assignments), nil
+}
+
+// reach answers the policy for every item the account has an answer about, in a
+// fixed order.
+//
+// The set is the baseline *plus* every item a grant names, and the union is the
+// whole point (§2.2): a grant may open something the baseline never mentioned,
+// so a screen built from the baseline alone would show a learner unable to
+// reach the thing they are at that moment using. Every answer comes from Reach,
+// the same function the middleware calls, so what is drawn and what is enforced
+// cannot drift apart.
+func (s *Service) reach(preset string, assignments []Assignment) []Decision {
+	baseline := s.policy.Baseline()
 	grants := Grants(assignments)
-	items := s.policy.Baseline().Items()
+	items := mergeItems(baseline.Items(), grantedItems(grants))
 	decisions := make([]Decision, 0, len(items))
 	for _, item := range items {
-		decisions = append(decisions, Reach(preset, s.policy.Baseline(), grants, item))
+		decisions = append(decisions, Reach(preset, baseline, grants, item))
 	}
-	return decisions, nil
+	return decisions
+}
+
+// grantedItems lists the items grants name.
+//
+// A grant whose id is empty is skipped, and it is not an oversight: the empty
+// id is a statement about every item of its kind, not an item, so listing it
+// would put a row on the screen — "capability" with no name — that no request
+// can ever be about. The grants arrive ordered by (kind, id) from the store, so
+// the items do too.
+func grantedItems(grants []Grant) []Item {
+	items := make([]Item, 0, len(grants))
+	for _, grant := range grants {
+		if grant.Item.ID != "" {
+			items = append(items, grant.Item)
+		}
+	}
+	return items
+}
+
+// mergeItems appends the items of extra that base does not already have,
+// keeping base's order first. It is here rather than inlined so that the
+// answer's order is one decision: a list that reshuffled between requests would
+// be one nobody could compare against the previous screen.
+func mergeItems(base, extra []Item) []Item {
+	merged := make([]Item, 0, len(base)+len(extra))
+	seen := make(map[Item]bool, len(base)+len(extra))
+	for _, source := range [][]Item{base, extra} {
+		for _, item := range source {
+			if seen[item] {
+				continue
+			}
+			seen[item] = true
+			merged = append(merged, item)
+		}
+	}
+	return merged
 }
 
 func (s *Service) checkPermissionNames(permissions []Permission) error {

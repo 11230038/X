@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"backend/internal/askquestions"
+	"backend/internal/authz"
 	"backend/internal/capability"
 	"backend/internal/chat"
 	"backend/internal/config"
@@ -46,6 +47,41 @@ func checkDrift(capabilities *capability.Registry, policy tool.Policy, registere
 	for _, name := range policy.Referenced() {
 		if !known[name] {
 			return fmt.Errorf("the tool policy names %s, which is not a registered tool", name)
+		}
+	}
+	return nil
+}
+
+// checkAuthzDrift refuses a learner's baseline that describes a different build.
+//
+// It is the same check as the tool and Tuning ones and it is about the same
+// pair of things written down twice: §5 says AUTHZ_LEARNER_CAPABILITIES and
+// AUTHZ_LEARNER_SURFACES must name "这个 build 注册过的", and the two files
+// that know what this build registered are the capability registry and
+// authz.Surfaces. A name in neither is refused here rather than absorbed,
+// because absorbing it is silent both ways — a capability nobody implemented
+// grants nothing, and a surface with no route grants nothing either, so a
+// deployment that misspelled one would start up and hand out a learner who
+// cannot reach what the operator believes they can.
+//
+// A profile name is read through authz.NormalizePreset, so the check is the
+// same reading the policy does rather than a second list of the three presets.
+func checkAuthzDrift(authzConfig config.AuthzConfig, capabilities *capability.Registry) error {
+	if normalized := authz.NormalizePreset(authzConfig.DefaultPreset); normalized != authzConfig.DefaultPreset {
+		return fmt.Errorf("AUTHZ_DEFAULT_PRESET must be one of standard, learner or custom")
+	}
+	registered := make(map[string]bool, len(capabilities.Names()))
+	for _, name := range capabilities.Names() {
+		registered[name] = true
+	}
+	for _, name := range authzConfig.LearnerCapabilities {
+		if !registered[name] {
+			return fmt.Errorf("AUTHZ_LEARNER_CAPABILITIES names %s, which is not a capability this build registers", name)
+		}
+	}
+	for _, name := range authzConfig.LearnerSurfaces {
+		if !authz.KnownSurface(name) {
+			return fmt.Errorf("AUTHZ_LEARNER_SURFACES names %s, which is not a surface this build serves", name)
 		}
 	}
 	return nil

@@ -102,6 +102,57 @@ func KnownKind(kind Kind) bool {
 	return false
 }
 
+// Surface names one user-visible area of the product — the places a screen can
+// be, as opposed to the capabilities that fill them.
+//
+// The set is closed here for the same reason the kinds are closed by the CHECK,
+// and §5 is explicit about what depends on it: AUTHZ_LEARNER_SURFACES must name
+// surfaces "这个 build 注册过的", so a deployment that wrote `AUTHZ_LEARNER_
+// SURFACES=calender` (or any other word that is not a route in router.go) has to
+// be refused at startup rather than silently narrow a learner to nothing. That
+// check can only exist if there is one list to check against, and this is it.
+//
+// The names are the route groups in internal/server/router.go, not the package
+// names, because a surface is what a person reaches: `notebook` is where the
+// question bank, the categories and the practice queue appear.
+const (
+	// SurfaceChat is talking to the assistant: the sessions and the socket.
+	SurfaceChat = "chat"
+	// SurfaceLibrary is the file library.
+	SurfaceLibrary = "library"
+	// SurfaceKnowledgeBase is the collections and what is searched in them.
+	SurfaceKnowledgeBase = "knowledge_base"
+	// SurfaceNotebook is the question bank and its categories.
+	SurfaceNotebook = "notebook"
+	// SurfacePractice is the review queue and the statistics over it.
+	SurfacePractice = "practice"
+	// SurfaceMastery is the paths and their insights.
+	SurfaceMastery = "mastery"
+	// SurfaceReading is the reader: materials, marks and the aids over them.
+	SurfaceReading = "reading"
+	// SurfaceDashboard is the one read that spans the domains.
+	SurfaceDashboard = "dashboard"
+	// SurfaceMemory is what the system has been told and has admitted.
+	SurfaceMemory = "memory"
+	// SurfaceSystem is what a build reports about itself: the capability list
+	// and the account's own profile.
+	SurfaceSystem = "system"
+	// SurfaceAdmin is the governance routes: grants, relationships, audits.
+	SurfaceAdmin = "admin"
+)
+
+// Surfaces is every area this build has a route for. It is the list §5's
+// startup check reads, so a surface that is added here and mounted on nothing
+// is a name a configuration may use and a request can never reach.
+var Surfaces = []string{
+	SurfaceChat, SurfaceLibrary, SurfaceKnowledgeBase, SurfaceNotebook,
+	SurfacePractice, SurfaceMastery, SurfaceReading, SurfaceDashboard,
+	SurfaceMemory, SurfaceSystem, SurfaceAdmin,
+}
+
+// KnownSurface reports whether a name is a surface registered by this build.
+func KnownSurface(id string) bool { return contains(Surfaces, id) }
+
 // The presets users.preset may carry. standard, learner and custom are what an
 // ordinary account starts from; they are not roles (§2.1), and PRD §23.1 第 7
 // 条 asked about the naming precisely so that they would not be read as one.
