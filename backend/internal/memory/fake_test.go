@@ -32,6 +32,7 @@ type fakeRepository struct {
 	tracesOfErr        error
 	activeFactErr      error
 	factErr            error
+	factsErr           error
 	duplicateGroupsErr error
 	createFactErr      error
 	saveFactErr        error
@@ -156,6 +157,9 @@ func (f *fakeRepository) Fact(_ context.Context, ownerID int64, factID string) (
 }
 
 func (f *fakeRepository) Facts(_ context.Context, query FactQuery) ([]Fact, error) {
+	if f.factsErr != nil {
+		return nil, f.factsErr
+	}
 	var found []Fact
 	for _, fact := range f.facts {
 		if fact.OwnerID != query.OwnerID {

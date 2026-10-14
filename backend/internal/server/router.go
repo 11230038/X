@@ -22,6 +22,7 @@ type Handlers struct {
 	Mastery       *handler.MasteryHandler
 	Reading       *handler.ReadingHandler
 	Dashboard     *handler.DashboardHandler
+	Memory        *handler.MemoryHandler
 	Capabilities  *handler.CapabilityHandler
 	WebSocket     *ws.Handler
 	TokenVerifier middleware.TokenVerifier
@@ -138,6 +139,33 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// The dashboard is the one read that spans the domains, and it sits beside
 	// the resources it reads rather than under any of them (COURSE-03).
 	authenticated.GET("/dashboard", handlers.Dashboard.Get)
+	// Memory is what the system has been told about an account and what it
+	// admitted from it (§2.14). Every route here is the caller's own memory: the
+	// account comes from the token and there is no owner in any body or query.
+	//
+	// The reads come first — the observations, the facts, one fact with the
+	// evidence chain it was admitted on — and then the writes. `POST /memory/facts`
+	// is the user's own way in (§2.7), and it is the only write here that takes a
+	// statement without naming a fact: the two routes beside it are the two batches,
+	// each of which is run as a preview and then as itself.
+	//
+	// There is no DELETE, and that is §2.14's sentence rather than an omission:
+	// MEM-02's three verbs are edit, retract and cleanup, so an id in a URL is never
+	// something this API removes. `POST /memory/facts/dedupe` and
+	// `/memory/facts/:factID/retract` are different routes at different depths, so
+	// the static `dedupe` does not shadow the parameter.
+	authenticated.GET("/memory/traces", handlers.Memory.Traces)
+	authenticated.GET("/memory/facts", handlers.Memory.Facts)
+	authenticated.GET("/memory/facts/:factID", handlers.Memory.Fact)
+	authenticated.PATCH("/memory/facts/:factID", handlers.Memory.EditFact)
+	authenticated.POST("/memory/facts", handlers.Memory.StateFact)
+	authenticated.POST("/memory/facts/:factID/retract", handlers.Memory.RetractFact)
+	authenticated.POST("/memory/facts/:factID/restore", handlers.Memory.RestoreFact)
+	authenticated.POST("/memory/facts/dedupe", handlers.Memory.Dedupe)
+	authenticated.POST("/memory/cleanup", handlers.Memory.Cleanup)
+	authenticated.GET("/memory/synthesis", handlers.Memory.Synthesis)
+	authenticated.GET("/memory/audit", handlers.Memory.Audit)
+	authenticated.GET("/memory/export", handlers.Memory.Export)
 	// The socket is authenticated by the middleware above before it is
 	// upgraded, so an unauthenticated request is answered as an HTTP request
 	// rather than becoming a connection (WS-06).

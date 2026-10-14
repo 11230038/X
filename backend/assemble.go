@@ -19,6 +19,7 @@ import (
 	"backend/internal/llm"
 	"backend/internal/mastery"
 	"backend/internal/masterypath"
+	"backend/internal/memory"
 	"backend/internal/notebook"
 	"backend/internal/parse"
 	"backend/internal/practice"
@@ -59,6 +60,11 @@ type ai struct {
 	// dashboard is the read that fans in over the domains above. It is built last
 	// because it is the one thing built from the others.
 	dashboard *dashboard.Service
+	// memory is what the system has been told about an account and what it
+	// admitted from it (§2.6). It is built from the database alone, because this
+	// version wires no surface to it yet: nothing in a turn observes anything, so
+	// what a person reaches through the routes is the whole of what is in here.
+	memory *memory.Service
 	// immersive is the immersion layer: the same service the turns resolve a
 	// selection through, kept here because the routes that open a material, save
 	// a position and run an extension are built beside the other handlers.
@@ -250,6 +256,15 @@ func assemble(
 		return nil, err
 	}
 
+	// Memory is built from the database and the deployment's six numbers (§5) and
+	// nothing else. It is built here, beside the other domains, even though this
+	// version joins none of them to it: the routes that read a person's memory
+	// are built beside every other route, over the same service.
+	memories, err := newMemory(cfg, db)
+	if err != nil {
+		return nil, err
+	}
+
 	// The dashboard reads three of the domains above and is read by nothing, so
 	// it is built last and from what is already assembled. Its one number is the
 	// deployment's (§5): how many entries a category carries.
@@ -267,7 +282,7 @@ func assemble(
 		turns: runner, socket: socket, capabilities: capabilities,
 		materials: materials, indexing: worker,
 		questions: questions, reviews: reviews, mastery: paths.service,
-		dashboard: overview, immersive: immersive,
+		dashboard: overview, immersive: immersive, memory: memories,
 	}, nil
 }
 

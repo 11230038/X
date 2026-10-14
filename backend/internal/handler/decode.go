@@ -34,6 +34,11 @@ const (
 	// one. A note is a sentence or two, so this is generous; what it must not be
 	// is unbounded, because a note is stored.
 	maxReadingRequestBytes int64 = 8 << 10
+	// The largest memory body carries a fact's statement and the scope it belongs
+	// to, or a cleanup's cutoff and the filters narrowing it. A fact is a sentence
+	// somebody wrote about themselves, so this is generous for the same reason a
+	// note's bound is: it is stored.
+	maxMemoryRequestBytes int64 = 8 << 10
 	// The largest question import is a file of questions, one to a line, so it is
 	// the one body here that is not an object. It is measured in questions rather
 	// than in bytes — a question is a few hundred bytes, so this is a file of some
