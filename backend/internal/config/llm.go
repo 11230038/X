@@ -22,7 +22,15 @@ type LLMConfig struct {
 	Provider string
 	BaseURL  string
 	Model    string
-	APIKey   string
+	// APIKeys is the pool: one or more credentials for the same provider, used in
+	// turn (§17.3). The key is a list rather than a single secret because a
+	// provider's rate limit is per credential, so the second key is what keeps a
+	// busy deployment answering.
+	APIKeys []string
+	// KeyFailureThreshold is how many consecutive rate limits rest one key, and
+	// KeyCooldown is how long it rests.
+	KeyFailureThreshold int
+	KeyCooldown         time.Duration
 	// TaskModel serves the short internal calls that the user never explicitly
 	// asked for, such as naming a session (CFG-02).
 	TaskModel     string
@@ -30,6 +38,13 @@ type LLMConfig struct {
 	Timeout       time.Duration
 	Capabilities  map[string]CapabilityParams
 }
+
+// minAPIKeyLength is the shortest thing this service will accept as a provider
+// key. It is a length rather than a pattern: providers differ in what their keys
+// look like, and a deployment that pasted a placeholder — or a key with the
+// middle missing — is caught by being obviously too short rather than by this
+// service inventing a shape to match.
+const minAPIKeyLength = 16
 
 // CapabilityParams is the CFG-01 tuning for a single capability.
 type CapabilityParams struct {
@@ -47,8 +62,9 @@ type StageParams struct {
 	MaxTokens int
 }
 
-// Validate checks the model provider settings. The API key is only checked for
-// presence here and is never echoed back in a failure message.
+// Validate checks the model provider settings. The keys are checked for shape
+// and never echoed back: a failure message is read in places a secret should not
+// reach, so it names the position of the key that is wrong and not the key.
 func (c LLMConfig) Validate() error {
 	if c.Provider != providerDeepSeek {
 		return fmt.Errorf("LLM_PROVIDER must be %s", providerDeepSeek)
@@ -56,14 +72,25 @@ func (c LLMConfig) Validate() error {
 	if err := validateBaseURL(c.BaseURL); err != nil {
 		return fmt.Errorf("invalid LLM_BASE_URL: %w", err)
 	}
-	for key, value := range map[string]string{
-		"LLM_MODEL":      c.Model,
-		"LLM_API_KEY":    c.APIKey,
-		"LLM_TASK_MODEL": c.TaskModel,
+	// An ordered list rather than a map, so that a file with two things wrong
+	// reports the same one every time: which key is named is a fact about the
+	// file, and a map would make it a fact about the run.
+	for _, entry := range []struct{ key, value string }{
+		{key: "LLM_MODEL", value: c.Model},
+		{key: "LLM_TASK_MODEL", value: c.TaskModel},
 	} {
-		if strings.TrimSpace(value) == "" {
-			return fmt.Errorf("%s must not be empty", key)
+		if strings.TrimSpace(entry.value) == "" {
+			return fmt.Errorf("%s must not be empty", entry.key)
 		}
+	}
+	if err := validateAPIKeys(c.APIKeys); err != nil {
+		return err
+	}
+	if c.KeyFailureThreshold < 1 {
+		return fmt.Errorf("LLM_KEY_FAILURE_THRESHOLD must be at least 1")
+	}
+	if c.KeyCooldown <= 0 {
+		return fmt.Errorf("LLM_KEY_COOLDOWN must be a positive duration")
 	}
 	if c.Timeout <= 0 {
 		return fmt.Errorf("LLM_TIMEOUT must be a positive duration")
@@ -72,6 +99,26 @@ func (c LLMConfig) Validate() error {
 		return fmt.Errorf("LLM_TASK_MAX_TOKENS must be a positive integer")
 	}
 	return validateCapabilityParams(c.Capabilities)
+}
+
+// validateAPIKeys checks the shape of the pool.
+//
+// An entry that is empty is named as empty rather than as too short: a trailing
+// comma or two commas in a row is a list somebody was still editing, and saying
+// so is more use than "shorter than 16 characters", which is also true.
+func validateAPIKeys(keys []string) error {
+	if len(keys) == 0 {
+		return fmt.Errorf("LLM_API_KEYS must list at least one key")
+	}
+	for i, key := range keys {
+		switch {
+		case key == "":
+			return fmt.Errorf("LLM_API_KEYS: the key at position %d is empty", i+1)
+		case len(key) < minAPIKeyLength:
+			return fmt.Errorf("LLM_API_KEYS: the key at position %d is shorter than %d characters", i+1, minAPIKeyLength)
+		}
+	}
+	return nil
 }
 
 func validateCapabilityParams(capabilities map[string]CapabilityParams) error {
@@ -116,17 +163,29 @@ func loadLLMConfig(values map[string]string) (LLMConfig, error) {
 	if err != nil {
 		return LLMConfig{}, err
 	}
+	keyThreshold, err := parsePositiveInt(values, "LLM_KEY_FAILURE_THRESHOLD")
+	if err != nil {
+		return LLMConfig{}, err
+	}
+	keyCooldown, err := parsePositiveDuration(values, "LLM_KEY_COOLDOWN")
+	if err != nil {
+		return LLMConfig{}, err
+	}
 	return LLMConfig{
 		Provider: strings.TrimSpace(values["LLM_PROVIDER"]),
 		// A trailing slash would double up when the client appends its path.
 		BaseURL: strings.TrimSuffix(strings.TrimSpace(values["LLM_BASE_URL"]), "/"),
 		Model:   strings.TrimSpace(values["LLM_MODEL"]),
-		// The key is used verbatim: trimming it would silently change the secret.
-		APIKey:        values["LLM_API_KEY"],
-		TaskModel:     strings.TrimSpace(values["LLM_TASK_MODEL"]),
-		TaskMaxTokens: taskMaxTokens,
-		Timeout:       timeout,
-		Capabilities:  capabilities,
+		// The keys keep their own characters — parseList trims the whitespace
+		// around a separator rather than inside a secret, which is the only way a
+		// comma-separated list can be written and read back.
+		APIKeys:             parseList(values["LLM_API_KEYS"]),
+		KeyFailureThreshold: keyThreshold,
+		KeyCooldown:         keyCooldown,
+		TaskModel:           strings.TrimSpace(values["LLM_TASK_MODEL"]),
+		TaskMaxTokens:       taskMaxTokens,
+		Timeout:             timeout,
+		Capabilities:        capabilities,
 	}, nil
 }
 

@@ -51,10 +51,17 @@ func (e *HTTPError) Retryable() bool {
 	return e.StatusCode == http.StatusTooManyRequests || e.StatusCode >= 500
 }
 
+// ErrNoKeySource reports a client built without anything to authenticate with.
+//
+// It is refused at construction rather than at the first call: a client with no
+// keys sends unauthenticated requests, and the mistake would arrive as a
+// provider error in the middle of somebody's turn.
+var ErrNoKeySource = errors.New("llm: a client needs a key source")
+
 // Client is an OpenAI-compatible chat completions client.
 type Client struct {
 	baseURL string
-	apiKey  string
+	keys    KeySource
 	http    *http.Client
 }
 
@@ -63,18 +70,30 @@ var _ Provider = (*Client)(nil)
 // NewClient builds a client for baseURL. timeout bounds how long a call may
 // take to start responding, not how long the answer may take to stream: a long
 // answer is bounded by the caller's context instead.
-func NewClient(baseURL, apiKey string, timeout time.Duration) *Client {
+//
+// The credentials come in as a source rather than as a key, so that one process
+// can hold several and rotate them (§17.3) without this package knowing that
+// anybody keeps a pool: what it knows is that somebody can give it the next key
+// and wants to hear how the provider treated it.
+func NewClient(baseURL string, keys KeySource, timeout time.Duration) (*Client, error) {
+	if keys == nil {
+		return nil, ErrNoKeySource
+	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.ResponseHeaderTimeout = timeout
 	return &Client{
 		baseURL: baseURL,
-		apiKey:  apiKey,
+		keys:    keys,
 		http:    &http.Client{Transport: transport},
-	}
+	}, nil
 }
 
 // Stream runs one chat completion and assembles the streamed fragments.
 func (c *Client) Stream(ctx context.Context, req Request, onDelta func(Delta) error) (Response, error) {
+	// One key per call, taken here rather than remembered on the client: a client
+	// that held a key would keep using a credential the pool has since rested,
+	// which is precisely the state the pool exists to leave behind.
+	key := c.keys.Next()
 	body, err := json.Marshal(newWireRequest(req))
 	if err != nil {
 		return Response{}, fmt.Errorf("llm: encode request")
@@ -86,10 +105,14 @@ func (c *Client) Stream(ctx context.Context, req Request, onDelta func(Delta) er
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+key)
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
+		// The call never arrived, so nothing is known about the key: it is neither
+		// credited nor blamed. Resting a credential because the network failed
+		// would take a working key out of service for a fault that had nothing to
+		// do with it, and the retry would then have one fewer to choose from.
 		return Response{}, wrapContext(ctx, fmt.Errorf("llm: call provider: %w", err))
 	}
 	defer func() {
@@ -97,8 +120,20 @@ func (c *Client) Stream(ctx context.Context, req Request, onDelta func(Delta) er
 	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return Response{}, c.readHTTPError(resp)
+		httpErr := readHTTPError(resp, key)
+		// Only a rate limit is about the key. A provider that is unwell (a 500) is
+		// a fault this pool cannot help with, and a key the provider rejects (a 401)
+		// is a configuration error that resting would only disguise as a temporary
+		// one — and would then hide for as long as the rest lasts.
+		if httpErr.StatusCode == http.StatusTooManyRequests {
+			c.keys.RateLimited(key)
+		}
+		return Response{}, httpErr
 	}
+	// A 2xx is the provider's verdict on the credential, and it is taken before
+	// the answer is read: how long the stream takes and whether it ends properly
+	// are facts about the answer rather than about the key that asked for it.
+	c.keys.Succeeded(key)
 	return c.consume(ctx, resp.Body, onDelta)
 }
 
@@ -170,12 +205,15 @@ func wrapContext(ctx context.Context, err error) error {
 }
 
 // readHTTPError turns a failed response into the error the rest of the service
-// reads, with this client's own key taken out of it.
+// reads, with the key this call went out with taken out of it.
 //
 // The text is the provider's, and providers differ in how much of the request
 // they repeat back: one that echoes the key would otherwise put it in this
 // service's logs, which is the one place configuration says it must never be.
-func (c *Client) readHTTPError(resp *http.Response) error {
+// The key that travels in is the one that was sent rather than every key the
+// pool holds — a key this call did not use cannot be in the provider's answer,
+// and reading the pool's list here would mean this package knew about the pool.
+func readHTTPError(resp *http.Response, sent string) *HTTPError {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	if err != nil {
 		return &HTTPError{StatusCode: resp.StatusCode}
@@ -194,7 +232,7 @@ func (c *Client) readHTTPError(resp *http.Response) error {
 	return &HTTPError{
 		StatusCode: resp.StatusCode,
 		Code:       payload.Error.Code,
-		Message:    redact(payload.Error.Message, c.apiKey),
+		Message:    redact(payload.Error.Message, sent),
 	}
 }
 

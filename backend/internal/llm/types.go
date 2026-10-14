@@ -91,3 +91,27 @@ type Provider interface {
 	// cancellation apart from a provider failure.
 	Stream(ctx context.Context, req Request, onDelta func(Delta) error) (Response, error)
 }
+
+// KeySource is where a client takes the credential for each call, and where it
+// says what became of the one it used.
+//
+// It is declared here, on the consuming side, rather than beside the pool that
+// implements it (§1.2): this package does not know a pool exists. It knows two
+// things — how to ask for the next key, and that somebody wants to hear how the
+// provider treated it — and that is the whole of the seam.
+//
+// The three methods are narrow enough that a type importing nothing but the
+// standard library can implement them without naming anything from here. That
+// is why a key travels back as the string it was handed out as rather than as a
+// handle: the other way round, this interface would have to name a type of the
+// pool's, and the pool would have to import this package to satisfy it.
+type KeySource interface {
+	// Next returns the key to send with one call.
+	Next() string
+	// Succeeded reports that the call made with key came back. It is only ever
+	// called when the provider answered: a call that never arrived says nothing
+	// about a credential either way.
+	Succeeded(key string)
+	// RateLimited reports that the provider refused key for being used too fast.
+	RateLimited(key string)
+}

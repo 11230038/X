@@ -15,8 +15,11 @@ type EmbeddingConfig struct {
 	// it, the same way the chat client appends /chat/completions.
 	BaseURL string
 	Model   string
-	// APIKey sits at the same level as LLM_API_KEY and gets the same treatment:
-	// never echoed, never logged, never inside an error message.
+	// APIKey sits at the same level as LLM_API_KEYS and gets the same treatment:
+	// never echoed, never logged, never inside an error message. It stays a single
+	// key rather than a pool: §17.3 is about the provider that serves every
+	// conversation, and the embedding provider is called once per document rather
+	// than once per person.
 	APIKey string
 	// Dimension is the width of document_chunks.embedding. It is not a free
 	// choice. The schema pins the width in VECTOR(N), vectors from two models

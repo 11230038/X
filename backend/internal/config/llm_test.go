@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -8,13 +9,15 @@ import (
 
 func validLLMConfig() LLMConfig {
 	return LLMConfig{
-		Provider:      "deepseek",
-		BaseURL:       "https://api.deepseek.com",
-		Model:         "deepseek-chat",
-		APIKey:        testLLMAPIKey,
-		TaskModel:     "deepseek-chat",
-		TaskMaxTokens: 512,
-		Timeout:       2 * time.Minute,
+		Provider:            "deepseek",
+		BaseURL:             "https://api.deepseek.com",
+		Model:               "deepseek-chat",
+		APIKeys:             []string{testLLMAPIKey},
+		KeyFailureThreshold: 3,
+		KeyCooldown:         time.Minute,
+		TaskModel:           "deepseek-chat",
+		TaskMaxTokens:       512,
+		Timeout:             2 * time.Minute,
 		Capabilities: map[string]CapabilityParams{
 			"chat": {
 				Temperature:         0.7,
@@ -52,7 +55,11 @@ func TestLLMConfigValidateRejectsInvalidSettings(t *testing.T) {
 		{name: "base URL without a host", mutate: func(c *LLMConfig) { c.BaseURL = "https://" }},
 		{name: "non-HTTP scheme", mutate: func(c *LLMConfig) { c.BaseURL = "ftp://api.deepseek.com" }},
 		{name: "blank model", mutate: func(c *LLMConfig) { c.Model = "  " }},
-		{name: "blank API key", mutate: func(c *LLMConfig) { c.APIKey = "" }},
+		{name: "no keys at all", mutate: func(c *LLMConfig) { c.APIKeys = nil }},
+		{name: "an empty entry in the list", mutate: func(c *LLMConfig) { c.APIKeys = []string{testLLMAPIKey, ""} }},
+		{name: "a key that is too short", mutate: func(c *LLMConfig) { c.APIKeys = []string{"too-short"} }},
+		{name: "zero failure threshold", mutate: func(c *LLMConfig) { c.KeyFailureThreshold = 0 }},
+		{name: "zero cooldown", mutate: func(c *LLMConfig) { c.KeyCooldown = 0 }},
 		{name: "blank task model", mutate: func(c *LLMConfig) { c.TaskModel = "" }},
 		{name: "zero timeout", mutate: func(c *LLMConfig) { c.Timeout = 0 }},
 		{name: "zero task max tokens", mutate: func(c *LLMConfig) { c.TaskMaxTokens = 0 }},
@@ -141,6 +148,77 @@ func TestLoadRejectsMalformedCapabilityParameters(t *testing.T) {
 
 			if _, err := Load(writeDotenv(t, values)); err == nil {
 				t.Fatalf("Load() error = nil, want an error for %s", tt.name)
+			}
+		})
+	}
+}
+
+// The keys are a list, and the list is what a deployment edits when it adds a
+// second credential: one key behaves exactly as it did before, and two are read
+// in the order they were written.
+func TestLoadParsesTheKeyList(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		value string
+		want  []string
+	}{
+		{name: "one key", value: testLLMAPIKey, want: []string{testLLMAPIKey}},
+		{name: "two keys", value: "first-unit-test-key,second-unit-test-key",
+			want: []string{"first-unit-test-key", "second-unit-test-key"}},
+		// The whitespace around a separator is the separator's, not the secret's:
+		// `a, b` is how a person writes a list, and refusing it would be refusing
+		// the ordinary spelling.
+		{name: "two keys with a space after the comma", value: "first-unit-test-key, second-unit-test-key",
+			want: []string{"first-unit-test-key", "second-unit-test-key"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			values := validValues()
+			values["LLM_API_KEYS"] = tt.value
+
+			cfg, err := Load(writeDotenv(t, values))
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if !slices.Equal(cfg.LLM.APIKeys, tt.want) {
+				t.Errorf("APIKeys = %v, want %v", cfg.LLM.APIKeys, tt.want)
+			}
+			if cfg.LLM.KeyFailureThreshold != 3 {
+				t.Errorf("KeyFailureThreshold = %d, want 3", cfg.LLM.KeyFailureThreshold)
+			}
+			if cfg.LLM.KeyCooldown != time.Minute {
+				t.Errorf("KeyCooldown = %v, want 1m", cfg.LLM.KeyCooldown)
+			}
+		})
+	}
+}
+
+// A list this service cannot use stops startup, and the failure says which
+// position is wrong and never what is at it.
+func TestLoadRefusesAKeyListItCannotUse(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "nothing at all", value: " ", want: "at least one key"},
+		// A trailing comma is a list somebody was still editing. Reading it as one
+		// key would be answering a question the file did not ask.
+		{name: "a trailing comma", value: testLLMAPIKey + ",", want: "position 2"},
+		{name: "a stub key", value: testLLMAPIKey + ",sk-live-stub", want: "position 2"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			values := validValues()
+			values["LLM_API_KEYS"] = tt.value
+
+			_, err := Load(writeDotenv(t, values))
+			if err == nil {
+				t.Fatalf("Load() error = nil, want an error for %s", tt.name)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %q, want it to carry %q", err, tt.want)
+			}
+			if strings.Contains(err.Error(), "sk-live") {
+				t.Errorf("the error carries a key: %s", err)
 			}
 		})
 	}

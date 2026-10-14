@@ -77,7 +77,7 @@ docker start seekdb
 - seekdb：`DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`、`DB_CHARSET`、`DB_COLLATION`、`DB_TLS`、`DB_TIMEZONE`、`DB_PING_TIMEOUT`
 - 连接池：`DB_MAX_OPEN_CONNS`、`DB_MAX_IDLE_CONNS`、`DB_CONN_MAX_LIFETIME`、`DB_CONN_MAX_IDLE_TIME`
 - 认证：`AUTH_JWT_SECRET`、`AUTH_JWT_ISSUER`、`AUTH_TOKEN_TTL`
-- 对话模型：`LLM_PROVIDER`、`LLM_BASE_URL`、`LLM_MODEL`、`LLM_API_KEY`、`LLM_TIMEOUT`、`LLM_TASK_MODEL`、`LLM_TASK_MAX_TOKENS`、`LLM_CAPABILITY_CONFIG_JSON`
+- 对话模型：`LLM_PROVIDER`、`LLM_BASE_URL`、`LLM_MODEL`、`LLM_API_KEYS`、`LLM_KEY_FAILURE_THRESHOLD`、`LLM_KEY_COOLDOWN`、`LLM_TIMEOUT`、`LLM_TASK_MODEL`、`LLM_TASK_MAX_TOKENS`、`LLM_CAPABILITY_CONFIG_JSON`
 - 一轮的边界：`TURN_INPUT_TIMEOUT`、`TURN_MAX_ROUNDS`、`TURN_MAX_ATTACHMENT_BYTES`
 - 嵌入模型（V2）：`EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_API_KEY`、`EMBEDDING_DIMENSION`、`EMBEDDING_TIMEOUT`、`EMBEDDING_BATCH_SIZE`
 - 解析（V2）：`PARSER_DEFAULT_ENGINE`、`PARSER_DOCLING_BASE_URL`、`PARSER_TIMEOUT`
@@ -92,7 +92,7 @@ docker start seekdb
 
 V4 的两个新能力（`mastery_path` / `immersive_reading`）**都只走 `responding` 这一个阶段**，它们在 `LLM_CAPABILITY_CONFIG_JSON` 里各有一条自己的条目，而这两条只声明 `responding`——与 `chat` 同名，所以按阶段名取 `max_tokens` 的查找命中；`immersive_reading` 的 `context_budget_tokens` 比其他能力大一档（48000），因为一轮阅读动辄带进一整段材料。四个 `MASTERY_*` 与一个 `DASHBOARD_RECENT_LIMIT` 是产品参数（同时推进几条路径、连对几次升档、一次取多少条），另外九个是阅读与 Memory 的规模与阈值。`MEMORY_SENSITIVE_KINDS` 是**唯一一个逗号分隔的集合**：它点的是部署**不信任**的 kind（默认 `preference,health,relationship,credential`），列进去的观察永不自动成为事实，但用户自己写下的事实不受它影响。`MEMORY_MAX_FACTS_PER_SURFACE` 截的是整份综合而不是四个列表各自（见 `V4设计方案.md` §0.3 第 4 条）。
 
-`LLM_API_KEY`、`EMBEDDING_API_KEY` 与 `AUTH_JWT_SECRET` 同级：不写日志、不进错误信息、不进响应体，占位值不替换会让服务停在启动阶段。
+`LLM_API_KEYS`、`EMBEDDING_API_KEY` 与 `AUTH_JWT_SECRET` 同级：不写日志、不进错误信息、不进响应体，占位值不替换会让服务停在启动阶段。
 
 `AUTH_JWT_SECRET` 至少 32 字节，必须使用随机值且不得提交：
 

@@ -12,6 +12,7 @@ import (
 	"backend/internal/config"
 	"backend/internal/dashboard"
 	"backend/internal/kb"
+	"backend/internal/keypool"
 	"backend/internal/llm"
 	"backend/internal/mastery"
 	"backend/internal/memory"
@@ -205,8 +206,25 @@ func assemble(
 	// provider and it is inside it, rather than because each caller remembered
 	// to write a row — a caller that forgets does not fail, it just makes the
 	// usage numbers quietly small.
+	// The credentials arrive as a pool rather than as a key: one provider with
+	// several keys is what keeps a rate-limited credential from slowing every
+	// call (§17.3). The pool is built here and handed over as the client's key
+	// source, and that handover is also the type check — llm declares what it
+	// needs and knows nothing about this type (§1.2).
+	keys, err := keypool.New(keypool.Options{
+		Keys:             cfg.LLM.APIKeys,
+		FailureThreshold: cfg.LLM.KeyFailureThreshold,
+		Cooldown:         cfg.LLM.KeyCooldown,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize the key pool: %w", err)
+	}
+	client, err := llm.NewClient(cfg.LLM.BaseURL, keys, cfg.LLM.Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("initialize the model client: %w", err)
+	}
 	provider, err := usage.New(
-		llm.NewClient(cfg.LLM.BaseURL, cfg.LLM.APIKey, cfg.LLM.Timeout),
+		client,
 		usage.NewGORMStore(db),
 		usage.Options{Provider: cfg.LLM.Provider, Logger: logger},
 	)

@@ -27,6 +27,25 @@ import (
 	"backend/internal/notebook"
 )
 
+// judgeKey is the credential these cases call with. It is a key *source* rather
+// than a key because that is what the client takes (§2.11): what a pool does
+// with several is internal/keypool's business, and a judge only ever needs one.
+type judgeKey string
+
+func (k judgeKey) Next() string       { return string(k) }
+func (k judgeKey) Succeeded(string)   {}
+func (k judgeKey) RateLimited(string) {}
+
+// newJudgeClient is the provider these cases hand to the judge.
+func newJudgeClient(t *testing.T, baseURL string) llm.Provider {
+	t.Helper()
+	client, err := llm.NewClient(baseURL, judgeKey("judge-test-key"), 5*time.Second)
+	if err != nil {
+		t.Fatalf("llm.NewClient() error = %v", err)
+	}
+	return client
+}
+
 // judgeRequest is the parts of the wire request this file asserts on.
 type judgeRequest struct {
 	Model    string `json:"model"`
@@ -103,7 +122,7 @@ func scriptedJudge(t *testing.T, replies ...string) (*Judge, *judgeCalls) {
 	t.Cleanup(server.Close)
 
 	judge, err := NewJudge(
-		llm.NewClient(server.URL, "judge-test-key", 5*time.Second), "conversation-model", 512)
+		newJudgeClient(t, server.URL), "conversation-model", 512)
 	if err != nil {
 		t.Fatalf("NewJudge() error = %v", err)
 	}
@@ -405,7 +424,7 @@ func TestAProviderFailureIsRetryableAndCancellationIsNot(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	judge, err := NewJudge(
-		llm.NewClient(server.URL, "judge-test-key", 5*time.Second), "conversation-model", 512)
+		newJudgeClient(t, server.URL), "conversation-model", 512)
 	if err != nil {
 		t.Fatalf("NewJudge() error = %v", err)
 	}
