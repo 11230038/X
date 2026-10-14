@@ -171,7 +171,21 @@ func (t *SaveQuestionTool) Definition() Definition {
 		Name: SaveQuestionName,
 		Description: "把一道题存进题库。每道题单独调用一次，题目会立刻出现在用户面前，" +
 			"所以不要在正文里再重复一遍题目内容。题目写得不合格会退回给你，改好再存一次。",
-		Parameters: json.RawMessage(`{
+		Parameters: questionParameters(false),
+	}
+}
+
+// questionSchemaTemplate is the argument schema of the two tools that write a
+// question: save_question, and mastery_question, which is that same call made
+// from inside a mastery path (§2.5).
+//
+// The two differ by exactly one property — the knowledge point a mastery
+// question is filed against — and that is why this is a template with two slots
+// rather than two schemas. The risk being avoided is not the typing, it is the
+// drift: a rule that bound one tool and not the other would let the two write
+// rows the other refuses, and the bank would then depend on which tool wrote a
+// question rather than on the question.
+const questionSchemaTemplate = `{
 			"type": "object",
 			"properties": {
 				"question": {
@@ -222,12 +236,31 @@ func (t *SaveQuestionTool) Definition() Definition {
 					"type": "array",
 					"items": {"type": "string"},
 					"description": "分类名，如 \"第三章\"，按名字归档"
-				}
+				}%s
 			},
-			"required": ["question", "question_type", "correct_answer", "explanation"],
+			"required": ["question", "question_type", "correct_answer", "explanation"%s],
 			"additionalProperties": false
-		}`),
+		}`
+
+// questionParameters returns that schema, with the mastery coordinate added when
+// the caller is the mastery tool.
+//
+// The coordinate's description says "id and not name" in as many words, because
+// that is the one part of the call the model can get wrong without noticing: a
+// name would be a string that looks like a coordinate, and the domain would
+// refuse it as a knowledge point that is not in the path — costing a round trip
+// rather than a wrong row, but costing one either way.
+func questionParameters(withKnowledgePoint bool) json.RawMessage {
+	property, required := "", ""
+	if withKnowledgePoint {
+		property = `,
+				"knowledge_point_id": {
+					"type": "string",
+					"description": "这道题考的那条知识点的 id（mastery_state 里 kp_ 开头的那一列），不是它的名字"
+				}`
+		required = `, "knowledge_point_id"`
 	}
+	return json.RawMessage(fmt.Sprintf(questionSchemaTemplate, property, required))
 }
 
 // Invoke writes the question down.
@@ -256,24 +289,50 @@ func (t *SaveQuestionTool) Invoke(ctx context.Context, call Call) (Result, error
 	}, nil
 }
 
+// questionArguments is one call's arguments, as both tools that write a question
+// take them.
+//
+// It is a superset: save_question reads every field but KnowledgePointID, and
+// mastery_question requires that one as well. The two share the type and the
+// validation below rather than each reading their own copy, because the question
+// they produce has to be the same question — the same row, the same judging, the
+// same bank (§2.5).
+type questionArguments struct {
+	Question        string   `json:"question"`
+	QuestionType    string   `json:"question_type"`
+	Options         []option `json:"options"`
+	CorrectAnswer   string   `json:"correct_answer"`
+	Explanation     string   `json:"explanation"`
+	Difficulty      string   `json:"difficulty"`
+	SourceLabel     string   `json:"source_label"`
+	KnowledgePoints []string `json:"knowledge_points"`
+	Categories      []string `json:"categories"`
+	// KnowledgePointID is the mastery coordinate. It is empty for save_question,
+	// which is the whole of the difference between the two calls.
+	KnowledgePointID string `json:"knowledge_point_id"`
+}
+
+// readQuestionArguments unmarshals one call's arguments.
+func readQuestionArguments(arguments json.RawMessage) (questionArguments, error) {
+	var args questionArguments
+	if err := json.Unmarshal(arguments, &args); err != nil {
+		return questionArguments{}, fmt.Errorf("tool: save_question arguments are not a JSON object: %w", err)
+	}
+	return args, nil
+}
+
 // parseQuestion reads one call's arguments as a question the bank can store, or
 // refuses with a sentence that says which part to change.
 func parseQuestion(arguments json.RawMessage, carried []Carried) (notebook.Question, error) {
-	var args struct {
-		Question        string   `json:"question"`
-		QuestionType    string   `json:"question_type"`
-		Options         []option `json:"options"`
-		CorrectAnswer   string   `json:"correct_answer"`
-		Explanation     string   `json:"explanation"`
-		Difficulty      string   `json:"difficulty"`
-		SourceLabel     string   `json:"source_label"`
-		KnowledgePoints []string `json:"knowledge_points"`
-		Categories      []string `json:"categories"`
+	args, err := readQuestionArguments(arguments)
+	if err != nil {
+		return notebook.Question{}, err
 	}
-	if err := json.Unmarshal(arguments, &args); err != nil {
-		return notebook.Question{}, fmt.Errorf("tool: save_question arguments are not a JSON object: %w", err)
-	}
+	return questionFrom(args, carried)
+}
 
+// questionFrom validates the fields both question-writing tools share.
+func questionFrom(args questionArguments, carried []Carried) (notebook.Question, error) {
 	text := strings.TrimSpace(args.Question)
 	if runes := utf8.RuneCountInString(text); runes < MinQuestionRunes {
 		return notebook.Question{}, &Refusal{Note: fmt.Sprintf(
