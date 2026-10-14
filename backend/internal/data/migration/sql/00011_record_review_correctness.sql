@@ -33,10 +33,18 @@ ALTER TABLE practice_review_events
 -- document is the literal true, and JSON_UNQUOTE is what turns that literal into
 -- the text 'true'.
 --
--- The WHERE clause is the whole safety of this statement. It is what leaves a
--- skipped review's is_correct NULL, which is the one outcome that must not be
--- got wrong here: backfill it and "unanswered" becomes indistinguishable from
--- "answered wrong" for every row that already exists, permanently and silently.
+-- The WHERE clause narrows the statement to the rows it has anything to say
+-- about, and on this engine that is all it does today: the assignment's own NULL
+-- propagation is what leaves a skipped review NULL, because `NULL = 'true'` is
+-- NULL rather than FALSE, so a row the WHERE excludes would be set to NULL by
+-- the UPDATE anyway. This was measured rather than reasoned (the backfill case in
+-- backfill_test.go, and a direct probe of the comparison), and the comment says
+-- so because the opposite is the natural thing to assume.
+--
+-- Keeping it is still right, for two reasons that do not depend on that: it is
+-- the guard that starts working the moment the column gains a DEFAULT, and it
+-- keeps a deployment's whole history from being rewritten to the value it
+-- already held.
 UPDATE practice_review_events
 SET is_correct = (JSON_UNQUOTE(JSON_EXTRACT(outcome_json, '$.judgment.is_correct')) = 'true')
 WHERE JSON_EXTRACT(outcome_json, '$.judgment.is_correct') IS NOT NULL;
