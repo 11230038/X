@@ -1,8 +1,8 @@
 // Package config reads the service's settings from its dotenv file. Each section
 // of settings lives in the file named after it — http.go, upload.go, auth.go,
 // database.go, llm.go, embedding.go, parse.go, kb.go, turn.go, practice.go,
-// mastery.go, dashboard.go, reading.go, memory.go, authz.go, audit.go, usage.go
-// — holding that section's struct, the loader that fills it, and the Validate
+// mastery.go, dashboard.go, reading.go, memory.go, authz.go, audit.go, usage.go,
+// limit.go — holding that section's struct, the loader that fills it, and the Validate
 // that guards it. This file is the composition: what the whole configuration is,
 // how the file is read into it, and the order the sections are checked in.
 package config
@@ -98,6 +98,10 @@ var requiredKeys = []string{
 	"AUDIT_RETENTION_DAYS",
 	"AUDIT_MAX_PAGE_SIZE",
 	"USAGE_RETENTION_DAYS",
+	"RATE_LIMIT_MODEL_PER_MINUTE",
+	"RATE_LIMIT_RETRIEVAL_PER_MINUTE",
+	"RATE_LIMIT_UPLOAD_PER_MINUTE",
+	"RATE_LIMIT_BURST",
 }
 
 // Config contains all settings required to run the service.
@@ -122,6 +126,7 @@ type Config struct {
 	Authz           AuthzConfig
 	Audit           AuditConfig
 	Usage           UsageConfig
+	Limit           LimitConfig
 }
 
 // Load reads configuration exclusively from the dotenv file at path. The path
@@ -208,6 +213,10 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	limit, err := loadLimitConfig(values)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
 		HTTPAddr:        strings.TrimSpace(values["HTTP_ADDR"]),
@@ -230,6 +239,7 @@ func Load(path string) (Config, error) {
 		Authz:           authorization,
 		Audit:           audit,
 		Usage:           usage,
+		Limit:           limit,
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -298,5 +308,8 @@ func (c Config) Validate() error {
 	if err := c.Audit.Validate(); err != nil {
 		return err
 	}
-	return c.Usage.Validate()
+	if err := c.Usage.Validate(); err != nil {
+		return err
+	}
+	return c.Limit.Validate()
 }

@@ -6,6 +6,7 @@ import (
 
 	"backend/internal/authz"
 	"backend/internal/handler"
+	"backend/internal/limit"
 	"backend/internal/middleware"
 	"backend/internal/ws"
 	"github.com/gin-gonic/gin"
@@ -45,6 +46,12 @@ type Handlers struct {
 	// — which is what every test in this repository wants, since what they are
 	// about is whether a request is refused (§2.16).
 	Refusals middleware.Recorder
+	// Limiter bounds how fast one account may do the three kinds of work that
+	// cost something outside this process (§2.10). It is mounted on routes
+	// rather than on a group, so a router built without one answers those
+	// routes' callers with a 500 rather than serving them unmeasured — the same
+	// direction the authorizer's absence takes.
+	Limiter middleware.Limiter
 }
 
 // learnerInPath is the account a guardian route names in its path, for the
@@ -109,6 +116,18 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	reach := func(surface string) *gin.RouterGroup {
 		return reachAs(middleware.Surface(surface))
 	}
+	// rateLimit is the third gate, and it is applied one route at a time rather
+	// than to a group (§2.10). The classes cut across the surface groups — the
+	// socket is in chat, a model call is in practice and in reading, a search is
+	// in the knowledge base — and any group-level limit would also bound the
+	// routes beside them that cost nothing outside this process. A user
+	// refreshing a dashboard must not be held back by another user's upload, so
+	// what is limited is exactly the three kinds of work that leave the machine:
+	// a call to the chat provider, a call to the embedding provider, and bytes
+	// written to disk. Where each of those happens is written at the route.
+	rateLimit := func(action limit.Action) gin.HandlerFunc {
+		return middleware.RateLimit(handlers.Limiter, action, logger)
+	}
 	// What this account is, and what it may reach, before anything else: it is
 	// mounted without a surface so that an account restricted out of every area
 	// can still ask why, and it is what a client reads to draw the refusals it
@@ -137,7 +156,10 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// second account. A file now belongs to the account that uploaded it, and
 	// every read of one is narrowed to that account, so both of these are here.
 	library := reach(authz.SurfaceLibrary)
-	library.POST("/library/files", handlers.LibraryFiles.Upload)
+	// The one route in this API that takes bytes and keeps them. What it costs
+	// is this instance's disk, which is the resource an account can exhaust for
+	// everyone else on the machine, so it is the upload class (§2.10).
+	library.POST("/library/files", rateLimit(limit.Upload), handlers.LibraryFiles.Upload)
 	library.GET("/library/files/:fileID", handlers.LibraryReads.Get)
 	library.GET("/library/files/:fileID/text", handlers.LibraryReads.Text)
 	knowledgeBase := reach(authz.SurfaceKnowledgeBase)
@@ -150,7 +172,13 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// Rebuilding is per document: the path says which collection the request is
 	// about, and the body says which document in it to re-read.
 	knowledgeBase.POST("/knowledge-bases/:kbID/rebuild", handlers.KnowledgeBase.Rebuild)
-	knowledgeBase.POST("/knowledge-bases/:kbID/search", handlers.KnowledgeBase.Search)
+	// The retrieval class: the query is embedded by an upstream provider before
+	// the index can be asked anything, so this route is one call that leaves the
+	// machine as well as one query. Rebuilding above is not mounted with it —
+	// its upstream work is handed to the index worker and happens after the
+	// answer, so what a limiter would bound here is the enqueue rather than the
+	// work (§2.10).
+	knowledgeBase.POST("/knowledge-bases/:kbID/search", rateLimit(limit.Retrieval), handlers.KnowledgeBase.Search)
 	knowledgeBase.POST("/knowledge-bases/:kbID/default", handlers.KnowledgeBase.SetDefault)
 	chat := reach(authz.SurfaceChat)
 	chat.POST("/sessions", handlers.Sessions.Create)
@@ -182,7 +210,9 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	notebook.GET("/question-categories", handlers.Questions.Categories)
 	practice := reach(authz.SurfacePractice)
 	practice.GET("/practice/queue", handlers.Practice.Queue)
-	practice.POST("/practice/reviews", handlers.Practice.Submit)
+	// Reviewing an answer is judged by the model, in this request, on the shared
+	// provider — so it is the model class (§2.10).
+	practice.POST("/practice/reviews", rateLimit(limit.Model), handlers.Practice.Submit)
 	practice.GET("/practice/reviews/:requestID", handlers.Practice.Read)
 	practice.GET("/practice/stats", handlers.Practice.Stats)
 	// Mastery paths are read and named here, and built through the socket: a
@@ -222,7 +252,12 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	reading.POST("/reading/materials/:materialID/pairings", handlers.Reading.ConfirmPairing)
 	reading.DELETE("/reading/pairings/:pairingID", handlers.Reading.CancelPairing)
 	reading.GET("/reading/materials/:materialID/extensions", handlers.Reading.Extensions)
-	reading.POST("/reading/materials/:materialID/extensions/:name", handlers.Reading.RunExtension)
+	// Running an extension is the other model call a request makes synchronously
+	// — the explanation or the vocabulary list over the passage in front of the
+	// reader — and the list beside it is a read of the build that calls nothing,
+	// so only the run is mounted (§2.10).
+	reading.POST("/reading/materials/:materialID/extensions/:name",
+		rateLimit(limit.Model), handlers.Reading.RunExtension)
 	// The dashboard is the one read that spans the domains, and it sits beside
 	// the resources it reads rather than under any of them (COURSE-03).
 	dashboard := reach(authz.SurfaceDashboard)
@@ -309,7 +344,15 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// The socket is authenticated by the middleware above before it is
 	// upgraded, so an unauthenticated request is answered as an HTTP request
 	// rather than becoming a connection (WS-06).
-	chat.GET("/ws", handlers.WebSocket.Serve)
+	//
+	// It is mounted with the model class because it is the door every
+	// conversational turn goes through: a turn's calls to the provider are made
+	// inside the connection, and no middleware can count the calls themselves —
+	// so what is bounded per account is how often this account opens one. A
+	// conversation is then a connection rather than a rate, which is the limit
+	// that can be enforced at a door, and the account's actual spend is bounded
+	// where it is written down, by §2.9's quota.
+	chat.GET("/ws", rateLimit(limit.Model), handlers.WebSocket.Serve)
 	router.NoRoute(handlers.System.NotFound)
 	router.NoMethod(handlers.System.MethodNotAllowed)
 

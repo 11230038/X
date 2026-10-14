@@ -17,6 +17,7 @@ import (
 	"backend/internal/data/migration"
 	"backend/internal/handler"
 	"backend/internal/library"
+	"backend/internal/limit"
 	"backend/internal/server"
 	"backend/internal/session"
 )
@@ -126,6 +127,19 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 	if err != nil {
 		return err
 	}
+	// The limiter is built here rather than inside assemble, because it is not a
+	// domain service: it has no store behind it and nothing to close, and it is
+	// one process's buckets — which is exactly what §2.10 says a rate limit is,
+	// and why a restart starting over is correct rather than a gap.
+	limiter, err := limit.New(limit.Options{
+		ModelPerMinute:     cfg.Limit.ModelPerMinute,
+		RetrievalPerMinute: cfg.Limit.RetrievalPerMinute,
+		UploadPerMinute:    cfg.Limit.UploadPerMinute,
+		Burst:              cfg.Limit.Burst,
+	})
+	if err != nil {
+		return fmt.Errorf("initialize the rate limiter: %w", err)
+	}
 	router := server.NewRouter(logger, cfg.AppEnv, server.Handlers{
 		System:        system,
 		Ops:           ops,
@@ -171,6 +185,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		// omitted record does not fail — it makes the audit say nothing
 		// happened.
 		Refusals: refusalRecorder{audit: ai.auditLog},
+		Limiter:  limiter,
 	})
 	httpServer := server.NewHTTPServer(cfg, router)
 

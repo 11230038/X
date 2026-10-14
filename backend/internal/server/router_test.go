@@ -53,6 +53,19 @@ func newTestRouterWithAuthorizer(
 	t *testing.T, checker readyChecker, practiceErr error, authorizer middleware.Authorizer,
 ) *gin.Engine {
 	t.Helper()
+	return newTestRouterWithGates(t, checker, practiceErr, authorizer, &routerLimiterStub{})
+}
+
+// newTestRouterWithGates is the builder the two wrappers above and the rate
+// limit cases share: the router with both of its narrowings chosen. A case
+// about one of them hands in the other as the permissive one it would have got
+// anyway, which is what keeps these cases from describing a policy or a limit
+// they are not about.
+func newTestRouterWithGates(
+	t *testing.T, checker readyChecker, practiceErr error,
+	authorizer middleware.Authorizer, limiter middleware.Limiter,
+) *gin.Engine {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(&strings.Builder{}, nil))
 	system := handler.NewSystemHandler(checker, 50*time.Millisecond, logger)
 	libraryFiles := handler.NewLibraryFilesHandler(routerUploaderStub{}, 1024, logger)
@@ -86,6 +99,7 @@ func newTestRouterWithAuthorizer(
 		Usage:         handler.NewUsageHandler(routerUsageStub{}, logger),
 		TokenVerifier: authenticator,
 		Authorizer:    authorizer,
+		Limiter:       limiter,
 		// KnowledgeBase is deliberately left out. This file is about which
 		// routes exist and which group they sit in; what a knowledge base
 		// endpoint answers is handler/kb_test.go's business, and wiring a stub
