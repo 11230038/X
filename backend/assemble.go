@@ -4,26 +4,18 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
-	"strings"
 
-	"backend/internal/askquestions"
 	"backend/internal/capability"
 	"backend/internal/chat"
 	"backend/internal/config"
 	"backend/internal/dashboard"
-	"backend/internal/deepquestion"
-	"backend/internal/deepsolve"
-	"backend/internal/embed"
 	"backend/internal/kb"
 	"backend/internal/llm"
 	"backend/internal/mastery"
-	"backend/internal/masterypath"
 	"backend/internal/memory"
 	"backend/internal/notebook"
 	"backend/internal/parse"
 	"backend/internal/practice"
-	"backend/internal/reading"
 	"backend/internal/routing"
 	"backend/internal/session"
 	"backend/internal/tool"
@@ -309,56 +301,6 @@ func questionRouting() turn.RouterFunc {
 	}
 }
 
-// newEmbedder builds the provider this process embeds with.
-//
-// It is built once, for the two things that embed: a document as it is indexed,
-// and a question as it is searched for. Both have to be the same model — the
-// base they meet in is the one that recorded which model its vectors came from.
-func newEmbedder(cfg config.Config) (embed.Embedder, error) {
-	embedder, err := embed.NewClient(embed.Options{
-		BaseURL:   cfg.Embedding.BaseURL,
-		APIKey:    cfg.Embedding.APIKey,
-		Model:     cfg.Embedding.Model,
-		Dimension: cfg.Embedding.Dimension,
-		Timeout:   cfg.Embedding.Timeout,
-		BatchSize: cfg.Embedding.BatchSize,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("initialize the embedding provider: %w", err)
-	}
-	return embedder, nil
-}
-
-// indexWorker builds the embedding queue's worker and starts it, returning the
-// channel that closes when it has stopped.
-//
-// The channel rather than the worker itself, because nothing outside this file
-// has anything to say to a worker: it has no state to read and no method to
-// call, only a job to do and a way to ask it to stop.
-func indexWorker(
-	ctx context.Context,
-	cfg config.Config,
-	logger *slog.Logger,
-	documents kb.Repository,
-	embedder embed.Embedder,
-) (<-chan struct{}, error) {
-	worker, err := kb.NewWorker(kb.WorkerOptions{
-		Lease:          cfg.KB.VectorLease,
-		Workers:        cfg.KB.IndexWorkers,
-		EmbedBatchSize: cfg.Embedding.BatchSize,
-		Logger:         logger,
-	}, documents, embedder)
-	if err != nil {
-		return nil, fmt.Errorf("initialize the index worker: %w", err)
-	}
-	stopped := make(chan struct{})
-	go func() {
-		defer close(stopped)
-		worker.Run(ctx)
-	}()
-	return stopped, nil
-}
-
 // turnRuntime adapts the turn runtime to what the protocol layer drives.
 //
 // The two differ in one method: a subscription is the hub's own type, and a
@@ -404,185 +346,4 @@ func (a *ai) close(ctx context.Context) error {
 	case <-ctx.Done():
 		return fmt.Errorf("stop the index worker: %w", ctx.Err())
 	}
-}
-
-// checkDrift refuses a configuration that does not describe this build.
-//
-// Each check is about a pair of things that are written down twice: the tools a
-// manifest names and the tools that were registered, and the capabilities and
-// stages the tuning names and the ones the manifests declare. A mismatch means
-// the process would start and then fail on the first turn that touched it.
-func checkDrift(capabilities *capability.Registry, policy tool.Policy, registered []string, configured capability.Config) error {
-	if err := capabilities.CheckToolDrift(registered); err != nil {
-		return fmt.Errorf("capability manifests name tools that are not registered: %w", err)
-	}
-	if err := capabilities.CheckConfigDrift(configured); err != nil {
-		return err
-	}
-	known := make(map[string]bool, len(registered))
-	for _, name := range registered {
-		known[name] = true
-	}
-	for _, name := range policy.Referenced() {
-		if !known[name] {
-			return fmt.Errorf("the tool policy names %s, which is not a registered tool", name)
-		}
-	}
-	return nil
-}
-
-// buildCapabilities registers every capability this build offers.
-//
-// It is a function rather than a block inside assemble so that the list of
-// capabilities, and the tuning each is built from, can be checked without a
-// database, a socket and a knowledge base service: what a process offers is a
-// property of the build, and a test can ask about it on its own.
-func buildCapabilities(cfg config.Config) (*capability.Registry, error) {
-	registry := capability.NewRegistry()
-	for _, register := range []struct {
-		name     string
-		manifest func() capability.Manifest
-		build    func(capability.Settings) (capability.Capability, error)
-	}{
-		{chat.Name, chat.Manifest, func(s capability.Settings) (capability.Capability, error) {
-			return chat.New(s)
-		}},
-		{askquestions.Name, askquestions.Manifest, func(s capability.Settings) (capability.Capability, error) {
-			return askquestions.New(s)
-		}},
-		{deepsolve.Name, deepsolve.Manifest, func(s capability.Settings) (capability.Capability, error) {
-			return deepsolve.New(s)
-		}},
-		// The mastery path is the one capability whose tool calls need something
-		// the capability itself cannot hold: the path, which belongs to the turn.
-		// The capability is one per process and the path is one per turn, so the
-		// capability is built like any other and the runtime installs the path
-		// around the turn's tools (masteryPath.Claim).
-		{masterypath.Name, masterypath.Manifest, func(s capability.Settings) (capability.Capability, error) {
-			return masterypath.New(s)
-		}},
-		// The question writer takes two more numbers than the others, and they are
-		// the deployment's own: how many questions a request that says nothing
-		// gets, and how many one request may ask for. Both are read from
-		// configuration here rather than looked up inside the package, so that a
-		// capability has no way to reach the environment.
-		{deepquestion.Name, deepquestion.Manifest, func(s capability.Settings) (capability.Capability, error) {
-			return deepquestion.New(s, deepquestion.Limits{
-				Default: cfg.Practice.QuestionDefaultCount,
-				Max:     cfg.Practice.QuestionMaxCount,
-			})
-		}},
-		// Immersive reading is built like the general assistant and differs from
-		// it in one thing: the passage the reader selected. That is material the
-		// turn carries rather than something the capability looks up, so it needs
-		// no seam of its own — the runtime puts it in the survey every grounded
-		// turn already runs (§2.8).
-		{reading.Name, reading.Manifest, func(s capability.Settings) (capability.Capability, error) {
-			return reading.New(s)
-		}},
-	} {
-		settings, err := capabilitySettings(cfg, register.manifest())
-		if err != nil {
-			return nil, err
-		}
-		built, err := register.build(settings)
-		if err != nil {
-			return nil, fmt.Errorf("initialize the %s capability: %w", register.name, err)
-		}
-		if err := registry.Register(built); err != nil {
-			return nil, fmt.Errorf("register the %s capability: %w", register.name, err)
-		}
-	}
-	return registry, nil
-}
-
-// capabilitySettings is one capability's tuning, resolved from configuration.
-//
-// A capability the deployment has not named runs on the general assistant's
-// tuning. Most of them are the same model answering the same user in the same
-// language, with one stage instead of two, so a deployment that never tunes them
-// should not have to write the same numbers out again under three more names —
-// and a capability being registered should not be a reason for a process that
-// started yesterday to refuse to start today. Naming one in
-// LLM_CAPABILITY_CONFIG_JSON overrides it, which is also how it is tuned.
-//
-// The stage limits are the one part that cannot be inherited blindly: they are
-// keyed by stage name, so a capability whose stages are its own — the question
-// writer has two, and neither is chat's — would receive a tuning with no key for
-// anything it runs. That is refused here with the key to write, rather than left
-// to fail inside the capability, because it is a fact about the deployment's
-// file: it runs a build whose question writer it never configured.
-func capabilitySettings(cfg config.Config, manifest capability.Manifest) (capability.Settings, error) {
-	params, ok := cfg.LLM.Capabilities[manifest.Name]
-	if !ok {
-		params = cfg.LLM.Capabilities[chat.Name]
-	}
-	stages := make(map[string]int, len(params.Stages))
-	for stage, tuning := range params.Stages {
-		stages[stage] = tuning.MaxTokens
-	}
-	// A tuning with no stages at all is not an inherited one but an absent one:
-	// "nothing is configured" is the capability's own settings refusing, and it
-	// says more about what is missing than this check could.
-	if len(stages) > 0 {
-		missing := make([]string, 0, len(manifest.Stages))
-		for _, stage := range manifest.Stages {
-			if stages[stage] <= 0 {
-				missing = append(missing, stage)
-			}
-		}
-		if len(missing) > 0 {
-			return capability.Settings{}, fmt.Errorf(
-				"%s runs the stages %s and the capability tuning covers %s: give %s an entry of its own "+
-					"in LLM_CAPABILITY_CONFIG_JSON naming those stages (per-stage limits are looked up "+
-					"by stage name, CFG-01)",
-				manifest.Name, strings.Join(missing, ", "), strings.Join(sortedStages(stages), ", "), manifest.Name)
-		}
-	}
-	return capability.Settings{
-		Model:               cfg.LLM.Model,
-		Temperature:         params.Temperature,
-		ContextBudgetTokens: params.ContextBudgetTokens,
-		MaxRounds:           cfg.Turn.MaxRounds,
-		StageMaxTokens:      stages,
-	}, nil
-}
-
-// sortedStages lists the stage names a tuning covers, for a message that says
-// which ones it has when the one being asked for is not among them.
-func sortedStages(stages map[string]int) []string {
-	names := make([]string, 0, len(stages))
-	for stage := range stages {
-		names = append(names, stage)
-	}
-	sort.Strings(names)
-	return names
-}
-
-// kbSettings is the knowledge base domain's tuning, resolved from configuration.
-func kbSettings(cfg config.Config, logger *slog.Logger) kb.Options {
-	return kb.Options{
-		Chunking:            kb.Chunking{Size: cfg.KB.ChunkSize, Overlap: cfg.KB.ChunkOverlap},
-		RetrievalTopK:       cfg.KB.RetrievalTopK,
-		Candidates:          cfg.KB.RetrievalCandidates,
-		RRFK:                cfg.KB.RRFK,
-		MaxCharsPerDocument: cfg.KB.MaxCharsPerDocument,
-		EmbeddingModel:      cfg.Embedding.Model,
-		Logger:              logger,
-	}
-}
-
-// capabilityConfig is which stages each configured capability declares, which
-// is what the drift check compares against the manifests.
-func capabilityConfig(cfg config.Config) capability.Config {
-	configured := make(capability.Config, len(cfg.LLM.Capabilities))
-	for name, params := range cfg.LLM.Capabilities {
-		stages := make([]string, 0, len(params.Stages))
-		for stage := range params.Stages {
-			stages = append(stages, stage)
-		}
-		sort.Strings(stages)
-		configured[name] = stages
-	}
-	return configured
 }
