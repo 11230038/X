@@ -16,6 +16,7 @@ import (
 	"backend/internal/embed"
 	"backend/internal/kb"
 	"backend/internal/llm"
+	"backend/internal/masterypath"
 	"backend/internal/notebook"
 	"backend/internal/parse"
 	"backend/internal/practice"
@@ -86,6 +87,22 @@ func assemble(
 		{tool.SolveReplanName, tool.NewSolveReplanTool()},
 		{tool.SolveFinishName, tool.NewSolveFinishTool()},
 		{tool.SaveQuestionName, tool.NewSaveQuestionTool(turn.Banker{})},
+		// The nine mastery tools are the same kind of thing as save_question:
+		// built once for the process, and answered by the turn they are called
+		// for, through the path that turn put in its own context. The path is
+		// installed by the runtime from what masteryPath.Claim returned, so a
+		// call that arrives without one is a plane that mounted a tool the turn
+		// was never given a path for — which the tool reports as the defect it is
+		// (tool.ErrNoMasteryPath).
+		{tool.MasteryStateName, tool.NewMasteryStateTool()},
+		{tool.MasteryQuestionName, tool.NewMasteryQuestionTool()},
+		{tool.MasteryGradeName, tool.NewMasteryGradeTool()},
+		{tool.MasterySkipName, tool.NewMasterySkipTool()},
+		{tool.MasteryAssessName, tool.NewMasteryAssessTool()},
+		{tool.MasteryMapName, tool.NewMasteryMapTool()},
+		{tool.MasteryEditName, tool.NewMasteryEditTool()},
+		{tool.MasterySwitchName, tool.NewMasterySwitchTool()},
+		{tool.MasteryLeaveName, tool.NewMasteryLeaveTool()},
 	} {
 		if err := tools.Register(register.tool); err != nil {
 			return nil, fmt.Errorf("register the %s tool: %w", register.name, err)
@@ -149,6 +166,14 @@ func assemble(
 	if err != nil {
 		return nil, fmt.Errorf("initialize session naming: %w", err)
 	}
+	// The mastery domain reads the same database and the same question bank the
+	// rest of the process does, and it judges with the same judge: a question
+	// filed on a path is a question in the bank, and judging an answer to it is
+	// the act practice already performs (§2.5).
+	paths, err := newMasteryPaths(cfg, db, questions, judge)
+	if err != nil {
+		return nil, err
+	}
 	repository := turn.NewGORMRepository(db)
 	hub, err := turn.NewHub(repository)
 	if err != nil {
@@ -161,6 +186,7 @@ func assemble(
 		Materials:         materials,
 		Questions:         questions,
 		Router:            questionRouting(),
+		Paths:             paths,
 		Capabilities:      capabilities,
 		Tools:             tools,
 		Policy:            policy,
@@ -361,6 +387,14 @@ func buildCapabilities(cfg config.Config) (*capability.Registry, error) {
 		}},
 		{deepsolve.Name, deepsolve.Manifest, func(s capability.Settings) (capability.Capability, error) {
 			return deepsolve.New(s)
+		}},
+		// The mastery path is the one capability whose tool calls need something
+		// the capability itself cannot hold: the path, which belongs to the turn.
+		// The capability is one per process and the path is one per turn, so the
+		// capability is built like any other and the runtime installs the path
+		// around the turn's tools (masteryPath.Claim).
+		{masterypath.Name, masterypath.Manifest, func(s capability.Settings) (capability.Capability, error) {
+			return masterypath.New(s)
 		}},
 		// The question writer takes two more numbers than the others, and they are
 		// the deployment's own: how many questions a request that says nothing

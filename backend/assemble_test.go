@@ -160,7 +160,7 @@ func TestTheRegisteredCapabilitiesAreWhatTheBuildOffers(t *testing.T) {
 		t.Fatalf("buildCapabilities() error = %v", err)
 	}
 
-	want := []string{"ask_questions", "chat", "deep_question", "deep_solve"}
+	want := []string{"ask_questions", "chat", "deep_question", "deep_solve", "mastery_path"}
 	got := registry.Names()
 	if len(got) != len(want) {
 		t.Fatalf("registered %v, want %v", got, want)

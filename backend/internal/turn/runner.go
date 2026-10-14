@@ -71,6 +71,12 @@ type turnRun struct {
 	cancel    context.CancelFunc
 	emitter   *Emitter
 	published resultWatch
+	// work is the context the turn's own work runs on — the turn's context with
+	// whatever the path claim added to it — and lease is the claim as the
+	// opening event reports it. Both are set once, before the first event, by
+	// claimPath, and read afterwards by the one goroutine running the turn.
+	work  context.Context
+	lease map[string]any
 
 	mu    sync.Mutex
 	reply chan string
@@ -116,12 +122,19 @@ func (r *Runner) newTurnRun(
 func (r *turnRun) run() {
 	defer r.runner.finished(r.turn.ID)
 
-	err := r.begin()
+	// The path is claimed before anything is said, because the turn announces it
+	// in its first event — which path this is, and whether this turn may write
+	// it. A claim that fails is a turn that never starts, reported the same way
+	// any failure before the first event is.
+	err := r.claimPath()
+	if err == nil {
+		err = r.begin()
+	}
 	if err == nil {
 		// The material is resolved before the tool plane is composed, because the
 		// plane is what the material mounts: which source tools this turn is
 		// offered is decided by what it turned out to be carrying.
-		r.resolveMaterial(r.ctx)
+		r.resolveMaterial(r.working())
 		err = r.runCapability()
 	}
 
@@ -132,19 +145,61 @@ func (r *turnRun) run() {
 	r.endTurn(ctx, err)
 }
 
+// claimPath settles which path this turn is on, if any, and decorates the
+// context the tools will find it in.
+//
+// It is the runtime's whole knowledge of the mastery path: it hands over the
+// three facts a path claim needs — which capability is running, whose session
+// and turn this is, what the user asked — and gets back a context and a claim.
+// It never learns what a path is.
+func (r *turnRun) claimPath() error {
+	if r.runner.paths == nil {
+		return nil
+	}
+	claimed, err := r.runner.paths.Claim(r.ctx, ClaimRequest{
+		Capability: r.turn.Capability,
+		SessionID:  r.session.ID,
+		TurnID:     r.turn.ID,
+		Goal:       r.question,
+	})
+	if err != nil {
+		return err
+	}
+	r.work = claimed.Context
+	r.lease = claimed.Lease
+	return nil
+}
+
+// working is the context the turn's own work runs on: the turn's context, plus
+// the path if this turn is on one.
+func (r *turnRun) working() context.Context {
+	if r.work != nil {
+		return r.work
+	}
+	return r.ctx
+}
+
 // begin moves the turn to running and tells the client which conversation it is
 // in, before anything else of the turn is produced.
 //
-// It is also where a routed turn says so. The decision rides on the first event
-// of the stream rather than on the turn's row or on the acknowledgement of the
-// command that started it: an acknowledgement travels on a short-lived in-memory
-// table, so a client that reconnects and replays from a position would never see
-// it, while an event is replayable and always in the same place — before
-// anything the turn produced (TOOL-08).
+// It is also where a routed turn says so, and where a turn on a path says which
+// one and who is writing it. Both ride on the first event of the stream rather
+// than on the turn's row or on the acknowledgement of the command that started
+// it: an acknowledgement travels on a short-lived in-memory table, so a client
+// that reconnects and replays from a position would never see it, while an event
+// is replayable and always in the same place — before anything the turn produced
+// (TOOL-08).
 func (r *turnRun) begin() error {
 	opening := event.Event{Type: event.TypeSession, Content: r.session.ID}
+	metadata := make(map[string]any, 2)
 	if r.routing != nil {
-		opening.Metadata = map[string]any{event.MetaRouting: r.routing.metadata()}
+		metadata[event.MetaRouting] = r.routing.metadata()
+	}
+	if r.lease != nil {
+		metadata[event.MetaLease] = r.lease
+	}
+	if len(metadata) > 0 {
+		opening.Metadata = metadata
 	}
 	if err := r.emit(r.ctx, opening); err != nil {
 		return err
@@ -185,12 +240,17 @@ func (r *turnRun) runCapability() error {
 	}
 	plane := mountedPlane{registry: r.runner.tools, mounted: names}
 
-	messages, err := r.messages(r.ctx)
+	// The turn's own work runs on the working context, which is where the path
+	// claim put what the tools need to find it: the tools are reached through
+	// the loop the capability runs, so whatever the claim added travels with it
+	// and the capability itself never has to be told about a path.
+	work := context.WithValue(r.working(), turnKey{}, r)
+	messages, err := r.messages(work)
 	if err != nil {
 		return err
 	}
 	loop := agentloop.New(r.runner.provider, &r.published, plane, r.runner.logger, manifest.Name)
-	return implementation.Run(context.WithValue(r.ctx, turnKey{}, r), runContext{
+	return implementation.Run(work, runContext{
 		emitter:  &r.published,
 		tools:    definitions,
 		messages: messages,

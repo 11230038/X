@@ -1,9 +1,10 @@
 // Package config reads the service's settings from its dotenv file. Each section
 // of settings lives in the file named after it — http.go, upload.go, auth.go,
-// database.go, llm.go, embedding.go, parse.go, kb.go, turn.go, practice.go —
-// holding that section's struct, the loader that fills it, and the Validate that
-// guards it. This file is the composition: what the whole configuration is, how
-// the file is read into it, and the order the sections are checked in.
+// database.go, llm.go, embedding.go, parse.go, kb.go, turn.go, practice.go,
+// mastery.go — holding that section's struct, the loader that fills it, and the
+// Validate that guards it. This file is the composition: what the whole
+// configuration is, how the file is read into it, and the order the sections are
+// checked in.
 package config
 
 import (
@@ -75,6 +76,10 @@ var requiredKeys = []string{
 	"QUESTION_MAX_COUNT",
 	"PRACTICE_QUEUE_SIZE",
 	"PRACTICE_JUDGE_MAX_TOKENS",
+	"MASTERY_LEASE_TTL",
+	"MASTERY_GATE_CONSECUTIVE",
+	"MASTERY_GATE_MIN_EVIDENCE",
+	"MASTERY_MAX_ACTIVE_PATHS",
 }
 
 // Config contains all settings required to run the service.
@@ -92,6 +97,7 @@ type Config struct {
 	KB              KBConfig
 	Turn            TurnConfig
 	Practice        PracticeConfig
+	Mastery         MasteryConfig
 }
 
 // Load reads configuration exclusively from the dotenv file at path. The path
@@ -150,6 +156,10 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	mastery, err := loadMasteryConfig(values)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
 		HTTPAddr:        strings.TrimSpace(values["HTTP_ADDR"]),
@@ -165,6 +175,7 @@ func Load(path string) (Config, error) {
 		KB:              kb,
 		Turn:            turn,
 		Practice:        practice,
+		Mastery:         mastery,
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -212,5 +223,8 @@ func (c Config) Validate() error {
 	if err := c.Turn.Validate(); err != nil {
 		return err
 	}
-	return c.Practice.Validate()
+	if err := c.Practice.Validate(); err != nil {
+		return err
+	}
+	return c.Mastery.Validate()
 }

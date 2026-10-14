@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -29,6 +30,17 @@ import (
 // version the observation was made against. Both are true statements about
 // different things, and a made-up version would be a statement about neither.
 func (s *Service) RecordEvidence(ctx context.Context, evidence Evidence) (Evidence, error) {
+	// The id is issued here when the caller has none, which is the ordinary
+	// case and the same rule the tree follows: whoever is closer to the learner
+	// says what was seen, and this package numbers the row it wrote (Map). A
+	// caller that already has an id — a replay, an import — keeps it.
+	if strings.TrimSpace(evidence.ID) == "" {
+		id, err := newID(evidenceIDPrefix)
+		if err != nil {
+			return Evidence{}, err
+		}
+		evidence.ID = id
+	}
 	if err := evidence.Validate(); err != nil {
 		return Evidence{}, err
 	}

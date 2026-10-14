@@ -43,9 +43,13 @@ type Options struct {
 	// that would catch that is about names, not about what they can do.
 	Questions Notebook
 	// Router decides which capability a turn runs when the client did not ask
-	// for one. It is the one optional thing here, and a nil one is this version's
+	// for one. It is an optional thing here, and a nil one is this version's
 	// predecessor exactly: every turn that named no capability runs the default.
-	Router       Router
+	Router Router
+	// Paths is the mastery path a turn works on, for the capabilities that have
+	// one. It is optional in the same sense the router is: a nil one runs every
+	// turn as this version's predecessor ran it, with no path and no claim.
+	Paths        Paths
 	Capabilities *capability.Registry
 	Tools        *tool.Registry
 	Policy       tool.Policy
@@ -74,6 +78,7 @@ type Runner struct {
 	materials    Materials
 	questions    Notebook
 	router       Router
+	paths        Paths
 	capabilities *capability.Registry
 	tools        *tool.Registry
 	policy       tool.Policy
@@ -130,6 +135,7 @@ func NewRunner(options Options) (*Runner, error) {
 		materials:    options.Materials,
 		questions:    options.Questions,
 		router:       options.Router,
+		paths:        options.Paths,
 		capabilities: options.Capabilities,
 		tools:        options.Tools,
 		policy:       options.Policy,

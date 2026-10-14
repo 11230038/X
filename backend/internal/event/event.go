@@ -30,6 +30,13 @@ const (
 	// "how did this conversation end up in question mode" is answerable from the
 	// turn's own stream, once, at the point the mode was decided.
 	MetaRouting = "routing"
+	// MetaLease says who is writing the mastery path a turn is on, and until
+	// when. It is on the same first event the routing decision rides on, and for
+	// the same reason: a path is something a turn finds itself on before it has
+	// said anything, and a client that reconnects and replays the stream has to
+	// be able to see which path that was and whether this turn may write it
+	// (§4). A turn on no path carries no lease at all.
+	MetaLease = "lease"
 	// MetaUsageSummary carries the token accounting on a result event.
 	MetaUsageSummary = "usage_summary"
 	// MetaCostSummary carries the cost accounting on a result event.

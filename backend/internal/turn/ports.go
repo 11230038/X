@@ -181,6 +181,57 @@ func (Sourcer) Retrieve(ctx context.Context, query string) (tool.Reading, error)
 	return run.retrieve(ctx, query)
 }
 
+// Paths is the mastery path a turn is about to work on, as the runtime sees it.
+//
+// The runtime knows that *some* capabilities work on a path and nothing else
+// about them: which capabilities those are, what a path is, and whether this
+// turn may write it belong to the capability and to the domain, and they are
+// joined by whoever assembled the process. So the runtime asks once, before it
+// says anything, and the implementation answers both questions at once — the
+// context the turn's tools will find their path in, and the claim the turn
+// announces in its first event.
+//
+// It is optional, and a nil one is a build with no mastery path in it: every
+// turn then runs as every turn ran before this version.
+type Paths interface {
+	// Claim settles which path this turn is on and prepares it for the turn's
+	// tools.
+	//
+	// A path another turn is writing is not an error. The turn runs — reading a
+	// path is not writing it — and what the claim reports is who holds it, which
+	// the tools then say in whatever they refuse (§2.3).
+	Claim(ctx context.Context, request ClaimRequest) (Claimed, error)
+}
+
+// ClaimRequest is what the runtime knows about the turn being started.
+type ClaimRequest struct {
+	// Capability is the capability this turn resolved to, and it is what the
+	// implementation reads to decide whether this turn is on a path at all. That
+	// the runtime does not know which capability works on a path is the point:
+	// the name travels as the string it already is, and the knowledge stays at
+	// the end that has it.
+	Capability string
+	SessionID  string
+	TurnID     string
+	// Goal is what this turn is about. It is used only when the conversation has
+	// no path yet, where it becomes the new path's goal — and it is the user's
+	// own words rather than a summary of them, because a path's goal is read
+	// back to the learner as the thing they set out to learn.
+	Goal string
+}
+
+// Claimed is a turn's path, as the runtime holds it.
+type Claimed struct {
+	// Context carries the path for the tools this turn dispatches. For a turn on
+	// no path it is the context the runtime handed over, unchanged.
+	Context context.Context
+	// Lease is the claim as the turn's first event reports it, or nil for a turn
+	// with no path. It stays opaque here on purpose: §4's four fields are the
+	// domain's reading of who holds a path, and the runtime's job is to publish
+	// them in the place a client looks, not to have an opinion about them.
+	Lease map[string]any
+}
+
 // Notebook is the part of the question bank domain the runtime uses: the bank a
 // turn writes the questions it generated into.
 //
