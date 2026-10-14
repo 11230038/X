@@ -32,12 +32,22 @@ func (PracticeReviewState) TableName() string {
 
 // PracticeReviewEvent records one idempotent review submission.
 type PracticeReviewEvent struct {
-	RequestID         string         `gorm:"column:request_id;primaryKey;autoIncrement:false"`
-	NotebookEntriesID string         `gorm:"column:notebook_entries_id;not null"`
-	UserAnswer        *string        `gorm:"column:user_answer"`
-	Rating            *float64       `gorm:"column:rating"`
-	Outcome           datatypes.JSON `gorm:"column:outcome_json;type:json"`
-	ReviewTime        *time.Time     `gorm:"column:review_time"`
+	RequestID         string   `gorm:"column:request_id;primaryKey;autoIncrement:false"`
+	NotebookEntriesID string   `gorm:"column:notebook_entries_id;not null"`
+	UserAnswer        *string  `gorm:"column:user_answer"`
+	Rating            *float64 `gorm:"column:rating"`
+	// IsCorrect is the judgement lifted out of Outcome, which is the same value
+	// in a second place on purpose: a JSON document can be read but not indexed,
+	// and "the reviews of this question that were right" is a question this table
+	// is asked often enough to need an index for.
+	//
+	// It is a pointer, and the nil is a third value rather than a missing one:
+	// nil is a skipped review — nothing was judged — while false is a review that
+	// was judged wrong. The table allows the column to be NULL for exactly that
+	// distinction (migration 00011).
+	IsCorrect  *bool          `gorm:"column:is_correct"`
+	Outcome    datatypes.JSON `gorm:"column:outcome_json;type:json"`
+	ReviewTime *time.Time     `gorm:"column:review_time"`
 }
 
 // TableName fixes the practice review event table name.

@@ -179,6 +179,7 @@ func (s *Service) record(ctx context.Context, repository Repository, review Revi
 		NotebookEntriesID: entry.ID,
 		UserAnswer:        review.UserAnswer,
 		Rating:            review.Rating,
+		IsCorrect:         correctnessOf(judgement),
 		Outcome:           outcomeJSON,
 		ReviewTime:        now,
 	})
@@ -358,6 +359,23 @@ func (s *Service) judgeAnswer(ctx context.Context, entry StoredEntry, review Rev
 		return nil, err
 	}
 	return &judged, nil
+}
+
+// correctnessOf is the judgement as the review event's column holds it: nil when
+// nothing was judged, which is a skip and only ever a skip.
+//
+// It is written apart from the code that builds the response because it is the
+// same decision as answerFace's first branch — a skipped submission writes no
+// answer face and no correctness — and because the one thing that must not
+// happen is for those two to disagree. A row with a NULL is_correct and a
+// written answer face, or the reverse, would make "the user answered and got it
+// wrong" and "the user declined to answer" the same row.
+func correctnessOf(judgement *Judgment) *bool {
+	if judgement == nil {
+		return nil
+	}
+	correct := judgement.IsCorrect
+	return &correct
 }
 
 // answerFace is what one submission writes to the answer face and what it is

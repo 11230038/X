@@ -193,6 +193,7 @@ func (r *GORMRepository) RecordedReview(ctx context.Context, requestID string) (
 		NotebookEntriesID: record.NotebookEntriesID,
 		UserAnswer:        stringFrom(record.UserAnswer),
 		Rating:            record.Rating,
+		IsCorrect:         record.IsCorrect,
 		Outcome:           record.Outcome,
 		ReviewTime:        timesFrom(record.ReviewTime),
 	}, nil
@@ -215,6 +216,7 @@ func (r *GORMRepository) RecordReview(ctx context.Context, review StoredReview) 
 		NotebookEntriesID: review.NotebookEntriesID,
 		UserAnswer:        nullable(review.UserAnswer),
 		Rating:            review.Rating,
+		IsCorrect:         review.IsCorrect,
 		Outcome:           datatypes.JSON(review.Outcome),
 		ReviewTime:        &review.ReviewTime,
 	}

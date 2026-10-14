@@ -188,8 +188,16 @@ type StoredReview struct {
 	NotebookEntriesID string
 	UserAnswer        string
 	Rating            *float64
-	Outcome           []byte
-	ReviewTime        time.Time
+	// IsCorrect is the judgement, lifted out of Outcome and stored beside it as
+	// a column. The two are written in the same statement and mean the same
+	// thing; the column exists because the question "which of this question's
+	// reviews were right" has to be answerable by an index rather than by
+	// decoding JSON.
+	//
+	// nil is skipped — nothing was judged — and is not the same as false.
+	IsCorrect  *bool
+	Outcome    []byte
+	ReviewTime time.Time
 }
 
 // StoredEntry is a question row as the review path needs it: the row's own key
