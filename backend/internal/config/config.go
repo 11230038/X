@@ -81,6 +81,9 @@ var requiredKeys = []string{
 	"MASTERY_GATE_MIN_EVIDENCE",
 	"MASTERY_MAX_ACTIVE_PATHS",
 	"DASHBOARD_RECENT_LIMIT",
+	"READING_UNIT_MAX_CHARS",
+	"READING_TUTOR_MAX_TOKENS",
+	"READING_EXTENSION_TIMEOUT",
 }
 
 // Config contains all settings required to run the service.
@@ -100,6 +103,7 @@ type Config struct {
 	Practice        PracticeConfig
 	Mastery         MasteryConfig
 	Dashboard       DashboardConfig
+	Reading         ReadingConfig
 }
 
 // Load reads configuration exclusively from the dotenv file at path. The path
@@ -166,6 +170,10 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	reading, err := loadReadingConfig(values)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
 		HTTPAddr:        strings.TrimSpace(values["HTTP_ADDR"]),
@@ -183,6 +191,7 @@ func Load(path string) (Config, error) {
 		Practice:        practice,
 		Mastery:         mastery,
 		Dashboard:       dashboard,
+		Reading:         reading,
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -236,5 +245,8 @@ func (c Config) Validate() error {
 	if err := c.Mastery.Validate(); err != nil {
 		return err
 	}
-	return c.Dashboard.Validate()
+	if err := c.Dashboard.Validate(); err != nil {
+		return err
+	}
+	return c.Reading.Validate()
 }

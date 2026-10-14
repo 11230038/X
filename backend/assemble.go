@@ -22,6 +22,7 @@ import (
 	"backend/internal/notebook"
 	"backend/internal/parse"
 	"backend/internal/practice"
+	"backend/internal/reading"
 	"backend/internal/routing"
 	"backend/internal/session"
 	"backend/internal/tool"
@@ -440,6 +441,14 @@ func buildCapabilities(cfg config.Config) (*capability.Registry, error) {
 				Default: cfg.Practice.QuestionDefaultCount,
 				Max:     cfg.Practice.QuestionMaxCount,
 			})
+		}},
+		// Immersive reading is built like the general assistant and differs from
+		// it in one thing: the passage the reader selected. That is material the
+		// turn carries rather than something the capability looks up, so it needs
+		// no seam of its own — the runtime puts it in the survey every grounded
+		// turn already runs (§2.8).
+		{reading.Name, reading.Manifest, func(s capability.Settings) (capability.Capability, error) {
+			return reading.New(s)
 		}},
 	} {
 		settings, err := capabilitySettings(cfg, register.manifest())
