@@ -3,6 +3,7 @@ package turn
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"backend/internal/agentloop"
 	"backend/internal/capability"
@@ -201,6 +202,67 @@ type Paths interface {
 	// path is not writing it — and what the claim reports is who holds it, which
 	// the tools then say in whatever they refuse (§2.3).
 	Claim(ctx context.Context, request ClaimRequest) (Claimed, error)
+}
+
+// Readings is the reading layer as the runtime reaches it: the passage a reader
+// had chosen when this turn started (§2.8).
+//
+// It is here for the same reason Paths is: the runtime has to put a reader's
+// selection in front of the model, and turning a material and a coordinate into
+// text is not something it can do — that is the reading layer's, and it reads
+// through the knowledge base the way every other read does. The two ends speak
+// their own vocabularies and the join is in assemble, so the runtime learns
+// nothing about reading beyond "a selection produces a source".
+//
+// What it resolves is one selection, and it is asked once per turn: a selection
+// is part of one turn's material, and a turn's material is settled before its
+// capability runs.
+type Readings interface {
+	// Passage resolves a declared selection into the source this turn may cite
+	// it as — the text at that coordinate, and the document it lives in.
+	//
+	// A selection that cannot be resolved is an error, and the runtime reports
+	// it as material that could not be read rather than failing the turn: the
+	// reader's question is still a question, and losing the passage it was about
+	// costs the answer its grounding and not its existence (§2.3).
+	Passage(ctx context.Context, selection Selection) (event.Source, error)
+}
+
+// Selection is a passage a client said the reader had chosen, in the vocabulary
+// the runtime has for a place in a text: the material, the coordinate, and the
+// text the client believes is there.
+//
+// The client's copy of the text is carried and never trusted. What a model is
+// given is what the coordinate resolves to, because a client can be a stale tab
+// and a document can be re-parsed underneath one; the text it sent is what the
+// two can be compared against when that matters.
+type Selection struct {
+	MaterialID string
+	Locator    event.Locator
+	Text       string
+}
+
+// Validate checks a selection before a turn is started with it.
+//
+// The span rules are the locator's own, said again here because this is where a
+// bad one stops the request: a negative start, or an end before the start, is a
+// coordinate no text has, and it is the client's to fix (ErrInvalidSelection).
+// A zero-width span is *not* refused here. Where the reader is looking and what
+// they selected are one field on the wire, and a reader who asked a question
+// with nothing selected is asking about where they are — which the reading
+// layer resolves to the text at that place. Refusing that would make the
+// ordinary way to ask about the current unit impossible to send.
+func (s Selection) Validate() error {
+	if strings.TrimSpace(s.MaterialID) == "" {
+		return fmt.Errorf("%w: the selection names no material", ErrInvalidSelection)
+	}
+	if s.Locator.CharStart < 0 {
+		return fmt.Errorf("%w: the selection starts before the text does", ErrInvalidSelection)
+	}
+	if s.Locator.CharEnd < s.Locator.CharStart {
+		return fmt.Errorf("%w: the selection ends before it starts", ErrInvalidSelection)
+	}
+	return nil
 }
 
 // ClaimRequest is what the runtime knows about the turn being started.

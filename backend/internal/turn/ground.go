@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"backend/internal/capability"
+	"backend/internal/event"
 	"backend/internal/kb"
 	"backend/internal/llm"
 	"backend/internal/tool"
@@ -25,15 +26,40 @@ import (
 // an attachment that failed to parse already follows, for the same reason:
 // losing the survey costs recall and not correctness (§2.3).
 func (r *turnRun) ground(ctx context.Context, query string) (capability.Grounding, error) {
-	if len(r.material.Attachments) == 0 && len(r.material.KnowledgeBases) == 0 {
-		// A turn carrying nothing has nothing to survey, so it gets a zero
-		// Grounding rather than a message saying so. This is what keeps such a
-		// turn's stream identical to the one V1 produced.
-		return capability.Grounding{}, nil
-	}
 	query = strings.TrimSpace(query)
 	grounding := capability.Grounding{}
 	surveyed := false
+
+	// The reader's selection comes first, and it is the one item of the survey
+	// that is not a search: it is the passage they were looking at when they
+	// asked, so it is what the answer is about rather than something the answer
+	// might be found in (§2.8). It is numbered with everything else — it is
+	// [1] because it was handed over first, and the model cites it the same way
+	// it cites a chunk.
+	if r.material.Selection != nil {
+		grounding.Sources = append(grounding.Sources, r.number([]event.Source{*r.material.Selection})...)
+		surveyed = true
+	}
+	if r.material.SelectionNote != "" {
+		grounding.Unavailable = append(grounding.Unavailable, r.material.SelectionNote)
+	}
+
+	if len(r.material.Attachments) == 0 && len(r.material.KnowledgeBases) == 0 {
+		// A turn carrying nothing has nothing to survey, so it gets a zero
+		// Grounding rather than a message saying so. This is what keeps such a
+		// turn's stream identical to the one V1 produced — and it is still what
+		// a turn carrying nothing gets, whether or not it carried a selection:
+		// the branch below is the same one, reached for the same reason.
+		if !surveyed && len(grounding.Unavailable) == 0 {
+			return capability.Grounding{}, nil
+		}
+		grounding.Message = llm.Message{
+			Role:    llm.RoleSystem,
+			Content: surveyText(r.material, grounding, surveyed),
+		}
+		r.unavailable = len(grounding.Unavailable)
+		return grounding, nil
+	}
 
 	for _, attachment := range r.material.Attachments {
 		if attachment.Unavailable != "" {
@@ -127,6 +153,13 @@ func (r *turnRun) surveyNotes(ctx context.Context, err error, what string) ([]st
 func surveyText(material Material, grounding capability.Grounding, surveyed bool) string {
 	var text strings.Builder
 	text.WriteString("本轮携带的材料：\n")
+	if material.Selection != nil {
+		// The passage the reader had chosen is named here as well as appearing
+		// numbered below, because the two say different things: this says why it
+		// is there at all — it is what the reader is looking at — and the list
+		// below is where a model reads its number from.
+		text.WriteString("- 读者划出的一段原文（就是下面编号最小的那一条）\n")
+	}
 	for _, attachment := range material.Attachments {
 		fmt.Fprintf(&text, "- 附件 %s", attachment.Label)
 		if attachment.Filename != "" {

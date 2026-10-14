@@ -49,7 +49,12 @@ type Options struct {
 	// Paths is the mastery path a turn works on, for the capabilities that have
 	// one. It is optional in the same sense the router is: a nil one runs every
 	// turn as this version's predecessor ran it, with no path and no claim.
-	Paths        Paths
+	Paths Paths
+	// Readings resolves the passage a reader had chosen, for the capabilities
+	// that are about one. It is optional in the same sense: a nil one is a build
+	// with no reading layer in it, where a turn that carries a selection is a
+	// turn whose selection could not be read.
+	Readings     Readings
 	Capabilities *capability.Registry
 	Tools        *tool.Registry
 	Policy       tool.Policy
@@ -79,6 +84,7 @@ type Runner struct {
 	questions    Notebook
 	router       Router
 	paths        Paths
+	readings     Readings
 	capabilities *capability.Registry
 	tools        *tool.Registry
 	policy       tool.Policy
@@ -136,6 +142,7 @@ func NewRunner(options Options) (*Runner, error) {
 		questions:    options.Questions,
 		router:       options.Router,
 		paths:        options.Paths,
+		readings:     options.Readings,
 		capabilities: options.Capabilities,
 		tools:        options.Tools,
 		policy:       options.Policy,
@@ -167,6 +174,12 @@ type StartRequest struct {
 	// turn carries none, which is not the same as carrying a default one: a turn
 	// that named no collection searches nothing (KB-07).
 	KnowledgeBases []string
+	// Selection is the passage the reader had chosen in a reading material, and
+	// it is empty for every turn that is not an immersive reading one (§2.8). It
+	// is one turn's material and not a conversation's: it is what the reader was
+	// looking at when they asked, and it is not stored — a saved selection would
+	// be somebody else's highlight in the second tab.
+	Selection *Selection
 }
 
 // Started is what starting a turn produced.
@@ -188,6 +201,15 @@ func (r *Runner) Start(ctx context.Context, request StartRequest) (Started, erro
 	content := strings.TrimSpace(request.Content)
 	if content == "" {
 		return Started{}, ErrEmptyMessage
+	}
+	// A selection is checked before the turn exists, because what can be wrong
+	// with one is wrong with the request: a coordinate that cannot be a span of
+	// any text is the client's to fix, and a turn that starts and then reports it
+	// is a user waiting on an answer that was never going to come.
+	if request.Selection != nil {
+		if err := request.Selection.Validate(); err != nil {
+			return Started{}, err
+		}
 	}
 	// What runs is decided here, before the turn row exists, which is the whole
 	// point of the position: a turn is created already knowing its capability, so
@@ -252,7 +274,7 @@ func (r *Runner) Start(ctx context.Context, request StartRequest) (Started, erro
 	}
 
 	r.launch(r.newTurnRun(runCtx, cancel, record, conversation, content,
-		declarationOf(request.Attachments, request.KnowledgeBases), emitter, routed))
+		declarationOf(request.Attachments, request.KnowledgeBases, request.Selection), emitter, routed))
 	return Started{Session: conversation, Turn: record}, nil
 }
 

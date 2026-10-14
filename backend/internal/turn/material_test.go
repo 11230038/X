@@ -478,11 +478,17 @@ func TestTheSourceToolsFindTheTurnTheyAreCalledFor(t *testing.T) {
 
 func TestBlankIDsAreNotCarried(t *testing.T) {
 	// An empty id names nothing, so it must not take one of the turn's numbers.
-	declared := declarationOf([]string{"  ", "lib_a", ""}, []string{"", " kb_a "})
+	// The selection rides through untouched: it is a passage and not an id, so
+	// there is nothing in it for this to trim or drop (§2.8).
+	selection := &Selection{MaterialID: "rm_a", Locator: event.Locator{Ordinal: 3, CharStart: 10, CharEnd: 20}}
+	declared := declarationOf([]string{"  ", "lib_a", ""}, []string{"", " kb_a "}, selection)
 	if len(declared.Attachments) != 1 || declared.Attachments[0] != "lib_a" {
 		t.Errorf("attachments = %v, want only the one that names something", declared.Attachments)
 	}
 	if len(declared.KnowledgeBases) != 1 || declared.KnowledgeBases[0] != "kb_a" {
 		t.Errorf("knowledge bases = %v, want only the one that names something", declared.KnowledgeBases)
+	}
+	if declared.Selection != selection {
+		t.Errorf("selection = %+v, want the one that was declared", declared.Selection)
 	}
 }

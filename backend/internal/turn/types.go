@@ -84,6 +84,11 @@ var (
 	ErrEmptyMessage = errors.New("turn: the message is empty")
 	// ErrEmptyReply reports an answer to a question that says nothing.
 	ErrEmptyReply = errors.New("turn: the reply is empty")
+	// ErrInvalidSelection reports a reading selection that names no material, or
+	// a span that cannot be one. It is refused before the turn exists: the
+	// client that sent it can fix it, and a turn that starts and then reports it
+	// is a turn the user waited for nothing.
+	ErrInvalidSelection = errors.New("turn: the reading selection is not usable")
 )
 
 // The failure codes a turn can end with.

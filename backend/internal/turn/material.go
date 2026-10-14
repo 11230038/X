@@ -30,6 +30,17 @@ type Material struct {
 	// the client named them, and one that has since been deleted stays in the
 	// list: what happened to it is reported, not papered over by leaving it out.
 	KnowledgeBases []string
+	// Selection is the passage a reader had chosen in a reading material, as the
+	// source this turn cites it as, and SelectionNote is why there is none when
+	// one was asked for.
+	//
+	// It is the one part of the material that is not searched: a selection is
+	// what the question is about, and it is handed over whole rather than
+	// retrieved from (§2.8). It mounts no tool — a client with a selection asks
+	// about it rather than reading it through a call — which is why the plane
+	// below is composed from the two lists and not from this.
+	Selection     *event.Source
+	SelectionNote string
 }
 
 // Attachment is one file a turn carried and whether it can be read.
@@ -95,6 +106,12 @@ type Declaration struct {
 	Attachments []string
 	// KnowledgeBases are collection ids.
 	KnowledgeBases []string
+	// Selection is the passage a reader had chosen in a reading material when
+	// this turn started, and it is nil for every turn that is not one (§2.8).
+	// It rides here rather than in a field of its own because it is material:
+	// it is what this turn was given to read, it is settled once, and the
+	// survey is the only thing that reads it.
+	Selection *Selection
 }
 
 // declarationOf reads what a client said a turn carries.
@@ -102,10 +119,11 @@ type Declaration struct {
 // A blank id is dropped rather than carried: it names nothing, so keeping it
 // would spend one of the turn's attachment numbers on a file that can never be
 // opened, and shift every number after it.
-func declarationOf(attachments, knowledgeBases []string) Declaration {
+func declarationOf(attachments, knowledgeBases []string, selection *Selection) Declaration {
 	return Declaration{
 		Attachments:    namedIDs(attachments),
 		KnowledgeBases: namedIDs(knowledgeBases),
+		Selection:      selection,
 	}
 }
 
@@ -128,6 +146,7 @@ func namedIDs(ids []string) []string {
 // position, so a failure does not shift the numbering the model was given.
 func (r *turnRun) resolveMaterial(ctx context.Context) {
 	material := Material{KnowledgeBases: r.declared.KnowledgeBases}
+	r.resolveSelection(ctx, &material)
 	for index, fileID := range r.declared.Attachments {
 		attachment := Attachment{Label: strconv.Itoa(index + 1), FileID: fileID}
 		document, err := r.runner.materials.AddDocument(ctx, fileID, "")
@@ -142,6 +161,32 @@ func (r *turnRun) resolveMaterial(ctx context.Context) {
 		material.Attachments = append(material.Attachments, attachment)
 	}
 	r.material = material
+}
+
+// resolveSelection turns the passage a reader had chosen into a source this turn
+// can cite, and it is done here with the rest of the material for the reason the
+// material is resolved here at all: the turn has one scope, settled once, and a
+// selection that arrived later would be a second answer to what this turn is
+// reading (§2.11).
+//
+// It never fails the turn. A selection that cannot be resolved — a material that
+// has since gone, a span the document no longer has — is material that could not
+// be read, reported the way an attachment that failed to parse is: the reader
+// asked a question and the question still stands, so what is lost is the
+// grounding and not the turn (§2.3). The numbering is untouched by the failure,
+// because nothing was handed over.
+func (r *turnRun) resolveSelection(ctx context.Context, material *Material) {
+	if r.declared.Selection == nil || r.runner.readings == nil {
+		return
+	}
+	source, err := r.runner.readings.Passage(ctx, *r.declared.Selection)
+	if err != nil {
+		material.SelectionNote = "你没有读到读者划出的那段原文：" + reasonFor(err)
+		r.runner.logger.WarnContext(ctx, "could not resolve the selection this turn carried",
+			"turn_id", r.turn.ID, "material_id", r.declared.Selection.MaterialID, "error", err)
+		return
+	}
+	material.Selection = &source
 }
 
 // reasonFor explains a file this service could not read, in words a reader can
