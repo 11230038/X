@@ -90,13 +90,15 @@ func (l Locator) Validate() error {
 // Documents is the part of the knowledge base the reading layer reads.
 //
 // It is a port rather than an import (§1.2): the knowledge base is a peer
-// domain, not a lower layer, and the one thing this package needs from it is
-// where a document's text begins and ends.
+// domain, not a lower layer, and what this package needs from it is where a
+// document's text begins and ends, and — for one span at a time — the text
+// itself.
 //
-// Nothing here returns the text itself, and that is deliberate. A catalogue
-// lists units by their coordinates; the words inside a unit are read through the
-// path a turn already reads material by (§2.8), which is what keeps the reading
-// layer from becoming a second way to read a document.
+// The read is deliberately a window and not a document. A catalogue lists units
+// by their coordinates, and the one place the words are needed is a locator
+// being resolved; asking for the whole text and cutting it here would make this
+// layer a second reader of the document, and asking for a span keeps the
+// extractor, the offsets and the unit of "a character" V2's (§2.8).
 type Documents interface {
 	// DocumentOfFile resolves an uploaded file to the document it was parsed
 	// into. A file no parse has reached yet reports ErrNotFound.
@@ -105,6 +107,10 @@ type Documents interface {
 	Document(ctx context.Context, documentID string) (Document, error)
 	// ChunkSpans lists the coordinates of a document's chunks, in reading order.
 	ChunkSpans(ctx context.Context, documentID string) ([]ChunkSpan, error)
+	// Text reads the characters of one document in [charStart, charEnd). The
+	// span is the caller's to have checked against the document's length, which
+	// is what lets storage clamp and this layer refuse.
+	Text(ctx context.Context, documentID string, charStart, charEnd int64) (string, error)
 }
 
 // Document is one parsed file, as the reading layer needs it.
@@ -118,9 +124,10 @@ type Document struct {
 }
 
 // ChunkSpan is where one chunk of a document's text begins and ends. It carries
-// no content, for the same reason the port has no method that returns text.
+// no content: the text of a span is read through Text, one span at a time, and
+// nothing here has a use for a chunk's own number — what this layer numbers is
+// its units.
 type ChunkSpan struct {
-	Ordinal   int
 	CharStart int64
 	CharEnd   int64
 	Page      *int
@@ -153,8 +160,11 @@ type Outline struct {
 	TextChars int64
 }
 
-// Unit is one chunk of a material's text as a catalogue lists it. It is a
-// ChunkSpan that knows which material it belongs to.
+// Unit is one piece of a material's text as a catalogue lists it, and it is a
+// run of the document's chunks rather than one chunk: chunks are sized for
+// retrieval and units for reading (§5). The Ordinal numbers the unit — what a
+// client holds and sends back — while the character span is what the text is
+// read by.
 type Unit struct {
 	Ordinal   int   `json:"ordinal"`
 	CharStart int64 `json:"char_start"`

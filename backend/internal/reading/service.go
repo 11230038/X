@@ -21,21 +21,38 @@ const (
 type Service struct {
 	repository Repository
 	// documents is the knowledge base, through the port this package declares.
-	// Nothing here reads a word of text through it: a catalogue is made of
-	// coordinates, and the text itself travels by the path a turn already reads
-	// material by (§2.8).
+	// A catalogue is made of coordinates and asks it for coordinates; the one
+	// thing that reads words through it is a locator being resolved.
 	documents Documents
+	// maxPassageChars is the largest a unit of text may be, and one bound serves
+	// both jobs: what the outline cuts the text into and what one resolved
+	// passage may hold. They are the same size of thing on purpose — the passage
+	// a model is handed is a unit a reader could have been looking at.
+	maxPassageChars int
+}
+
+// Options tune the reading layer.
+type Options struct {
+	// UnitMaxChars is the largest a unit of a material's text may be (§5).
+	UnitMaxChars int
 }
 
 // NewService returns the service over a storage adapter and the knowledge base.
-func NewService(repository Repository, documents Documents) (*Service, error) {
+func NewService(repository Repository, documents Documents, options Options) (*Service, error) {
 	if repository == nil {
 		return nil, fmt.Errorf("reading service needs a repository")
 	}
 	if documents == nil {
 		return nil, fmt.Errorf("reading service needs the knowledge base")
 	}
-	return &Service{repository: repository, documents: documents}, nil
+	if options.UnitMaxChars <= 0 {
+		return nil, fmt.Errorf("reading service needs a positive unit bound")
+	}
+	return &Service{
+		repository:      repository,
+		documents:       documents,
+		maxPassageChars: options.UnitMaxChars,
+	}, nil
 }
 
 // Materials lists the catalogue, most recently touched first.
@@ -70,16 +87,11 @@ func (s *Service) Outline(ctx context.Context, materialID string) (Outline, erro
 	if err != nil {
 		return Outline{}, err
 	}
-	units := make([]Unit, 0, len(spans))
-	for _, span := range spans {
-		units = append(units, Unit{
-			Ordinal:   span.Ordinal,
-			CharStart: span.CharStart,
-			CharEnd:   span.CharEnd,
-			Page:      span.Page,
-		})
-	}
-	return Outline{Material: material, Units: units, TextChars: document.TextChars}, nil
+	return Outline{
+		Material:  material,
+		Units:     unitsOf(spans, s.maxPassageChars),
+		TextChars: document.TextChars,
+	}, nil
 }
 
 // Create builds a material from a file that has already been uploaded and
