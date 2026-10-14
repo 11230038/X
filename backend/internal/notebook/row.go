@@ -35,13 +35,15 @@ func toEntry(record models.NotebookEntry) (Entry, error) {
 // one that goes stale.
 func QuestionOf(record models.NotebookEntry) (Question, error) {
 	question := Question{
-		QuestionID: record.QuestionID,
-		Text:       record.Question,
-		Type:       QuestionType(record.QuestionType),
-		SessionID:  stringOf(record.SessionID),
-		TurnID:     stringOf(record.TurnID),
-		Source:     stringOf(record.Source),
-		MaterialID: stringOf(record.MaterialID),
+		QuestionID:       record.QuestionID,
+		Text:             record.Question,
+		Type:             QuestionType(record.QuestionType),
+		SessionID:        stringOf(record.SessionID),
+		TurnID:           stringOf(record.TurnID),
+		Source:           stringOf(record.Source),
+		MaterialID:       stringOf(record.MaterialID),
+		MasteryPathID:    stringOf(record.MasteryPathID),
+		KnowledgePointID: stringOf(record.KnowledgePointID),
 	}
 	question.CorrectAnswer = stringOf(record.CorrectAnswer)
 	question.Explanation = stringOf(record.Explanation)

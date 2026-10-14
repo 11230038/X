@@ -52,6 +52,15 @@ func (t *MasteryQuestionTool) Definition() Definition {
 // the model cannot check by reading the sentence: a question stored against the
 // wrong coordinate looks exactly like one stored against the right one, and the
 // next thing that happens is that the wrong evidence is counted.
+//
+// The coordinate is checked against the tree before the question is written, and
+// that order is the point of the read below. A question is filed on the way into
+// the bank (§2.2) and the coordinate is written once, so a question filed
+// against an id that is not in the path would keep that id for good — the model
+// would read "knowledge point kp_42 is not in path mp_1" and the row would go on
+// saying it was. The domain refuses the same id a moment later (mastery.Ask
+// checks it inside its transaction), and that check is what makes the rule true;
+// this one is what keeps the refusal from leaving anything behind.
 func (t *MasteryQuestionTool) Invoke(ctx context.Context, call Call) (Result, error) {
 	path, err := masteryPathFrom(ctx)
 	if err != nil {
@@ -60,6 +69,16 @@ func (t *MasteryQuestionTool) Invoke(ctx context.Context, call Call) (Result, er
 	question, knowledgePointID, err := parseMasteryQuestion(call.Arguments, path.Carried(ctx))
 	if err != nil {
 		return refused(err)
+	}
+	view, err := path.Current(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	if _, _, ok := view.Path.Tree.KnowledgePoint(knowledgePointID); !ok {
+		return refused(&Refusal{Note: fmt.Sprintf(
+			"知识点 %s 不在这条路径里，这道题没有存。现在这条路径上有这些知识点：%s。"+
+				"用其中一个 id 再出一次题；要加一条，先用 mastery_map。",
+			knowledgePointID, strings.Join(view.Path.Tree.KnowledgePointIDs(), "、"))})
 	}
 	saved, err := path.Ask(ctx, question, knowledgePointID)
 	if err != nil {

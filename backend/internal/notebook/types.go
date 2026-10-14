@@ -105,6 +105,18 @@ type Question struct {
 	// Saving adds a name and never removes one, so a category the user filed a
 	// question under by hand survives the question being generated again.
 	Categories []string
+	// MasteryPathID and KnowledgePointID are the coordinate a mastery path
+	// generated this question from, and they travel together because neither
+	// half means anything alone: a knowledge point lives in its path's own tree,
+	// so the same kp-001 under two paths is two different things (§2.2). Both
+	// are empty for a question that came from anywhere else, which is most of
+	// them.
+	//
+	// The pair is written once, like the two fields below it: it says where the
+	// question came from, and a path that regenerates the same question later
+	// does not take it over.
+	MasteryPathID    string
+	KnowledgePointID string
 	// SessionID and TurnID say where this question was first asked, and are
 	// written once: they are not ownership, and a later conversation that
 	// regenerates the same question does not take it over. Both may be empty —
@@ -121,12 +133,23 @@ type Question struct {
 // one of the three. A blank text is not a cosmetic problem — it would hash to
 // the same identity as every other blank question of its type, which is how one
 // question's text ends up replacing another's.
+//
+// The last rule is the mastery coordinate, and half of one is refused rather
+// than completed: the path and the point are read together or not at all, and a
+// row naming a point with no path to look it up in names nothing. Storage cannot
+// say this — `knowledge_point_id` points into `state_json`, so there is no
+// foreign key to lean on (§2.2) — and this is the only place above it that sees
+// both halves at once.
 func (q Question) Validate() error {
 	if normalize(q.Text) == "" {
 		return fmt.Errorf("%w: the question text is blank", ErrInvalidQuestion)
 	}
 	if !q.Type.Valid() {
 		return fmt.Errorf("%w: %q is not a question type", ErrInvalidQuestion, q.Type)
+	}
+	if (q.MasteryPathID == "") != (q.KnowledgePointID == "") {
+		return fmt.Errorf("%w: a question is filed on a path and a knowledge point, or on neither",
+			ErrInvalidQuestion)
 	}
 	return nil
 }

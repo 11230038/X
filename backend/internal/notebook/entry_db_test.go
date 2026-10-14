@@ -17,6 +17,7 @@ import (
 func TestEntryReadsBackWhatWasWritten(t *testing.T) {
 	service, _ := newDBService(t)
 	given := withCategories(sampleQuestion("什么是闭包"), "数学")
+	given.MasteryPathID, given.KnowledgePointID = "mp_1", "kp_001"
 	result := save(t, service, given)
 	entry := entryOf(t, service, result.QuestionID)
 
@@ -43,6 +44,13 @@ func TestEntryReadsBackWhatWasWritten(t *testing.T) {
 	}
 	if entry.Question.MaterialID != "doc_1" {
 		t.Errorf("material_id = %q, want doc_1", entry.Question.MaterialID)
+	}
+	// The mastery coordinate is part of the question face, so a question read
+	// back says which path's knowledge point it was generated for (§2.2): this
+	// is what QN-02's "a related knowledge point" reads once there is one.
+	if entry.Question.MasteryPathID != "mp_1" || entry.Question.KnowledgePointID != "kp_001" {
+		t.Errorf("the question came back filed as %q/%q, want mp_1/kp_001",
+			entry.Question.MasteryPathID, entry.Question.KnowledgePointID)
 	}
 	if entry.CreatedAt.IsZero() {
 		t.Error("created_at is the zero time, want the time the row was written")

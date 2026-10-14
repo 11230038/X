@@ -123,6 +123,8 @@ type storedRow struct {
 	Source            *string        `gorm:"column:source"`
 	MaterialID        *string        `gorm:"column:material_id"`
 	Extra             datatypes.JSON `gorm:"column:extra"`
+	MasteryPathID     *string        `gorm:"column:mastery_path_id"`
+	KnowledgePointID  *string        `gorm:"column:knowledge_point_id"`
 	SessionID         *string        `gorm:"column:session_id"`
 	TurnID            *string        `gorm:"column:turn_id"`
 	CreatTime         *time.Time     `gorm:"column:creat_time"`
@@ -140,8 +142,8 @@ func readRow(t *testing.T, resource *data.Resource, questionID string) storedRow
 	var row storedRow
 	err := resource.GORM().Raw(`SELECT notebook_entries_id, question_id, question, question_type,
 			options, correct_answer, explanation, difficulty, source, material_id, extra,
-			session_id, turn_id, creat_time, update_time, user_answer, is_correct, result,
-			resolved, attempt_count, bookmarked
+			mastery_path_id, knowledge_point_id, session_id, turn_id, creat_time, update_time,
+			user_answer, is_correct, result, resolved, attempt_count, bookmarked
 		FROM notebook_entries WHERE question_id = ?`, questionID).Scan(&row).Error
 	if err != nil {
 		t.Fatalf("read the row of %s: %v", questionID, err)

@@ -109,6 +109,14 @@ func TestSaveRefusesAQuestionStorageWouldRefuse(t *testing.T) {
 		{"a blank text", Question{Type: QuestionChoice}, ErrInvalidQuestion},
 		{"a text of spaces", Question{Text: " \t\n ", Type: QuestionChoice}, ErrInvalidQuestion},
 		{"an unknown type", Question{Text: "选一个", Type: QuestionType("essay")}, ErrInvalidQuestion},
+		// Half a mastery coordinate. The point is an id inside one path's tree,
+		// so either half on its own names somewhere that cannot be looked up.
+		{"a knowledge point with no path",
+			Question{Text: "选一个", Type: QuestionChoice, KnowledgePointID: "kp_001"},
+			ErrInvalidQuestion},
+		{"a path with no knowledge point",
+			Question{Text: "选一个", Type: QuestionChoice, MasteryPathID: "mp_1"},
+			ErrInvalidQuestion},
 	}
 	for _, scenario := range cases {
 		t.Run(scenario.name, func(t *testing.T) {

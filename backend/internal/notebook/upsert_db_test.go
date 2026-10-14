@@ -1,10 +1,11 @@
 package notebook
 
 // The write path, checked against a real seekdb: that saving a question writes
-// its question face and leaves the answer face alone, that the two columns
-// holding the conversation a question came from are written once, and that a
-// question already in the bank is rewritten rather than duplicated — including
-// when two callers ask at the same moment.
+// its question face and leaves the answer face alone, that the four columns
+// saying where the question came from — the conversation and the mastery
+// coordinate — are written once, and that a question already in the bank is
+// rewritten rather than duplicated, including when two callers ask at the same
+// moment.
 //
 // None of it is knowable from a double. The upsert is a statement pair whose
 // second half is reached by the one behaviour a double has no reason to
@@ -284,6 +285,71 @@ func TestUpsertKeepsTheConversationAQuestionCameFrom(t *testing.T) {
 	}
 	if row.TurnID == nil || *row.TurnID != "trn_1" {
 		t.Errorf("turn_id = %v, want trn_1, the turn it came out of", row.TurnID)
+	}
+}
+
+// TestUpsertFilesAQuestionOnThePathItCameFrom pins the mastery coordinate: the
+// path and the knowledge point a question was generated from are written on the
+// way in and stay where they were put (§2.2).
+//
+// The two columns have no foreign key to hold them — a knowledge point is an
+// entry in `mastery_paths.state_json` rather than a row of its own, so there is
+// nothing for a constraint to point at — which is why what a write leaves behind
+// is read back out of the database here instead of being taken from the write.
+func TestUpsertFilesAQuestionOnThePathItCameFrom(t *testing.T) {
+	repository, resource := newDBRepository(t)
+	generated := sampleQuestion("什么是闭包")
+	generated.MasteryPathID, generated.KnowledgePointID = "mp_1", "kp_001"
+	first := saveAt(t, repository, generated, atSecond(0))
+
+	row := readRow(t, resource, first.QuestionID)
+	if row.MasteryPathID == nil || *row.MasteryPathID != "mp_1" {
+		t.Errorf("mastery_path_id = %v, want mp_1", row.MasteryPathID)
+	}
+	if row.KnowledgePointID == nil || *row.KnowledgePointID != "kp_001" {
+		t.Errorf("knowledge_point_id = %v, want kp_001", row.KnowledgePointID)
+	}
+
+	// The same question generated again on another path is the same row, and the
+	// coordinate stays where it was: where a question came from is a fact about
+	// the first write, and a later path that regenerates it does not take it over.
+	again := generated
+	again.MasteryPathID, again.KnowledgePointID = "mp_2", "kp_002"
+	again.Explanation = "在另一条路径里生成的"
+	saveAt(t, repository, again, atSecond(60))
+	row = readRow(t, resource, first.QuestionID)
+	if row.MasteryPathID == nil || *row.MasteryPathID != "mp_1" ||
+		row.KnowledgePointID == nil || *row.KnowledgePointID != "kp_001" {
+		t.Errorf("the rewrite moved the question to %v/%v, want mp_1/kp_001",
+			row.MasteryPathID, row.KnowledgePointID)
+	}
+	// The rewrite did its own job, or the line above is asserting about a write
+	// that never landed.
+	if row.Explanation == nil || *row.Explanation != "在另一条路径里生成的" {
+		t.Errorf("explanation = %v, want the rewrite's", row.Explanation)
+	}
+
+	// A question generated in a conversation carries neither half, and a rewrite
+	// of one of those on a path does not quietly fill them in: the column says
+	// where the question was made, and this one was made in the chat.
+	plain := sampleQuestion("闭包捕获的是什么")
+	second := saveAt(t, repository, plain, atSecond(0))
+	if row := readRow(t, resource, second.QuestionID); row.MasteryPathID != nil ||
+		row.KnowledgePointID != nil {
+		t.Errorf("a question generated in a conversation carries %v/%v, want neither",
+			row.MasteryPathID, row.KnowledgePointID)
+	}
+	filed := plain
+	filed.MasteryPathID, filed.KnowledgePointID = "mp_1", "kp_001"
+	filed.Difficulty = "easy"
+	saveAt(t, repository, filed, atSecond(60))
+	row = readRow(t, resource, second.QuestionID)
+	if row.MasteryPathID != nil || row.KnowledgePointID != nil {
+		t.Errorf("a path write filed a question that was already in the bank as %v/%v",
+			row.MasteryPathID, row.KnowledgePointID)
+	}
+	if row.Difficulty == nil || *row.Difficulty != "easy" {
+		t.Errorf("difficulty = %v, want the rewrite's", row.Difficulty)
 	}
 }
 

@@ -113,12 +113,13 @@ func (r *GORMRepository) rowIDOf(ctx context.Context, questionID string) (string
 }
 
 // writeQuestionFace applies the question-face columns to one row and reports how
-// many rows it changed.
+// many rows changed.
 //
 // The columns are named one by one rather than derived from the model, and that
 // is the point: this is also the statement that must not touch the answer face,
-// not the conversation the question was first asked in, and not update_time.
-// A list of columns is a place where leaving something out is visible.
+// not the conversation the question was first asked in, not the mastery
+// coordinate it was generated from, and not update_time. A list of columns is a
+// place where leaving something out is visible.
 func (r *GORMRepository) writeQuestionFace(ctx context.Context, question Question) (int64, error) {
 	options, err := jsonColumn(question.Options)
 	if err != nil {
@@ -147,9 +148,10 @@ func (r *GORMRepository) writeQuestionFace(ctx context.Context, question Questio
 	return result.RowsAffected, nil
 }
 
-// questionModel is the row to insert: the question face, the two keys, and the
-// conversation it was first asked in. The answer face is left for the review
-// path, so a question nobody has answered has nothing written on it.
+// questionModel is the row to insert: the question face, the two keys, the path
+// it was generated from, and the conversation it was first asked in. The answer
+// face is left for the review path, so a question nobody has answered has
+// nothing written on it.
 func questionModel(entryID string, question Question, now time.Time) (models.NotebookEntry, error) {
 	options, err := jsonColumn(question.Options)
 	if err != nil {
@@ -171,9 +173,15 @@ func questionModel(entryID string, question Question, now time.Time) (models.Not
 		Source:            nullable(question.Source),
 		MaterialID:        nullable(question.MaterialID),
 		Extra:             extra,
-		SessionID:         nullable(question.SessionID),
-		TurnID:            nullable(question.TurnID),
-		CreatedAt:         now,
+		// The mastery coordinate is written here, on the way in, and only here:
+		// it is where the question came from (§2.2), which is a fact about the
+		// first write and not something a later one can improve on. Validate has
+		// already refused half of it.
+		MasteryPathID:    nullable(question.MasteryPathID),
+		KnowledgePointID: nullable(question.KnowledgePointID),
+		SessionID:        nullable(question.SessionID),
+		TurnID:           nullable(question.TurnID),
+		CreatedAt:        now,
 	}, nil
 }
 

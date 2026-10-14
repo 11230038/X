@@ -147,6 +147,12 @@ func (t *TurnPath) Current(ctx context.Context) (mastery.View, error) {
 // path recorded — which happens when the path refuses, and which is the harmless
 // half of the pair: a question is an asset of the bank on its own (QN-01), while
 // an interaction naming a question that does not exist is a broken row.
+//
+// This is also the one place that holds both halves of a question's mastery
+// coordinate at once — the path is the turn's, the knowledge point is the
+// model's — so it is where the pair is written onto the question before the bank
+// stores it (§2.2). Nothing else may fill those two columns: a question is filed
+// once, by the call that generated it on the path it was generated for.
 func (t *TurnPath) Ask(ctx context.Context, question notebook.Question, knowledgePointID string) (tool.Saved, error) {
 	// Before the bank, because an interaction is a write to the path: a question
 	// filed by a turn that may not write the path would be a question in the bank
@@ -155,6 +161,8 @@ func (t *TurnPath) Ask(ctx context.Context, question notebook.Question, knowledg
 	if err := t.writable(); err != nil {
 		return tool.Saved{}, err
 	}
+	question.MasteryPathID = t.pathID
+	question.KnowledgePointID = knowledgePointID
 	saved, err := t.bank.Save(ctx, question)
 	if err != nil {
 		return tool.Saved{}, err
