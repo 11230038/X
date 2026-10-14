@@ -31,6 +31,7 @@ type Handlers struct {
 	Guardians     *handler.GuardianHandler
 	Audit         *handler.AuditHandler
 	Reports       *handler.ReportsHandler
+	Usage         *handler.UsageHandler
 	WebSocket     *ws.Handler
 	TokenVerifier middleware.TokenVerifier
 	// Authorizer answers what an account may reach. It is what the routes below
@@ -115,6 +116,12 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	system := reach(authz.SurfaceSystem)
 	system.GET("/auth/me", handlers.Auth.Me)
 	system.GET("/capabilities", handlers.Capabilities.List)
+	// The usage report is the account's own read of what its calls cost (§2.7).
+	// It sits with the two above because it is the same kind of thing — a
+	// read-only fact about the account or the build, answerable without reaching
+	// any of the domains — and not with the audit, which is the one route here
+	// that answers about the whole instance.
+	system.GET("/usage", handlers.Usage.Get)
 	// The file library is behind the token from the upload onwards. It used to be
 	// the one public write in this API, because a file had no owner: what you
 	// uploaded was stored for whoever came back for the id. That made every stored

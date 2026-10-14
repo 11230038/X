@@ -489,6 +489,7 @@ func validValues() map[string]string {
 		"AUTHZ_LEARNER_SURFACES":       "chat",
 		"AUDIT_RETENTION_DAYS":         "180",
 		"AUDIT_MAX_PAGE_SIZE":          "200",
+		"USAGE_RETENTION_DAYS":         "365",
 	}
 }
 

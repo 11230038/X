@@ -74,6 +74,11 @@ type ai struct {
 	// subject seen twice — the policy answers, and the record says it answered
 	// — and the refusal middleware writes to this on every denied request.
 	auditLog *audit.Service
+	// usage is the reading half of what the recorder writes (§2.7): the same
+	// table, reached the other way. It is here rather than beside the handler
+	// for the reason the audit is: the recorder and the report are one subject
+	// seen twice, and the window the report is retained by is a deployment's.
+	usage *usage.Service
 }
 
 // assemble builds the turn runtime from configuration.
@@ -208,6 +213,15 @@ func assemble(
 	if err != nil {
 		return nil, fmt.Errorf("initialize the usage record: %w", err)
 	}
+	// The reading half is built over the same table and its own type, and it is
+	// built here rather than where the handler is: the window it is retained by
+	// is checked at startup like every other configured number, so a deployment
+	// that wrote a window nobody could serve is refused before the first
+	// request rather than at the first report.
+	usageReport, err := usage.NewService(usage.NewGORMLedger(db), cfg.Usage.RetentionDays)
+	if err != nil {
+		return nil, fmt.Errorf("initialize the usage report: %w", err)
+	}
 	// The question bank and the review path share this database with everything
 	// else, and each gets its own service over it: a question is written by the
 	// turns that generate it, read by the bank's endpoints, and advanced by a
@@ -330,6 +344,7 @@ func assemble(
 		questions: questions, reviews: reviews, mastery: paths.service,
 		dashboard: overview, immersive: immersive, memory: memories,
 		authorization: authorization, auditLog: auditLog,
+		usage: usageReport,
 	}, nil
 }
 

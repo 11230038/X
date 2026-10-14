@@ -20,6 +20,7 @@ import (
 	"backend/internal/kb"
 	"backend/internal/library"
 	"backend/internal/middleware"
+	"backend/internal/usage"
 	"github.com/gin-gonic/gin"
 )
 
@@ -68,6 +69,7 @@ func newTestRouterWithAuthorizer(
 		Guardians:     handler.NewGuardianHandler(routerGuardianStub{}, logger),
 		Audit:         handler.NewAuditHandler(routerAuditStub{}, logger),
 		Reports:       handler.NewReportsHandler(routerDashboardStub{}, routerAuditWriterStub{}, logger),
+		Usage:         handler.NewUsageHandler(routerUsageStub{}, logger),
 		TokenVerifier: authenticator,
 		Authorizer:    authorizer,
 		// KnowledgeBase is deliberately left out. This file is about which
@@ -202,6 +204,16 @@ func (routerAuditStub) List(context.Context, audit.Filter) ([]audit.Event, error
 }
 
 func (routerAuditStub) MaxPageSize() int { return 50 }
+
+// routerUsageStub answers the usage report with a window that has nothing in it.
+// What a report says is handler/usage_test.go's business; what matters here is
+// that the route is mounted, behind a token, in the group it belongs to — which
+// is what the surface in a refusal is the only way to see.
+type routerUsageStub struct{}
+
+func (routerUsageStub) Read(context.Context, usage.Query) (usage.Report, error) {
+	return usage.Report{Groups: []usage.Group{}}, nil
+}
 
 // routerDashboardStub answers the reports route with a view that is
 // recognisable as this stub's, so that the one route which answers with another
@@ -695,6 +707,50 @@ func TestRouterRegistersGovernanceUnderTheAdministrativeSurface(t *testing.T) {
 			})
 		})
 	}
+}
+
+// The usage report is the account's own reading of what its calls cost (§2.7),
+// and it is mounted with the two other per-account facts rather than under the
+// administrative surface. The two are different questions — the audit answers
+// about the whole instance, this one about the account asking — and the surface
+// in the refusal is the only thing that says which group a mount ended up in:
+// the status only says the authorizer was consulted.
+//
+// It is also the mount §7.2's security check turns on. That A cannot see a row of
+// B's is decided in the query the handler builds (handler/usage_test.go) and in
+// the scope the ledger reads through (usage/store_db_test.go); what this case
+// adds is that the route is reachable at all, and reachable as the account's own.
+func TestRouterRegistersTheUsageReportUnderTheSystemSurface(t *testing.T) {
+	denied := newTestRouterWithAuthorizer(t, readyChecker{}, nil, routerAuthorizerStub{deny: true})
+
+	t.Run("without a token it is unauthenticated", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		router := newTestRouterWithAuthorizer(t, readyChecker{}, nil, routerAuthorizerStub{})
+		router.ServeHTTP(recorder, routerRequest(http.MethodGet, "/api/v1/usage", "", false))
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
+		}
+	})
+
+	t.Run("a denial names the surface it is in", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		denied.ServeHTTP(recorder, routerRequest(http.MethodGet, "/api/v1/usage", "", true))
+		if recorder.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403; body=%s", recorder.Code, recorder.Body.String())
+		}
+		if want := `"surface":"` + authz.SurfaceSystem + `"`; !strings.Contains(recorder.Body.String(), want) {
+			t.Errorf("body = %s, want it to carry %s", recorder.Body.String(), want)
+		}
+	})
+
+	t.Run("the account reaches its own report", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		router := newTestRouterWithAuthorizer(t, readyChecker{}, nil, routerAuthorizerStub{})
+		router.ServeHTTP(recorder, routerRequest(http.MethodGet, "/api/v1/usage", "", true))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+		}
+	})
 }
 
 // routerRequest builds one request, optionally bearing the stub's token.

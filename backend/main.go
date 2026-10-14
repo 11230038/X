@@ -139,7 +139,12 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		// else, so it is the dashboard service with the audit beside it: the
 		// answer is the one the learner would get, and the entry is what says
 		// somebody else looked at it.
-		Reports:       handler.NewReportsHandler(ai.dashboard, ai.auditLog, logger),
+		Reports: handler.NewReportsHandler(ai.dashboard, ai.auditLog, logger),
+		// The usage report reads the same table the recorder writes, through a
+		// different type: the recorder cannot read a window and the ledger
+		// cannot write a call, which is what keeps "how much have I spent" from
+		// being a question the writing path is able to answer for anybody.
+		Usage:         handler.NewUsageHandler(ai.usage, logger),
 		WebSocket:     ai.socket,
 		TokenVerifier: authService,
 		Authorizer:    ai.authorization,

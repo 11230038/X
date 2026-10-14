@@ -153,6 +153,9 @@ type Store interface {
 // outside — the call works, the answer is right, and the numbers are small.
 var ErrUnattributed = errors.New("usage: a model call has to be made on behalf of an account")
 
-// ErrNotConfigured is a recorder with no provider or no store behind it, which
-// is a wiring mistake rather than a call that should be made.
-var ErrNotConfigured = errors.New("usage: the recorder is not configured")
+// ErrNotConfigured is one of this package's two halves built without the thing
+// it needs — a recorder with no provider or no store, a report with no ledger.
+// It is a wiring mistake rather than a call that should be made or a read that
+// should be answered, and it is one error rather than two because the caller's
+// next move is the same either way.
+var ErrNotConfigured = errors.New("usage: the usage record is not configured")
