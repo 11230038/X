@@ -16,6 +16,7 @@ const (
 	seedMasteryEventID     = "seed_mastery_event"
 	seedReadingMaterialID  = "seed_reading_material"
 	seedReadingWorkspaceID = "seed_reading_workspace"
+	seedPendingQuestionID  = "seed_pending_question"
 )
 
 func seedMasteryReading(tx *gorm.DB) error {
@@ -109,6 +110,9 @@ func seedReading(tx *gorm.DB) error {
 	title := "Seed reading workspace"
 	description := "用于验证 Reading Workspace 持久化结构。"
 	tabOrder := int32(0)
+	// The passage the pending question was generated about, in the same shape a
+	// locator is stored in: the material plus a coordinate into its text.
+	locator := `{"material_id":"` + seedReadingMaterialID + `","ordinal":0,"char_start":0,"char_end":120}`
 	now := time.Now().UTC()
 
 	records := []struct {
@@ -132,6 +136,13 @@ func seedReading(tx *gorm.DB) error {
 			WorkspaceID: seedReadingWorkspaceID, SessionID: seedSessionID,
 			ActiveMaterialID: stringPointer(seedReadingMaterialID), UpdatedAt: &now,
 		}, "reading workspace session", "workspace_id = ? AND session_id = ?", []any{seedReadingWorkspaceID, seedSessionID}},
+		// The pending question comes after the material, and it has to: its
+		// material_id is a foreign key now, so a question about a passage that
+		// does not exist is refused by the database rather than stored.
+		{&models.ReadingQuizPending{
+			MaterialID: seedReadingMaterialID, Locator: locator, QuestionID: seedPendingQuestionID,
+			QuestionJSON: datatypes.JSON(`{"question":"什么是数据库事务？","type":"short_answer"}`),
+		}, "reading quiz pending", "question_id", seedPendingQuestionID},
 	}
 
 	for _, item := range records {

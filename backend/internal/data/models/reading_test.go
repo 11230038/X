@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/datatypes"
 	"gorm.io/gorm/schema"
 )
 
@@ -19,7 +20,11 @@ func TestReadingModelMappings(t *testing.T) {
 		{"material", &ReadingMaterial{}, "reading_materials", []string{"material_id"}, []string{"material_id", "content_id", "filename", "source_type", "creat_time", "update_time"}},
 		{"workspace", &ReadingWorkspace{}, "reading_workspaces", []string{"workspace_id"}, []string{"workspace_id", "active_material_id", "title", "description", "creat_time", "update_time"}},
 		{"workspace session", &ReadingWorkspaceSession{}, "reading_workspace_sessions", []string{"workspace_id", "session_id"}, []string{"workspace_id", "session_id", "active_material_id", "creat_time", "update_time"}},
-		{"workspace material", &ReadingWorkspaceMaterial{}, "reading_workspace_materials", []string{"workspace_id", "material_id"}, []string{"workspace_id", "material_id", "tab_order", "creat_time"}},
+		{"workspace material", &ReadingWorkspaceMaterial{}, "reading_workspace_materials", []string{"workspace_id", "material_id"}, []string{"workspace_id", "material_id", "tab_order", "pinned", "opened", "creat_time"}},
+		{"position", &ReadingPosition{}, "reading_positions", []string{"material_id", "session_id"}, []string{"material_id", "session_id", "locator_json", "revision", "creat_time", "update_time"}},
+		{"mark", &ReadingMark{}, "reading_marks", []string{"mark_id"}, []string{"mark_id", "material_id", "session_id", "kind", "locator_json", "body", "revision", "creat_time", "update_time"}},
+		{"pairing", &ReadingPairing{}, "reading_pairings", []string{"pairing_id"}, []string{"pairing_id", "primary_material_id", "counterpart_material_id", "primary_language", "counterpart_language", "creat_time"}},
+		{"quiz pending", &ReadingQuizPending{}, "reading_quiz_pending", []string{"material_id", "locator", "question_id"}, []string{"material_id", "locator", "question_id", "question_json", "creat_time"}},
 	}
 
 	for _, tt := range tests {
@@ -49,11 +54,15 @@ func TestReadingNullableFields(t *testing.T) {
 	workspace := ReadingWorkspace{}
 	workspaceSession := ReadingWorkspaceSession{}
 	workspaceMaterial := ReadingWorkspaceMaterial{}
+	position := ReadingPosition{}
+	mark := ReadingMark{}
 	fields := []any{
 		material.ContentID, material.Filename, material.SourceType, material.UpdatedAt,
 		workspace.ActiveMaterialID, workspace.Title, workspace.Description, workspace.UpdatedAt,
 		workspaceSession.ActiveMaterialID, workspaceSession.UpdatedAt,
-		workspaceMaterial.TabOrder,
+		workspaceMaterial.TabOrder, workspaceMaterial.Pinned, workspaceMaterial.Opened,
+		position.UpdatedAt,
+		mark.SessionID, mark.Body, mark.UpdatedAt,
 	}
 	for index, field := range fields {
 		if reflect.TypeOf(field).Kind() != reflect.Ptr {
@@ -62,5 +71,18 @@ func TestReadingNullableFields(t *testing.T) {
 	}
 	if reflect.TypeOf(material.CreatedAt) != reflect.TypeOf(time.Time{}) {
 		t.Fatal("ReadingMaterial.CreatedAt must be time.Time")
+	}
+}
+
+func TestReadingJSONFields(t *testing.T) {
+	jsonFields := []any{
+		ReadingPosition{}.LocatorJSON,
+		ReadingMark{}.LocatorJSON,
+		ReadingQuizPending{}.QuestionJSON,
+	}
+	for index, field := range jsonFields {
+		if reflect.TypeOf(field) != reflect.TypeOf(datatypes.JSON{}) {
+			t.Errorf("reading JSON field %d has type %T", index, field)
+		}
 	}
 }

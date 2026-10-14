@@ -47,18 +47,6 @@ func (NotebookEntry) TableName() string {
 	return "notebook_entries"
 }
 
-// ReadingQuizPending is a persisted question awaiting submission.
-type ReadingQuizPending struct {
-	QuestionID string    `gorm:"column:question_id;primaryKey;autoIncrement:false"`
-	Question   string    `gorm:"column:question;not null"`
-	CreatedAt  time.Time `gorm:"column:creat_time;autoCreateTime"`
-}
-
-// TableName fixes the pending quiz table name.
-func (ReadingQuizPending) TableName() string {
-	return "reading_quiz_pending"
-}
-
 // NotebookCategory is a persisted question category.
 type NotebookCategory struct {
 	NotebookCategoriesID string    `gorm:"column:notebook_categories_id;primaryKey;autoIncrement:false"`

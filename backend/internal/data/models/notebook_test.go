@@ -31,13 +31,6 @@ func TestNotebookModelMappings(t *testing.T) {
 			},
 		},
 		{
-			name:       "reading quiz pending",
-			model:      &ReadingQuizPending{},
-			table:      "reading_quiz_pending",
-			primaryKey: []string{"question_id"},
-			columns:    []string{"question", "creat_time"},
-		},
-		{
 			name:       "notebook category",
 			model:      &NotebookCategory{},
 			table:      "notebook_categories",

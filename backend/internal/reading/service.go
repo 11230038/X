@@ -1,0 +1,254 @@
+package reading
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+)
+
+const (
+	materialIDPrefix = "rm_"
+	markIDPrefix     = "rmk_"
+	idRandomBytes    = 16
+)
+
+// Service owns the rules about the reading layer: which materials the catalogue
+// holds, what makes a position write a conflict, and what a mark may be.
+type Service struct {
+	repository Repository
+	// documents is the knowledge base, through the port this package declares.
+	// Nothing here reads a word of text through it: a catalogue is made of
+	// coordinates, and the text itself travels by the path a turn already reads
+	// material by (§2.8).
+	documents Documents
+}
+
+// NewService returns the service over a storage adapter and the knowledge base.
+func NewService(repository Repository, documents Documents) (*Service, error) {
+	if repository == nil {
+		return nil, fmt.Errorf("reading service needs a repository")
+	}
+	if documents == nil {
+		return nil, fmt.Errorf("reading service needs the knowledge base")
+	}
+	return &Service{repository: repository, documents: documents}, nil
+}
+
+// Materials lists the catalogue, most recently touched first.
+//
+// The workspace is optional and it is what decides whether each material comes
+// back with the tab state of that workspace or with none. A read outside a
+// workspace is not a different kind of read: it is the same catalogue seen by
+// somebody who has no tabs open.
+func (s *Service) Materials(ctx context.Context, workspaceID string) ([]Material, error) {
+	return s.repository.Materials(ctx, strings.TrimSpace(workspaceID))
+}
+
+// Outline returns one material and what it is made of.
+//
+// A material whose row names no document comes back with the material and no
+// units rather than as an error. The row exists and the catalogue should list
+// it; what it lacks is a text to be a coordinate into, and saying so with an
+// empty outline is truer than refusing to describe a row that is there.
+func (s *Service) Outline(ctx context.Context, materialID string) (Outline, error) {
+	material, err := s.repository.Material(ctx, strings.TrimSpace(materialID))
+	if err != nil {
+		return Outline{}, err
+	}
+	if material.ContentID == "" {
+		return Outline{Material: material, Units: []Unit{}}, nil
+	}
+	document, err := s.documents.Document(ctx, material.ContentID)
+	if err != nil {
+		return Outline{}, err
+	}
+	spans, err := s.documents.ChunkSpans(ctx, material.ContentID)
+	if err != nil {
+		return Outline{}, err
+	}
+	units := make([]Unit, 0, len(spans))
+	for _, span := range spans {
+		units = append(units, Unit{
+			Ordinal:   span.Ordinal,
+			CharStart: span.CharStart,
+			CharEnd:   span.CharEnd,
+			Page:      span.Page,
+		})
+	}
+	return Outline{Material: material, Units: units, TextChars: document.TextChars}, nil
+}
+
+// Create builds a material from a file that has already been uploaded and
+// parsed.
+//
+// A document that already has a material gets that material back rather than a
+// second one, because what this answers is "open this file in the reader" and a
+// reader who clicks it twice should not end up with two tabs. The lookup is not
+// a lock — content_id carries no unique index (migration 00012) — so this is
+// idempotent in the ordinary case and not under a race; that limit is recorded
+// in the design's deviation list rather than papered over here.
+func (s *Service) Create(ctx context.Context, fileID, sourceType string) (Material, error) {
+	fileID = strings.TrimSpace(fileID)
+	if fileID == "" {
+		return Material{}, fmt.Errorf("%w: no file was named", ErrInvalidRequest)
+	}
+	document, err := s.documents.DocumentOfFile(ctx, fileID)
+	if err != nil {
+		return Material{}, err
+	}
+	existing, err := s.repository.MaterialOfContent(ctx, document.ID)
+	if err == nil {
+		return existing, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return Material{}, err
+	}
+	materialID, err := newID(materialIDPrefix)
+	if err != nil {
+		return Material{}, fmt.Errorf("generate material id: %w", err)
+	}
+	now := time.Now().UTC()
+	material := Material{
+		MaterialID: materialID,
+		ContentID:  document.ID,
+		Filename:   document.Filename,
+		SourceType: strings.TrimSpace(sourceType),
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if err := s.repository.CreateMaterial(ctx, material); err != nil {
+		return Material{}, err
+	}
+	return material, nil
+}
+
+// Position reads where a reader stopped. The second return value is false when
+// nothing has been saved, which is an answer and not a missing resource.
+func (s *Service) Position(ctx context.Context, materialID, sessionID string) (Position, bool, error) {
+	if _, err := s.repository.Material(ctx, strings.TrimSpace(materialID)); err != nil {
+		return Position{}, false, err
+	}
+	position, err := s.repository.Position(ctx, strings.TrimSpace(materialID), strings.TrimSpace(sessionID))
+	if errors.Is(err, ErrNotFound) {
+		return Position{}, false, nil
+	}
+	if err != nil {
+		return Position{}, false, err
+	}
+	return position, true, nil
+}
+
+// SavePosition writes where a reader stopped, under the revision guard (§2.11).
+//
+// A revision of zero is a request to create the position and anything else is a
+// promise about what the row held. Neither is a last-writer-wins write: a client
+// that read a revision somebody has since moved gets ErrStalePosition and reads
+// the row again, which is the third appearance of the same shape in this
+// version — the review state, the path state, and this.
+func (s *Service) SavePosition(ctx context.Context, request SavePositionRequest) (Position, error) {
+	if err := request.Validate(); err != nil {
+		return Position{}, err
+	}
+	if _, err := s.repository.Material(ctx, request.MaterialID); err != nil {
+		return Position{}, err
+	}
+	now := time.Now().UTC()
+	if request.Revision == 0 {
+		position := Position{
+			MaterialID: request.MaterialID,
+			SessionID:  request.SessionID,
+			Locator:    request.Locator,
+			Revision:   1,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		err := s.repository.CreatePosition(ctx, position)
+		if errors.Is(err, ErrDuplicate) {
+			return Position{}, fmt.Errorf("%w: another tab saved a position first", ErrStalePosition)
+		}
+		if err != nil {
+			return Position{}, err
+		}
+		return position, nil
+	}
+	moved, err := s.repository.SavePosition(ctx, request.MaterialID, request.SessionID, request.Revision, request.Locator, now)
+	if err != nil {
+		return Position{}, err
+	}
+	if !moved {
+		// Nothing moved, and there are two reasons that look alike from here: the
+		// row was removed, or it has moved on. Reading it tells the two apart, and
+		// the caller is told which — "your position is gone" and "your position has
+		// moved" invite different next steps.
+		if _, err := s.repository.Position(ctx, request.MaterialID, request.SessionID); errors.Is(err, ErrNotFound) {
+			return Position{}, fmt.Errorf("%w: the position is gone", ErrStalePosition)
+		}
+		return Position{}, fmt.Errorf("%w: revision %d is no longer current", ErrStalePosition, request.Revision)
+	}
+	return s.repository.Position(ctx, request.MaterialID, request.SessionID)
+}
+
+// Marks lists the marks on one material.
+func (s *Service) Marks(ctx context.Context, materialID string) ([]Mark, error) {
+	if _, err := s.repository.Material(ctx, strings.TrimSpace(materialID)); err != nil {
+		return nil, err
+	}
+	return s.repository.Marks(ctx, strings.TrimSpace(materialID))
+}
+
+// AddMark writes one bookmark, highlight or note.
+//
+// The mark is written at revision 1 and never revised: a mark is a thing the
+// reader put on the text, and editing it is a later version's business. What the
+// revision column is for is the same thing it is for everywhere else — being
+// able to say whether the row moved — and it starts at the first version.
+func (s *Service) AddMark(ctx context.Context, request MarkRequest) (Mark, error) {
+	if err := request.Validate(); err != nil {
+		return Mark{}, err
+	}
+	if _, err := s.repository.Material(ctx, request.MaterialID); err != nil {
+		return Mark{}, err
+	}
+	markID, err := newID(markIDPrefix)
+	if err != nil {
+		return Mark{}, fmt.Errorf("generate mark id: %w", err)
+	}
+	now := time.Now().UTC()
+	mark := Mark{
+		MarkID:     markID,
+		MaterialID: request.MaterialID,
+		SessionID:  request.SessionID,
+		Kind:       request.Kind,
+		Locator:    request.Locator,
+		Body:       strings.TrimSpace(request.Body),
+		Revision:   1,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if err := s.repository.CreateMark(ctx, mark); err != nil {
+		return Mark{}, err
+	}
+	return mark, nil
+}
+
+// RemoveMark takes one mark off the material.
+func (s *Service) RemoveMark(ctx context.Context, markID string) error {
+	return s.repository.DeleteMark(ctx, strings.TrimSpace(markID))
+}
+
+// newID returns a readable row id with the given prefix.
+//
+// The row key is random while a question's address is derived, and the two are
+// different jobs: an address has to be stable across writers, and a row key only
+// has to be unique.
+func newID(prefix string) (string, error) {
+	value := make([]byte, idRandomBytes)
+	if _, err := rand.Read(value); err != nil {
+		return "", err
+	}
+	return prefix + hex.EncodeToString(value), nil
+}

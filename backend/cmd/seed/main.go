@@ -25,7 +25,6 @@ const (
 	seedNotebookEntryID    = "seed_notebook_entry"
 	seedNotebookQuestionID = "seed_notebook_question"
 	seedNotebookCategoryID = "seed_notebook_category"
-	seedPendingQuestionID  = "seed_pending_question"
 	seedReviewRequestID    = "seed_review_request"
 )
 
@@ -206,7 +205,6 @@ func seedNotebookPractice(tx *gorm.DB) error {
 	result := "correct"
 	source := "seed"
 	categoryName := "数据库基础"
-	pendingQuestion := "什么是数据库事务？"
 	isCorrect := true
 	resolved := true
 	bookmarked := false
@@ -256,10 +254,6 @@ func seedNotebookPractice(tx *gorm.DB) error {
 		&models.NotebookEntryCategory{
 			NotebookEntriesID:    seedNotebookEntryID,
 			NotebookCategoriesID: seedNotebookCategoryID,
-		},
-		&models.ReadingQuizPending{
-			QuestionID: seedPendingQuestionID,
-			Question:   pendingQuestion,
 		},
 		&models.PracticeReviewState{
 			NotebookEntriesID: seedNotebookEntryID,
