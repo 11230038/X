@@ -160,6 +160,16 @@ func NewRunner(options Options) (*Runner, error) {
 
 // StartRequest is what a client asks for when it starts a turn.
 type StartRequest struct {
+	// OwnerID is whose turn this is, and it is zero for a turn with no account
+	// behind it — a test, or a connection nobody has signed in on (§2.7).
+	//
+	// The runner does not know what the account is for. It knows that a turn has
+	// a master, and the master is who the Memory it observes belongs to; a turn
+	// with no master writes no Memory at all, which is a narrower and safer rule
+	// than writing it somewhere shared. The id arrives from the authenticated
+	// websocket connection, because that boundary is the only layer that knows who
+	// is on the other end of it.
+	OwnerID int64
 	// SessionID continues an existing conversation. Empty starts a new one.
 	SessionID string
 	// Capability is what should run. Empty runs the default.

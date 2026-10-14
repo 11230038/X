@@ -84,6 +84,12 @@ var requiredKeys = []string{
 	"READING_UNIT_MAX_CHARS",
 	"READING_TUTOR_MAX_TOKENS",
 	"READING_EXTENSION_TIMEOUT",
+	"MEMORY_CONFIDENCE_THRESHOLD",
+	"MEMORY_MIN_CORROBORATION",
+	"MEMORY_MIN_SURFACES",
+	"MEMORY_SENSITIVE_KINDS",
+	"MEMORY_SYNTHESIS_WINDOW_DAYS",
+	"MEMORY_MAX_FACTS_PER_SURFACE",
 }
 
 // Config contains all settings required to run the service.
@@ -104,6 +110,7 @@ type Config struct {
 	Mastery         MasteryConfig
 	Dashboard       DashboardConfig
 	Reading         ReadingConfig
+	Memory          MemoryConfig
 }
 
 // Load reads configuration exclusively from the dotenv file at path. The path
@@ -174,6 +181,10 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	memory, err := loadMemoryConfig(values)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
 		HTTPAddr:        strings.TrimSpace(values["HTTP_ADDR"]),
@@ -192,6 +203,7 @@ func Load(path string) (Config, error) {
 		Mastery:         mastery,
 		Dashboard:       dashboard,
 		Reading:         reading,
+		Memory:          memory,
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -248,5 +260,8 @@ func (c Config) Validate() error {
 	if err := c.Dashboard.Validate(); err != nil {
 		return err
 	}
-	return c.Reading.Validate()
+	if err := c.Reading.Validate(); err != nil {
+		return err
+	}
+	return c.Memory.Validate()
 }
