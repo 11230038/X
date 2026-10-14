@@ -64,8 +64,12 @@ type Session struct {
 	UpdatedAt     time.Time      `gorm:"column:update_time;autoCreateTime;autoUpdateTime"`
 	Preferences   datatypes.JSON `gorm:"column:preferences_json;type:json"`
 	WorkspaceMode *string        `gorm:"column:workspace_mode"`
-	IsDeleted     bool           `gorm:"column:is_deleted;not null;default:false"`
-	DeletedAt     *time.Time     `gorm:"column:deleted_at"`
+	// OwnerID is NULL for conversations that predate V5 (migration 00014).
+	// That is a state rather than a gap: such a row belongs to no account, is
+	// visible only to an administrator, and is claimed explicitly.
+	OwnerID   *int64     `gorm:"column:owner_id"`
+	IsDeleted bool       `gorm:"column:is_deleted;not null;default:false"`
+	DeletedAt *time.Time `gorm:"column:deleted_at"`
 }
 
 // TableName fixes the sessions table name.
@@ -109,21 +113,24 @@ func (Summary) TableName() string {
 
 // Turn is the persistence mapping for one model or tool execution.
 type Turn struct {
-	TurnID             string         `gorm:"column:turn_id;primaryKey;autoIncrement:false"`
-	SessionID          string         `gorm:"column:session_id;not null"`
-	Extra              datatypes.JSON `gorm:"column:extra;type:json"`
-	CreatedAt          time.Time      `gorm:"column:creat_time;autoCreateTime"`
-	UpdatedAt          *time.Time     `gorm:"column:update_time"`
-	FinishedAt         *time.Time     `gorm:"column:finish_time"`
-	OwnerID            *string        `gorm:"column:own_id"`
-	FencingToken       *int64         `gorm:"column:fencing_token"`
-	StateVersion       int64          `gorm:"column:state_version;not null"`
-	Status             string         `gorm:"column:status;not null"`
-	Capability         *string        `gorm:"column:capability"`
-	Error              *string        `gorm:"column:error"`
-	Retryable          *int16         `gorm:"column:retryable"`
-	FailureCode        *string        `gorm:"column:failure_code"`
-	AssistantMessageID *string        `gorm:"column:assistant_message_id"`
+	TurnID     string         `gorm:"column:turn_id;primaryKey;autoIncrement:false"`
+	SessionID  string         `gorm:"column:session_id;not null"`
+	Extra      datatypes.JSON `gorm:"column:extra;type:json"`
+	CreatedAt  time.Time      `gorm:"column:creat_time;autoCreateTime"`
+	UpdatedAt  *time.Time     `gorm:"column:update_time"`
+	FinishedAt *time.Time     `gorm:"column:finish_time"`
+	// WorkerID names the worker that owns this turn. It is not an account: the
+	// account is StartRequest.OwnerID, an int64 on a different table. Migration
+	// 00014 renamed this column from own_id so the two stop sharing a name.
+	WorkerID           *string `gorm:"column:worker_id"`
+	FencingToken       *int64  `gorm:"column:fencing_token"`
+	StateVersion       int64   `gorm:"column:state_version;not null"`
+	Status             string  `gorm:"column:status;not null"`
+	Capability         *string `gorm:"column:capability"`
+	Error              *string `gorm:"column:error"`
+	Retryable          *int16  `gorm:"column:retryable"`
+	FailureCode        *string `gorm:"column:failure_code"`
+	AssistantMessageID *string `gorm:"column:assistant_message_id"`
 }
 
 // TableName fixes the turns table name.

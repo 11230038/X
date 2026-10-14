@@ -50,7 +50,7 @@ func TestConversationModelMappings(t *testing.T) {
 			table:      "turns",
 			primaryKey: "turn_id",
 			columns: []string{
-				"session_id", "extra", "creat_time", "update_time", "finish_time", "own_id",
+				"session_id", "extra", "creat_time", "update_time", "finish_time", "worker_id",
 				"fencing_token", "state_version", "status", "capability", "error", "retryable",
 				"failure_code", "assistant_message_id",
 			},

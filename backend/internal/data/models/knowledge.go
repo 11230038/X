@@ -15,6 +15,8 @@ type KnowledgeBase struct {
 	IsDefault bool      `gorm:"column:is_default;not null;default:false"`
 	CreatedAt time.Time `gorm:"column:creat_time;autoCreateTime"`
 	UpdatedAt time.Time `gorm:"column:update_time;autoCreateTime;autoUpdateTime"`
+	// OwnerID is the account that built the collection (migration 00014).
+	OwnerID *int64 `gorm:"column:owner_id"`
 }
 
 // TableName fixes the knowledge_bases table name.

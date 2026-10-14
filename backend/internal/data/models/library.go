@@ -14,6 +14,9 @@ type LibraryFile struct {
 	UpdatedAt   time.Time  `gorm:"column:updated_at;autoUpdateTime"`
 	IsDeleted   bool       `gorm:"column:is_deleted;not null"`
 	DeletedAt   *time.Time `gorm:"column:deleted_at"`
+	// OwnerID is the account that uploaded the file (migration 00014). A file
+	// belongs to no conversation, so there is no chain to derive it from.
+	OwnerID *int64 `gorm:"column:owner_id"`
 }
 
 func (LibraryFile) TableName() string { return "library_files" }

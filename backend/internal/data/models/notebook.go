@@ -40,6 +40,10 @@ type NotebookEntry struct {
 	KnowledgePointID *string        `gorm:"column:knowledge_point_id"`
 	SessionID        *string        `gorm:"column:session_id"`
 	TurnID           *string        `gorm:"column:turn_id"`
+	// OwnerID is carried here rather than derived from the session because
+	// session_id is nullable (migration 00014): a question asked with no
+	// conversation behind it has no chain to walk.
+	OwnerID *int64 `gorm:"column:owner_id"`
 }
 
 // TableName fixes the notebook entry table name.
@@ -52,6 +56,8 @@ type NotebookCategory struct {
 	NotebookCategoriesID string    `gorm:"column:notebook_categories_id;primaryKey;autoIncrement:false"`
 	Name                 string    `gorm:"column:name;not null"`
 	CreatedAt            time.Time `gorm:"column:creat_time;autoCreateTime"`
+	// Names are unique per owner, not globally (migration 00014).
+	OwnerID *int64 `gorm:"column:owner_id"`
 }
 
 // TableName fixes the notebook category table name.

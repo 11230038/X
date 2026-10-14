@@ -14,6 +14,9 @@ type ReadingMaterial struct {
 	SourceType *string    `gorm:"column:source_type"`
 	CreatedAt  time.Time  `gorm:"column:creat_time;autoCreateTime"`
 	UpdatedAt  *time.Time `gorm:"column:update_time;autoUpdateTime:false"`
+	// OwnerID is the account the material was built for (migration 00014). A
+	// material comes from a file, not from a conversation.
+	OwnerID *int64 `gorm:"column:owner_id"`
 }
 
 func (ReadingMaterial) TableName() string { return "reading_materials" }

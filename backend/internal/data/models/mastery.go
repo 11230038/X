@@ -8,12 +8,16 @@ import (
 
 // MasteryPath stores one mastery path state snapshot.
 type MasteryPath struct {
-	MasteryPathID  string         `gorm:"column:mastery_path_id;primaryKey;autoIncrement:false"`
-	OwnerSessionID string         `gorm:"column:owner_session_id;not null"`
-	State          datatypes.JSON `gorm:"column:state_json;type:json"`
-	Version        *int32         `gorm:"column:version"`
-	CreatedAt      time.Time      `gorm:"column:creat_time;autoCreateTime"`
-	UpdatedAt      *time.Time     `gorm:"column:update_time;autoUpdateTime:false"`
+	MasteryPathID  string `gorm:"column:mastery_path_id;primaryKey;autoIncrement:false"`
+	OwnerSessionID string `gorm:"column:owner_session_id;not null"`
+	// OwnerID is the account, which is not OwnerSessionID: that column names
+	// the session that started the path, and a path outlives its session
+	// (migration 00014).
+	OwnerID   *int64         `gorm:"column:owner_id"`
+	State     datatypes.JSON `gorm:"column:state_json;type:json"`
+	Version   *int32         `gorm:"column:version"`
+	CreatedAt time.Time      `gorm:"column:creat_time;autoCreateTime"`
+	UpdatedAt *time.Time     `gorm:"column:update_time;autoUpdateTime:false"`
 }
 
 func (MasteryPath) TableName() string { return "mastery_paths" }
