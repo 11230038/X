@@ -85,6 +85,32 @@ func (r *GORMRepository) UpsertQuestion(ctx context.Context, entryID string, que
 	return Upserted{ID: id, QuestionID: question.QuestionID}, nil
 }
 
+// DeleteQuestion removes one question, with everything the schema hangs off it.
+//
+// The row is reached by the question's own key rather than by the row key,
+// because the row key is the importer's invention and the question's address is
+// the thing two instances agree about: a package names a question id, and this is
+// the statement §2.13's recovery needs to be able to answer with.
+//
+// The scope is the caller's, so an account deleting a question whose address is
+// another account's finds nothing — which is the same answer as a question that
+// is nowhere, and the one AUTH-06 asks for.
+func (r *GORMRepository) DeleteQuestion(ctx context.Context, questionID string, caller authz.Caller) error {
+	if err := r.ready(); err != nil {
+		return err
+	}
+	query := data.OwnerScope(r.db.WithContext(ctx).Model(&models.NotebookEntry{}),
+		caller.UserID, caller.IsAdmin(), "owner_id")
+	result := query.Where("question_id = ?", questionID).Delete(&models.NotebookEntry{})
+	if result.Error != nil {
+		return fmt.Errorf("delete question %s: %w", questionID, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("%w: %s", ErrNotFound, questionID)
+	}
+	return nil
+}
+
 // insertQuestion inserts the row and reports whether this call is the one that
 // made it. A duplicate key is not a failure: it means somebody else inserted
 // this question between the update and this insert, and they were right.

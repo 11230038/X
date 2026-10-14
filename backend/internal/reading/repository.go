@@ -47,6 +47,15 @@ type Repository interface {
 	// rather than as a caller, the same way it does on a session: there is no
 	// row yet to narrow against, so the caller only supplies the owner value.
 	CreateMaterial(ctx context.Context, material Material) error
+	// DeleteMaterial removes one material, ErrNotFound when there was none the
+	// caller may see. The rows that hang off it go with it, because the schema's
+	// foreign keys say so rather than because this statement knows about them.
+	//
+	// It is the inverse of CreateMaterial and it has exactly one caller: a
+	// workspace import that did not finish, taking back the rows it wrote
+	// (§2.13). Nothing in the product removes a material — the catalogue has no
+	// delete — which is why there is no service method around this one.
+	DeleteMaterial(ctx context.Context, materialID string, caller authz.Caller) error
 
 	// Position reads where a reader stopped, ErrNotFound when nothing was saved
 	// or the material is not the caller's.
@@ -298,6 +307,33 @@ func (r *GORMRepository) CreateMaterial(ctx context.Context, material Material) 
 	err := r.db.WithContext(ctx).Create(&record).Error
 	if err != nil {
 		return fmt.Errorf("create reading material %s: %w", material.MaterialID, err)
+	}
+	return nil
+}
+
+// DeleteMaterial removes one material.
+//
+// One statement is the whole of it: positions, marks, workspace tabs and
+// pairings all reference reading_materials with ON DELETE CASCADE (00012), so
+// taking the material out takes them with it — and the two rows that reference a
+// material loosely are SET NULL (00004), which is what a row that is about
+// mastery rather than about a document should do when the document goes.
+//
+// Rows affected is the not-found test rather than a read first. A read and then
+// a delete has a window between them, and the answer it gives — "it was there a
+// moment ago" — is not one any caller can act on.
+func (r *GORMRepository) DeleteMaterial(ctx context.Context, materialID string, caller authz.Caller) error {
+	if err := r.ready(); err != nil {
+		return err
+	}
+	query := data.OwnerScope(r.db.WithContext(ctx).Model(&models.ReadingMaterial{}),
+		caller.UserID, caller.IsAdmin(), "owner_id")
+	result := query.Where("material_id = ?", materialID).Delete(&models.ReadingMaterial{})
+	if result.Error != nil {
+		return fmt.Errorf("delete reading material %s: %w", materialID, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("%w: material %s", ErrNotFound, materialID)
 	}
 	return nil
 }

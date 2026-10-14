@@ -335,6 +335,17 @@ type Repository interface {
 	// nothing, so the caller is told ErrNotFound — the same answer as a question
 	// that is nowhere at all.
 	UpsertQuestion(ctx context.Context, entryID string, question Question, now time.Time, caller authz.Caller) (Upserted, error)
+	// DeleteQuestion removes one question, ErrNotFound when there is none the
+	// caller may see. Its categories, its review state and its review events go
+	// with it, because the schema says so (ON DELETE CASCADE from 00003 and
+	// 00004) rather than because this statement knows about them.
+	//
+	// It is the inverse of UpsertQuestion and it has exactly one caller: a
+	// workspace import that did not finish, taking back the rows it wrote
+	// (§2.13). Nothing in the product deletes a question — a bank that could lose
+	// one by accident is a bank nobody keeps anything in — which is why there is
+	// no service method around this one.
+	DeleteQuestion(ctx context.Context, questionID string, caller authz.Caller) error
 	// AddCategories files a question under the given names, creating the
 	// categories that do not exist yet. It never removes one: this is the write
 	// side of generating a question, and a category the user added by hand is

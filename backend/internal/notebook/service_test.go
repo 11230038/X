@@ -61,6 +61,18 @@ func (f *fakeRepository) UpsertQuestion(_ context.Context, entryID string, quest
 	return Upserted{ID: entryID, QuestionID: question.QuestionID, Created: true}, nil
 }
 
+// DeleteQuestion is here because the interface has it, not because the service
+// uses it: its one caller is a workspace import taking back what it wrote
+// (§2.13), and what the statement really does to the rows hanging off a question
+// is the schema's answer and is checked in delete_db_test.go.
+func (f *fakeRepository) DeleteQuestion(_ context.Context, questionID string, _ authz.Caller) error {
+	if _, held := f.entries[questionID]; !held {
+		return fmt.Errorf("%w: %s", ErrNotFound, questionID)
+	}
+	delete(f.entries, questionID)
+	return nil
+}
+
 func (f *fakeRepository) AddCategories(_ context.Context, entryID string, names []string, _ authz.Caller) error {
 	if f.fileErr != nil {
 		return f.fileErr

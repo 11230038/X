@@ -14,6 +14,7 @@ package reading
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -137,6 +138,27 @@ func (f *fakeRepository) CreateMaterial(_ context.Context, material Material) er
 	}
 	f.withMaterial(material)
 	return nil
+}
+
+// DeleteMaterial removes the material and, because the fake is standing in for a
+// schema whose foreign keys say so, the rows hanging off it. It is here to
+// satisfy the interface rather than to prove anything: the cascade is a claim
+// about migration 00004 and 00012, and delete_db_test.go is where it is checked.
+func (f *fakeRepository) DeleteMaterial(_ context.Context, materialID string, _ authz.Caller) error {
+	for index, material := range f.materials {
+		if material.MaterialID != materialID {
+			continue
+		}
+		f.materials = append(f.materials[:index], f.materials[index+1:]...)
+		f.deletes = append(f.deletes, materialID)
+		f.positions = slices.DeleteFunc(f.positions, func(p Position) bool { return p.MaterialID == materialID })
+		f.marks = slices.DeleteFunc(f.marks, func(m Mark) bool { return m.MaterialID == materialID })
+		f.pairings = slices.DeleteFunc(f.pairings, func(p Pairing) bool {
+			return p.PrimaryMaterialID == materialID || p.CounterpartMaterialID == materialID
+		})
+		return nil
+	}
+	return fmt.Errorf("%w: material %s", ErrNotFound, materialID)
 }
 
 func (f *fakeRepository) Position(_ context.Context, materialID, sessionID string, _ authz.Caller) (Position, error) {
