@@ -88,6 +88,10 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// else a person's own material goes through: what these answer is what this
 	// user has been asked, answered and got wrong.
 	authenticated.GET("/questions", handlers.Questions.List)
+	// The batch import is one route in two modes: `dry_run=true` reports what
+	// writing the file would do and writes nothing, and the same route without it
+	// does what the report said (§2.13).
+	authenticated.POST("/questions/import", handlers.Questions.Import)
 	authenticated.GET("/questions/:questionID", handlers.Questions.Get)
 	authenticated.PATCH("/questions/:questionID", handlers.Questions.Patch)
 	authenticated.GET("/question-categories", handlers.Questions.Categories)

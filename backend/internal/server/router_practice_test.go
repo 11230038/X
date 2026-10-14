@@ -34,6 +34,12 @@ func (routerQuestionsStub) Categories(context.Context) ([]notebook.Category, err
 	return []notebook.Category{{Name: "数学", Count: 3}}, nil
 }
 
+// Import answers the batch import with an empty report: this file is about which
+// routes exist, and what the import says about a file is handler/question_import_test.go's.
+func (routerQuestionsStub) Import(context.Context, string, bool) (notebook.ImportReport, error) {
+	return notebook.ImportReport{Entries: []notebook.ImportEntry{}}, nil
+}
+
 func routerQuestionBankEntry(questionID string) notebook.Entry {
 	return notebook.Entry{
 		Question: notebook.Question{QuestionID: questionID, Text: "什么是闭包", Type: notebook.QuestionChoice},

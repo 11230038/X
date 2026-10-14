@@ -21,6 +21,9 @@ type Questions interface {
 	Mark(context.Context, string, notebook.Change) error
 	SetCategories(context.Context, string, []string) error
 	Categories(context.Context) ([]notebook.Category, error)
+	// Import is the batch import (QN-05): the file's whole text, and whether this
+	// request is the preview.
+	Import(context.Context, string, bool) (notebook.ImportReport, error)
 }
 
 // QuestionHandler handles the question bank: the list, one question, the marks

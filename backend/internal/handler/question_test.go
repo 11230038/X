@@ -27,12 +27,17 @@ type questionStub struct {
 	entry      notebook.Entry
 	listed     []notebook.Entry
 	categories []notebook.Category
-	err        error
+	// report is what the batch import answers with. Its DryRun is set by the stub
+	// rather than by the case, because which request this is is the one thing the
+	// domain is told and the one thing the answer echoes.
+	report notebook.ImportReport
+	err    error
 
 	filters []notebook.Filter
 	marks   []markCall
 	files   []fileCall
 	read    []string
+	imports []importCall
 }
 
 type markCall struct {
@@ -43,6 +48,13 @@ type markCall struct {
 type fileCall struct {
 	questionID string
 	names      []string
+}
+
+// importCall is one batch import as the domain saw it: the file's whole text and
+// which of the two requests it was.
+type importCall struct {
+	file   string
+	dryRun bool
 }
 
 func (s *questionStub) Get(_ context.Context, questionID string) (notebook.Entry, error) {
@@ -67,6 +79,16 @@ func (s *questionStub) SetCategories(_ context.Context, questionID string, names
 
 func (s *questionStub) Categories(context.Context) ([]notebook.Category, error) {
 	return s.categories, s.err
+}
+
+func (s *questionStub) Import(_ context.Context, file string, dryRun bool) (notebook.ImportReport, error) {
+	s.imports = append(s.imports, importCall{file: file, dryRun: dryRun})
+	if s.err != nil {
+		return notebook.ImportReport{}, s.err
+	}
+	report := s.report
+	report.DryRun = dryRun
+	return report, nil
 }
 
 // sampleEntry is one question of the bank with both faces filled in, so that a
@@ -108,6 +130,7 @@ func newQuestionRouter(questions Questions) *gin.Engine {
 	handler := NewQuestionHandler(questions, testHandlerLogger())
 	router := gin.New()
 	router.GET("/api/v1/questions", handler.List)
+	router.POST("/api/v1/questions/import", handler.Import)
 	router.GET("/api/v1/questions/:questionID", handler.Get)
 	router.PATCH("/api/v1/questions/:questionID", handler.Patch)
 	router.GET("/api/v1/question-categories", handler.Categories)

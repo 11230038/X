@@ -13,6 +13,7 @@ package notebook
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -28,11 +29,25 @@ type fakeRepository struct {
 	refiledFor []string
 	marks      int
 	listed     int
+	// entries is the bank this repository holds, by content address. A bank
+	// rather than a single entry, because what a test about a conflict needs is
+	// the question that is already there and the one that is not.
+	entries map[string]Entry
 
 	upsertErr error
 	fileErr   error
 	markErr   error
 	listErr   error
+	entryErr  error
+}
+
+// withQuestion puts one question in the bank this repository holds.
+func (f *fakeRepository) withQuestion(question Question) {
+	if f.entries == nil {
+		f.entries = map[string]Entry{}
+	}
+	question.QuestionID = QuestionID(question.Text, question.Type)
+	f.entries[question.QuestionID] = Entry{Question: question}
 }
 
 func (f *fakeRepository) UpsertQuestion(_ context.Context, entryID string, question Question,
@@ -53,8 +68,15 @@ func (f *fakeRepository) AddCategories(_ context.Context, entryID string, names 
 	return nil
 }
 
-func (f *fakeRepository) Entry(_ context.Context, _ string) (Entry, error) {
-	return Entry{}, nil
+func (f *fakeRepository) Entry(_ context.Context, questionID string) (Entry, error) {
+	if f.entryErr != nil {
+		return Entry{}, f.entryErr
+	}
+	entry, ok := f.entries[questionID]
+	if !ok {
+		return Entry{}, fmt.Errorf("%w: %s", ErrNotFound, questionID)
+	}
+	return entry, nil
 }
 
 func (f *fakeRepository) List(_ context.Context, _ Filter) ([]Entry, error) {
