@@ -3,6 +3,7 @@ package mastery
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -11,14 +12,21 @@ import (
 // seen", and the second is the input the gate reads. The two share the version
 // guard, the event log and the transaction, and nothing else.
 
-// RecordEvidence appends one observation to a path's history.
+// RecordEvidence appends one observation to a path's history and moves the
+// levels the gate derives from it.
 //
-// It takes the path's version for the same reason a tree change does: the
-// evidence is a fact about the path's progress, and the event left behind says
-// which version it belongs to. What it does *not* do — yet — is recompute the
-// mastery levels cached in the tree; that is the gate's job and it arrives with
-// it, in the same transaction, so that "the evidence was recorded" and "the
-// levels say so" can never come apart.
+// The order is state first, event second — the reverse of a tree change — and
+// the reversal is the whole of the lease's expiry rule (§2.3). A turn whose
+// lease expired while it was still running loses the version guard; if losing it
+// rolled the transaction back, it would also destroy the observation, and the
+// observation is still true: the learner did answer that question, whatever the
+// next writer did to the tree. So the guard loses, the state stays where the
+// other writer put it, and the evidence and its event land anyway.
+//
+// Which version the event names follows from that. When the state moved, the
+// event names the version it reached; when it did not, the event names the
+// version the observation was made against. Both are true statements about
+// different things, and a made-up version would be a statement about neither.
 func (s *Service) RecordEvidence(ctx context.Context, evidence Evidence) (Evidence, error) {
 	if err := evidence.Validate(); err != nil {
 		return Evidence{}, err
@@ -48,6 +56,29 @@ func (s *Service) RecordEvidence(ctx context.Context, evidence Evidence) (Eviden
 		if err := repository.AppendEvidence(ctx, evidence); err != nil {
 			return err
 		}
+		evidences, err := repository.Evidences(ctx, path.ID)
+		if err != nil {
+			return err
+		}
+		tree := GateTree(path.Tree, evidences, s.gate)
+
+		// The guard first, because which version the event may name depends on
+		// whether it held.
+		version := path.Version
+		updated := false
+		moved, err := repository.SaveTree(ctx, path.ID, path.Version, tree, now)
+		switch {
+		case err == nil:
+			version, updated = moved, true
+		case errors.Is(err, ErrStaleState):
+			// The path moved under this observation. The evidence stands; the state
+			// does not get written, and the levels wait for the writer that did move
+			// it to recompute them — which it will, because every writer of the state
+			// runs the gate over the whole evidence.
+		default:
+			return err
+		}
+
 		eventID, err := newID(eventIDPrefix)
 		if err != nil {
 			return err
@@ -56,6 +87,7 @@ func (s *Service) RecordEvidence(ctx context.Context, evidence Evidence) (Eviden
 			"evidence_id":     evidence.ID,
 			"knowledge_point": evidence.KnowledgePoint,
 			"result":          evidence.Result,
+			"state_updated":   updated,
 		})
 		if err != nil {
 			return fmt.Errorf("encode evidence %s: %w", evidence.ID, err)
@@ -64,20 +96,12 @@ func (s *Service) RecordEvidence(ctx context.Context, evidence Evidence) (Eviden
 			ID:        eventID,
 			PathID:    path.ID,
 			Type:      EventEvidenceRecorded,
-			Version:   path.Version + 1,
+			Version:   version,
 			Payload:   payload,
 			Actor:     evidence.Actor,
 			CreatedAt: now,
 		}
 		if err := repository.AppendEvent(ctx, event); err != nil {
-			return err
-		}
-		// The state is rewritten as itself, under the guard, so that the version the
-		// evidence's event names is a version the path really reached. It is not a
-		// no-op: without it the event would point at a version that the next tree
-		// change would take instead, and the history would say two different changes
-		// produced the same one.
-		if _, err := repository.SaveTree(ctx, path.ID, path.Version, path.Tree, now); err != nil {
 			return err
 		}
 		if err := repository.TouchSession(ctx, path.ID, evidence.Actor, now); err != nil {

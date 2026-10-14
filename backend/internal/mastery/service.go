@@ -34,6 +34,9 @@ type Options struct {
 	// a deployment that asked for one has a mistake in its configuration that
 	// should be reported rather than papered over.
 	LeaseTTL time.Duration
+	// Gate is the two thresholds that decide what a knowledge point's evidence
+	// means.
+	Gate GateOptions
 }
 
 // Validate reports whether the options are usable.
@@ -41,7 +44,7 @@ func (o Options) Validate() error {
 	if o.LeaseTTL <= 0 {
 		return fmt.Errorf("mastery: the lease ttl must be positive, not %s", o.LeaseTTL)
 	}
-	return nil
+	return o.Gate.Validate()
 }
 
 // Service owns the rules about a mastery path: what may be changed, what a
@@ -50,6 +53,7 @@ func (o Options) Validate() error {
 type Service struct {
 	repository Repository
 	leaseTTL   time.Duration
+	gate       GateOptions
 	// clock is a field and not a call to time.Now inside the methods, because
 	// every write here stores a time and a case that cannot choose the time
 	// cannot pin the row it wrote.
@@ -67,6 +71,7 @@ func NewService(repository Repository, options Options) (*Service, error) {
 	return &Service{
 		repository: repository,
 		leaseTTL:   options.LeaseTTL,
+		gate:       options.Gate,
 		clock:      func() time.Time { return time.Now().UTC() },
 	}, nil
 }
@@ -401,6 +406,17 @@ func (s *Service) change(
 		if err != nil {
 			return err
 		}
+		// The levels are recomputed on every write of the state, which is what makes
+		// them a cache of the evidence and not a second answer to the same question
+		// (§2.1). It happens after the mutation because a knowledge point the caller
+		// has just added may already have evidence waiting for it, and before the
+		// version is taken because the levels are part of the state the version
+		// names.
+		evidences, err := repository.Evidences(ctx, path.ID)
+		if err != nil {
+			return err
+		}
+		tree = GateTree(tree, evidences, s.gate)
 		if err := tree.Validate(); err != nil {
 			return err
 		}
