@@ -223,8 +223,12 @@ func TestAQuestionIsNotWrittenAgainstAKnowledgePointThePathDoesNotHave(t *testin
 	if err == nil {
 		t.Fatal("a question was filed against a knowledge point that is not in the path")
 	}
-	if !errors.Is(err, mastery.ErrNotFound) {
-		t.Errorf("Ask() error = %v, want a missing knowledge point", err)
+	// A refusal and not the domain's own error: this bridge is the only thing that
+	// turns a mastery error into a sentence a model can act on, and the tools
+	// understand those two shapes and nothing else (see refuse).
+	var refusal *tool.Refusal
+	if !errors.As(err, &refusal) {
+		t.Errorf("Ask() error = %v, want a refusal the model reads", err)
 	}
 	if len(fixture.bank.handed) != 0 {
 		t.Errorf("the bank was handed %+v", fixture.bank.handed)

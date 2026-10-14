@@ -58,9 +58,10 @@ func (t *MasteryQuestionTool) Definition() Definition {
 // the bank (§2.2) and the coordinate is written once, so a question filed
 // against an id that is not in the path would keep that id for good — the model
 // would read "knowledge point kp_42 is not in path mp_1" and the row would go on
-// saying it was. The domain refuses the same id a moment later (mastery.Ask
-// checks it inside its transaction), and that check is what makes the rule true;
-// this one is what keeps the refusal from leaving anything behind.
+// saying it was. The bridge refuses the same id a moment later, inside Ask and
+// still in front of the bank, and that refusal is what makes the rule true; this
+// check is here because it is the one that knows the ids that *are* there, and a
+// model that has to try again needs them named.
 func (t *MasteryQuestionTool) Invoke(ctx context.Context, call Call) (Result, error) {
 	path, err := masteryPathFrom(ctx)
 	if err != nil {

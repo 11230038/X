@@ -144,9 +144,10 @@ func (t *TurnPath) Current(ctx context.Context) (mastery.View, error) {
 // records depend on each other in: the interaction names a question by the id
 // the bank gave it, so the question has to exist before the path can be told
 // that it was asked. The cost of the order is a question in the bank that no
-// path recorded — which happens when the path refuses, and which is the harmless
-// half of the pair: a question is an asset of the bank on its own (QN-01), while
-// an interaction naming a question that does not exist is a broken row.
+// path recorded — which is why the coordinate is checked in front of the bank
+// rather than beside the path: a question is an asset of the bank on its own
+// (QN-01) and would be a fine thing to keep, but this one has been stamped with
+// a knowledge point, and a stamp is not a thing that can be corrected later.
 //
 // This is also the one place that holds both halves of a question's mastery
 // coordinate at once — the path is the turn's, the knowledge point is the
@@ -160,6 +161,25 @@ func (t *TurnPath) Ask(ctx context.Context, question notebook.Question, knowledg
 	// something the path knows nothing about.
 	if err := t.writable(); err != nil {
 		return tool.Saved{}, err
+	}
+	// And the coordinate is checked here, before the stamp is written, because the
+	// domain's own check happens a moment too late: by the time mastery.Ask reads
+	// the tree, the question is in the bank carrying an id nothing resolves. §2.2
+	// says the database cannot verify a knowledge point — it points into
+	// state_json — so the only place that can refuse one is the tree that defines
+	// it, and the only moment that matters is before the column is filled.
+	//
+	// The tool makes this same check one call earlier, and that is not this one
+	// twice: its refusal lists the ids the path does have, which is what a model
+	// needs to try again. This one is the guarantee, and it does not depend on
+	// which caller got here first.
+	view, err := t.refresh(ctx)
+	if err != nil {
+		return tool.Saved{}, t.refuse(err)
+	}
+	if _, _, ok := view.Path.Tree.KnowledgePoint(knowledgePointID); !ok {
+		return tool.Saved{}, t.refuse(fmt.Errorf("%w: knowledge point %s is not in path %s",
+			mastery.ErrNotFound, knowledgePointID, t.pathID))
 	}
 	question.MasteryPathID = t.pathID
 	question.KnowledgePointID = knowledgePointID
