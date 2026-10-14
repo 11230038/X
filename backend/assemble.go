@@ -16,6 +16,7 @@ import (
 	"backend/internal/embed"
 	"backend/internal/kb"
 	"backend/internal/llm"
+	"backend/internal/mastery"
 	"backend/internal/masterypath"
 	"backend/internal/notebook"
 	"backend/internal/parse"
@@ -48,6 +49,11 @@ type ai struct {
 	// the judge is the same provider and the same model the turns run on.
 	questions *notebook.Service
 	reviews   *practice.Service
+	// mastery is the same service the turns claim their path from, kept for the
+	// reason materials is: reading a path, renaming it and dropping a claim are
+	// the same domain the capability works in, reached by a person instead of by
+	// a model.
+	mastery *mastery.Service
 }
 
 // assemble builds the turn runtime from configuration.
@@ -170,6 +176,10 @@ func assemble(
 	// rest of the process does, and it judges with the same judge: a question
 	// filed on a path is a question in the bank, and judging an answer to it is
 	// the act practice already performs (§2.5).
+	//
+	// paths is the join the runtime claims a turn's path through, and the service
+	// inside it goes into ai as well: one domain, reached by a turn and by a
+	// person.
 	paths, err := newMasteryPaths(cfg, db, questions, judge)
 	if err != nil {
 		return nil, err
@@ -217,7 +227,7 @@ func assemble(
 	return &ai{
 		turns: runner, socket: socket, capabilities: capabilities,
 		materials: materials, indexing: worker,
-		questions: questions, reviews: reviews,
+		questions: questions, reviews: reviews, mastery: paths.service,
 	}, nil
 }
 

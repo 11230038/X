@@ -78,12 +78,18 @@ func (m masteryPath) Claim(ctx context.Context, request turn.ClaimRequest) (turn
 // It is where the four keys of §5 become the domain's four thresholds, and it is
 // a constructor rather than a block inside assemble for the same reason the
 // capability list is: what the domain is tuned with can then be read on its own.
+//
+// It hands back the join rather than the interface it satisfies, because the
+// process keeps both halves: the runtime reaches the domain through Claim, and
+// the HTTP endpoints reach the same *service* for the reads and the renames a
+// person does outside a turn. One service, two ways in — the same arrangement as
+// the knowledge base.
 func newMasteryPaths(
 	cfg config.Config,
 	db *gorm.DB,
 	questions *notebook.Service,
 	judge *practice.Judge,
-) (turn.Paths, error) {
+) (masteryPath, error) {
 	service, err := mastery.NewService(mastery.NewGORMRepository(db), mastery.Options{
 		LeaseTTL: cfg.Mastery.LeaseTTL,
 		Gate: mastery.GateOptions{
@@ -93,7 +99,7 @@ func newMasteryPaths(
 		MaxActivePaths: cfg.Mastery.MaxActivePaths,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("initialize the mastery path domain: %w", err)
+		return masteryPath{}, fmt.Errorf("initialize the mastery path domain: %w", err)
 	}
 	// The bank is the runtime's, and it is the runtime's own type: a question
 	// filed from inside a path carries this turn's session and turn and is

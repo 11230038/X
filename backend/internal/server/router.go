@@ -19,6 +19,7 @@ type Handlers struct {
 	Sessions      *handler.SessionHandler
 	Questions     *handler.QuestionHandler
 	Practice      *handler.PracticeHandler
+	Mastery       *handler.MasteryHandler
 	Capabilities  *handler.CapabilityHandler
 	WebSocket     *ws.Handler
 	TokenVerifier middleware.TokenVerifier
@@ -92,6 +93,17 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	authenticated.POST("/practice/reviews", handlers.Practice.Submit)
 	authenticated.GET("/practice/reviews/:requestID", handlers.Practice.Read)
 	authenticated.GET("/practice/stats", handlers.Practice.Stats)
+	// Mastery paths are read and named here, and built through the socket: a
+	// path is created inside the turn that was asked to work on it (§2.1), so
+	// there is no POST among these. The two lease endpoints are the exception to
+	// "a turn's state is a turn's business", and the reason is written where they
+	// are handled: a claim left behind by a turn that died is a person's to drop.
+	authenticated.GET("/mastery/paths", handlers.Mastery.List)
+	authenticated.GET("/mastery/paths/:pathID", handlers.Mastery.Get)
+	authenticated.PATCH("/mastery/paths/:pathID", handlers.Mastery.Patch)
+	authenticated.GET("/mastery/paths/:pathID/insight", handlers.Mastery.Insight)
+	authenticated.GET("/mastery/paths/:pathID/lease", handlers.Mastery.Lease)
+	authenticated.DELETE("/mastery/paths/:pathID/lease", handlers.Mastery.ReleaseLease)
 	// The socket is authenticated by the middleware above before it is
 	// upgraded, so an unauthenticated request is answered as an HTTP request
 	// rather than becoming a connection (WS-06).

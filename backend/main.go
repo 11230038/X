@@ -119,6 +119,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		Sessions:      handler.NewSessionHandler(sessionService, logger),
 		Questions:     handler.NewQuestionHandler(ai.questions, logger),
 		Practice:      handler.NewPracticeHandler(ai.reviews, cfg.Practice.QueueSize, logger),
+		Mastery:       handler.NewMasteryHandler(ai.mastery, logger),
 		Capabilities:  handler.NewCapabilityHandler(ai.capabilities),
 		WebSocket:     ai.socket,
 		TokenVerifier: authService,
