@@ -32,15 +32,21 @@ type fakeRepository struct {
 	// marks is in the order they were written, which is the order storage
 	// promises to list them in.
 	marks []Mark
+	// pairings is every confirmed pairing, which is only ever written by a
+	// confirmation: a recommendation computes its answer and stores none of it.
+	pairings []Pairing
 
 	// Errors a test asks for, so that the failure paths a service has are
 	// reachable without a database that is unwell.
-	materialErr   error
-	createErr     error
-	positionErr   error
-	saveErr       error
-	markErr       error
-	deleteMarkErr error
+	materialErr      error
+	createErr        error
+	positionErr      error
+	saveErr          error
+	markErr          error
+	deleteMarkErr    error
+	pairingErr       error
+	createPairingErr error
+	deletePairingErr error
 
 	// created and moved record what reached storage, which is how a create and a
 	// move of the same position are told apart.
@@ -48,6 +54,11 @@ type fakeRepository struct {
 	moved   []Position
 	// deletes records the marks that were taken off.
 	deletes []string
+	// confirmed and cancelled record the two pairing writes, which is how a
+	// confirmation that was answered from the row that was there is told from one
+	// that wrote a row.
+	confirmed []Pairing
+	cancelled []string
 	// reads counts the material reads, which is how a refusal that never reached
 	// storage is told from one that did.
 	reads int
@@ -201,6 +212,64 @@ func (f *fakeRepository) DeleteMark(_ context.Context, markID string) error {
 		}
 	}
 	return fmt.Errorf("%w: mark %s", ErrNotFound, markID)
+}
+
+// The pairings, in memory. A confirm and a cancel are the only two writes there
+// are, and both are written down: a test that says a recommendation stored
+// nothing needs somewhere that would have noticed a row appearing.
+func (f *fakeRepository) PairingOf(_ context.Context, materialID string) (Pairing, error) {
+	if f.pairingErr != nil {
+		return Pairing{}, f.pairingErr
+	}
+	for _, pairing := range f.pairings {
+		if pairing.PrimaryMaterialID == materialID || pairing.CounterpartMaterialID == materialID {
+			return pairing, nil
+		}
+	}
+	return Pairing{}, fmt.Errorf("%w: material %s is in no pairing", ErrNotFound, materialID)
+}
+
+func (f *fakeRepository) PairingBetween(_ context.Context, first, second string) (Pairing, error) {
+	if f.pairingErr != nil {
+		return Pairing{}, f.pairingErr
+	}
+	for _, pairing := range f.pairings {
+		one := pairing.PrimaryMaterialID == first && pairing.CounterpartMaterialID == second
+		other := pairing.PrimaryMaterialID == second && pairing.CounterpartMaterialID == first
+		if one || other {
+			return pairing, nil
+		}
+	}
+	return Pairing{}, fmt.Errorf("%w: materials %s and %s are not paired", ErrNotFound, first, second)
+}
+
+func (f *fakeRepository) CreatePairing(_ context.Context, pairing Pairing) error {
+	if f.createPairingErr != nil {
+		return f.createPairingErr
+	}
+	f.pairings = append(f.pairings, pairing)
+	f.confirmed = append(f.confirmed, pairing)
+	return nil
+}
+
+func (f *fakeRepository) DeletePairing(_ context.Context, pairingID string) error {
+	if f.deletePairingErr != nil {
+		return f.deletePairingErr
+	}
+	for index, pairing := range f.pairings {
+		if pairing.PairingID == pairingID {
+			f.pairings = append(f.pairings[:index], f.pairings[index+1:]...)
+			f.cancelled = append(f.cancelled, pairingID)
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: pairing %s", ErrNotFound, pairingID)
+}
+
+// withPairing puts a confirmed pairing in place.
+func (f *fakeRepository) withPairing(pairing Pairing) *fakeRepository {
+	f.pairings = append(f.pairings, pairing)
+	return f
 }
 
 // fakeDocuments is the knowledge base, as the reading layer reaches it.

@@ -40,6 +40,9 @@ type readingStub struct {
 	marks     []reading.Mark
 	mark      reading.Mark
 	passage   reading.Passage
+	pairings  reading.Pairings
+	pairing   reading.Pairing
+	cancelled bool
 	err       error
 
 	workspaces []string
@@ -48,6 +51,9 @@ type readingStub struct {
 	adds       []reading.MarkRequest
 	resolved   []reading.Locator
 	positions  [][2]string
+	paired     []string
+	confirms   []reading.PairingRequest
+	cancels    []string
 }
 
 func (s *readingStub) Materials(_ context.Context, workspaceID string) ([]reading.Material, error) {
@@ -103,6 +109,21 @@ func (s *readingStub) Resolve(_ context.Context, materialID string, locator read
 	return passage, nil
 }
 
+func (s *readingStub) Pairings(_ context.Context, materialID string) (reading.Pairings, error) {
+	s.paired = append(s.paired, materialID)
+	return s.pairings, s.err
+}
+
+func (s *readingStub) ConfirmPairing(_ context.Context, request reading.PairingRequest) (reading.Pairing, error) {
+	s.confirms = append(s.confirms, request)
+	return s.pairing, s.err
+}
+
+func (s *readingStub) CancelPairing(_ context.Context, pairingID string) (bool, error) {
+	s.cancels = append(s.cancels, pairingID)
+	return s.cancelled, s.err
+}
+
 func newReadingRouter(readings Readings, extensions *reading.Registry) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	handler := NewReadingHandler(readings, extensions, testHandlerLogger())
@@ -114,6 +135,9 @@ func newReadingRouter(readings Readings, extensions *reading.Registry) *gin.Engi
 	router.GET("/api/v1/reading/materials/:materialID/marks", handler.Marks)
 	router.POST("/api/v1/reading/materials/:materialID/marks", handler.AddMark)
 	router.POST("/api/v1/reading/materials/:materialID/position", handler.SavePosition)
+	router.GET("/api/v1/reading/materials/:materialID/pairings", handler.Pairings)
+	router.POST("/api/v1/reading/materials/:materialID/pairings", handler.ConfirmPairing)
+	router.DELETE("/api/v1/reading/pairings/:pairingID", handler.CancelPairing)
 	router.GET("/api/v1/reading/materials/:materialID/extensions", handler.Extensions)
 	router.POST("/api/v1/reading/materials/:materialID/extensions/:name", handler.RunExtension)
 	return router

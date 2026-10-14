@@ -48,6 +48,18 @@ type Repository interface {
 	CreateMark(ctx context.Context, mark Mark) error
 	// DeleteMark removes one mark, ErrNotFound when there was none to remove.
 	DeleteMark(ctx context.Context, markID string) error
+
+	// PairingOf reads the confirmed pairing a material is in, from either end of
+	// it, ErrNotFound when it is in none.
+	PairingOf(ctx context.Context, materialID string) (Pairing, error)
+	// PairingBetween reads the confirmed pairing of one pair of materials,
+	// whichever way round it was confirmed.
+	PairingBetween(ctx context.Context, first, second string) (Pairing, error)
+	// CreatePairing writes one confirmation. ErrDuplicate means it is already
+	// there, which is the one collision this row can have.
+	CreatePairing(ctx context.Context, pairing Pairing) error
+	// DeletePairing removes one confirmation, ErrNotFound when there was none.
+	DeletePairing(ctx context.Context, pairingID string) error
 }
 
 // GORMRepository reads and writes the reading tables through GORM (seekdb over

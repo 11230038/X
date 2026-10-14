@@ -29,6 +29,13 @@ type Readings interface {
 	Marks(ctx context.Context, materialID string) ([]reading.Mark, error)
 	AddMark(ctx context.Context, request reading.MarkRequest) (reading.Mark, error)
 	Resolve(ctx context.Context, materialID string, locator reading.Locator) (reading.Passage, error)
+	// Pairings is the bilingual read: whether this material's bilingual reading is
+	// enabled and what it could be paired with (§2.10). ConfirmPairing and
+	// CancelPairing are the two writes that change it, and cancelling reports
+	// whether there was anything left to cancel.
+	Pairings(ctx context.Context, materialID string) (reading.Pairings, error)
+	ConfirmPairing(ctx context.Context, request reading.PairingRequest) (reading.Pairing, error)
+	CancelPairing(ctx context.Context, pairingID string) (bool, error)
 }
 
 // ReadingHandler handles the reading layer: the catalogue, one material's units,

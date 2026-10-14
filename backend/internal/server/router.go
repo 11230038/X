@@ -121,6 +121,14 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// and the run of one of them over one passage. The list is a read of the
 	// build; the run is the reader asking a question about the text in front of
 	// them, and neither is routed through a turn (§2.9).
+	// A paired book is the reader's own confirmation that two materials are one
+	// book in two languages. The list is a recommendation computed per request and
+	// writes nothing; the write is the confirmation itself; and the cancel is the
+	// same row removed (§2.10). Nothing downstream behaves bilingually until that
+	// row is there, which is why the list carries the enabled state and its reason.
+	authenticated.GET("/reading/materials/:materialID/pairings", handlers.Reading.Pairings)
+	authenticated.POST("/reading/materials/:materialID/pairings", handlers.Reading.ConfirmPairing)
+	authenticated.DELETE("/reading/pairings/:pairingID", handlers.Reading.CancelPairing)
 	authenticated.GET("/reading/materials/:materialID/extensions", handlers.Reading.Extensions)
 	authenticated.POST("/reading/materials/:materialID/extensions/:name", handlers.Reading.RunExtension)
 	// The dashboard is the one read that spans the domains, and it sits beside
