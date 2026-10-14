@@ -60,10 +60,11 @@ func (o GateOptions) Validate() error {
 // decision the first time and different decisions after that.
 var reviewIntervalDays = [...]int{1, 3, 7, 16, 35, 75, 160, 340}
 
-// maxReviewIntervalDays caps the curve. Without a cap it is a geometric series
-// with no ceiling, and a knowledge point with a long enough run would be
-// scheduled past what a DATETIME holds — the same wall, and the same answer,
-// as the question curve's.
+// maxReviewIntervalDays caps the curve, so that a knowledge point can never be
+// scheduled past what a DATETIME holds — the same wall, and the same answer, as
+// the question curve's. The table below stops at 340 days, so this is not a cap
+// the curve reaches today: it is what keeps a longer entry added later from
+// becoming a due time the column cannot store.
 const maxReviewIntervalDays = 365
 
 // partialDivisor is what a partly-right observation divides the interval by.
@@ -92,12 +93,23 @@ func ReviewInterval(evidences []Evidence) time.Duration {
 		// sooner rather than to split the difference.
 		return time.Duration(reviewIntervalDays[0]) * 24 * time.Hour
 	}
+	// A partial ends the run it was part of, so the run this interval is read from
+	// is the one it ended and not the empty one it left behind. Reading the run as
+	// `currentRun` reports it would make the halving below divide the *first*
+	// interval every time — which is what a wrong answer is scheduled at, and is
+	// the one answer a partial is supposed to be distinguishable from.
+	if last == ResultPartial {
+		run, _, _ = currentRun(evidences[:len(evidences)-1])
+	}
 
 	days := reviewIntervalDays[0]
 	if run > 0 {
+		// The run is one-based and the table is not: a run of n right answers reads
+		// the n-th entry, and a run longer than the table holds at the table's last
+		// entry rather than falling back to the one before it.
 		index := run
-		if index >= len(reviewIntervalDays) {
-			index = len(reviewIntervalDays) - 1
+		if index > len(reviewIntervalDays) {
+			index = len(reviewIntervalDays)
 		}
 		days = reviewIntervalDays[index-1]
 	}
