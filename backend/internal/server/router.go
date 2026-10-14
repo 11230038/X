@@ -20,6 +20,7 @@ type Handlers struct {
 	Questions     *handler.QuestionHandler
 	Practice      *handler.PracticeHandler
 	Mastery       *handler.MasteryHandler
+	Dashboard     *handler.DashboardHandler
 	Capabilities  *handler.CapabilityHandler
 	WebSocket     *ws.Handler
 	TokenVerifier middleware.TokenVerifier
@@ -104,6 +105,9 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	authenticated.GET("/mastery/paths/:pathID/insight", handlers.Mastery.Insight)
 	authenticated.GET("/mastery/paths/:pathID/lease", handlers.Mastery.Lease)
 	authenticated.DELETE("/mastery/paths/:pathID/lease", handlers.Mastery.ReleaseLease)
+	// The dashboard is the one read that spans the domains, and it sits beside
+	// the resources it reads rather than under any of them (COURSE-03).
+	authenticated.GET("/dashboard", handlers.Dashboard.Get)
 	// The socket is authenticated by the middleware above before it is
 	// upgraded, so an unauthenticated request is answered as an HTTP request
 	// rather than becoming a connection (WS-06).

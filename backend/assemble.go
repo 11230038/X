@@ -11,6 +11,7 @@ import (
 	"backend/internal/capability"
 	"backend/internal/chat"
 	"backend/internal/config"
+	"backend/internal/dashboard"
 	"backend/internal/deepquestion"
 	"backend/internal/deepsolve"
 	"backend/internal/embed"
@@ -54,6 +55,9 @@ type ai struct {
 	// the same domain the capability works in, reached by a person instead of by
 	// a model.
 	mastery *mastery.Service
+	// dashboard is the read that fans in over the domains above. It is built last
+	// because it is the one thing built from the others.
+	dashboard *dashboard.Service
 }
 
 // assemble builds the turn runtime from configuration.
@@ -224,10 +228,24 @@ func assemble(
 		return nil, err
 	}
 
+	// The dashboard reads three of the domains above and is read by nothing, so
+	// it is built last and from what is already assembled. Its one number is the
+	// deployment's (§5): how many entries a category carries.
+	overview, err := dashboard.NewService(dashboard.Options{
+		RecentLimit: cfg.Dashboard.RecentLimit,
+		Sessions:    sessions,
+		Paths:       paths.service,
+		Reviews:     reviews,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	return &ai{
 		turns: runner, socket: socket, capabilities: capabilities,
 		materials: materials, indexing: worker,
 		questions: questions, reviews: reviews, mastery: paths.service,
+		dashboard: overview,
 	}, nil
 }
 
