@@ -23,10 +23,33 @@ const (
 	idRandomBytes          = 16
 )
 
+// Options are the few things the domain takes from the deployment. Everything
+// else it needs is either a constant in this package or read from the tables —
+// and the split is deliberate: a threshold that decides what "mastered" means
+// would be a deployment deciding what the product means by it.
+type Options struct {
+	// LeaseTTL is how long a turn's claim on a path stands before another turn
+	// may take it over. A non-positive value is refused rather than defaulted,
+	// because a lease that expires immediately is a lease that does nothing, and
+	// a deployment that asked for one has a mistake in its configuration that
+	// should be reported rather than papered over.
+	LeaseTTL time.Duration
+}
+
+// Validate reports whether the options are usable.
+func (o Options) Validate() error {
+	if o.LeaseTTL <= 0 {
+		return fmt.Errorf("mastery: the lease ttl must be positive, not %s", o.LeaseTTL)
+	}
+	return nil
+}
+
 // Service owns the rules about a mastery path: what may be changed, what a
-// change has to leave behind, and what a version guard means when it fails.
+// change has to leave behind, who is allowed to write it, and what a version
+// guard means when it fails.
 type Service struct {
 	repository Repository
+	leaseTTL   time.Duration
 	// clock is a field and not a call to time.Now inside the methods, because
 	// every write here stores a time and a case that cannot choose the time
 	// cannot pin the row it wrote.
@@ -34,11 +57,18 @@ type Service struct {
 }
 
 // NewService returns the service over a storage adapter.
-func NewService(repository Repository) (*Service, error) {
+func NewService(repository Repository, options Options) (*Service, error) {
 	if repository == nil {
 		return nil, fmt.Errorf("mastery service needs a repository")
 	}
-	return &Service{repository: repository, clock: func() time.Time { return time.Now().UTC() }}, nil
+	if err := options.Validate(); err != nil {
+		return nil, err
+	}
+	return &Service{
+		repository: repository,
+		leaseTTL:   options.LeaseTTL,
+		clock:      func() time.Time { return time.Now().UTC() },
+	}, nil
 }
 
 // View is a path as a reader wants it: the tree, the version, and what the path
