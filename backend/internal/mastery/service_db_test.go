@@ -146,10 +146,11 @@ func TestDBArrivingIsNeverRefusedForHavingTooManyPaths(t *testing.T) {
 	// links has nothing to count.
 	//
 	// This case is written to pin what happens rather than what was intended:
-	// `MASTERY_MAX_ACTIVE_PATHS` bounds nothing today, and whether it should be
-	// counted per conversation or per person is a product question the design
-	// answers one way and this code the other (V4设计方案 §0.3). Changing it here
-	// would be this package answering that question on its own.
+	// `MASTERY_MAX_ACTIVE_PATHS` bounds nothing today (V4设计方案 §0.3 第 10 条).
+	// The descriptions elsewhere in this repository are written from the code, so
+	// what is pinned here is what the key does: it counts one conversation's
+	// paths and it refuses no arrival. A bound that fires would have to say what
+	// it counts and what it refuses, and that is not this package's decision.
 	arrival, err := h.service.Arrive(ctx, ArriveRequest{Actor: actor, Goal: "第四条"}, h.caller)
 	if err != nil {
 		t.Fatalf("arriving at the limit: %v, want the path the conversation is already on: %v",

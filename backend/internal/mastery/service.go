@@ -32,9 +32,9 @@ type Options struct {
 	//
 	// It is required rather than defaulted, and the reason is the shape of the
 	// mistake: a zero would not mean "no limit", it would mean no path could ever
-	// be started — the check is `len(active) >= MaxActivePaths` — and a
-	// deployment that forgot the key would find that out the first time a user
-	// tried to learn something.
+	// be started — the check is `len(active) >= MaxActivePaths`. That check does
+	// not fire today (Open), but the value is still guarded, because a setting
+	// whose name promises a limit should not be able to hold the opposite of one.
 	MaxActivePaths int
 }
 

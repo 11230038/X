@@ -415,7 +415,7 @@ V4 加两个能力（`mastery_path`、`immersive_reading`）、一个只读的"�
 
 **掌握路径（MP-01–05）** 把一门要学的东西拆成知识点，然后按证据推进每一条的档位。它**不是一个请求-应答的接口**，是一轮对话：
 
-- **路径在一轮 turn 里开启**，不在 REST 上（没有 `POST /mastery/paths`）。MP-01 的五个来源——目标、材料、Notebook、Reading——都要先有一次会话才谈得上"从哪个来源来"。所以 `GET /mastery/paths` 是读，建是 `mastery_path` 能力在 `Start` 时做的事。同时推进的路径数上限是 `MASTERY_MAX_ACTIVE_PATHS`，但**这一版它拦不住任何请求**——一个会话只要有活跃路径就直接回到那条路径上，要数路径得先没有路径可回（见 [backend/.env.example](backend/.env.example) 里这个键的说明），而"上限该不该存在、该按会话还是按人算"是还没裁决的产品问题。
+- **路径在一轮 turn 里开启**，不在 REST 上（没有 `POST /mastery/paths`）。MP-01 的五个来源——目标、材料、Notebook、Reading——都要先有一次会话才谈得上"从哪个来源来"。所以 `GET /mastery/paths` 是读，建是 `mastery_path` 能力在 `Start` 时做的事。同时推进的路径数上限是 `MASTERY_MAX_ACTIVE_PATHS`，但**这一版它拦不住任何请求**——一个会话只要有活跃路径就直接回到那条路径上，要数路径得先没有路径可回（见 [backend/.env.example](backend/.env.example) 里这个键的说明）：**这个键今天什么也不拦**，本仓库对它的说明一律按代码的实际行为写。上限要真的生效，得先说清它数的是什么、拦的是什么。
 - **九个工具**是这一版的全部动作：`mastery_state`（读树与档位）、`mastery_question`（出题）、`mastery_grade`（判卷）、`mastery_skip`、`mastery_assess`（记一条证据）、`mastery_map` / `mastery_edit`（建图与改知识点）、`mastery_switch`、`mastery_leave`。能力本身只有一个阶段（`responding`），因为"这一轮在干什么"是**工具**说的，一轮按学习者的下一句话在九个工具之间走。
 - **一题只存一处**：`mastery_question` 出的题就在 `notebook_entries` 里，只是多带了 `mastery_path_id` 与 `knowledge_point_id` 两列。掌握路径**没有自己的题表**，所以题库的每一个过滤器在它上面都照常有效。
 - **档位由证据算出来，不由模型说**：连续 `MASTERY_GATE_CONSECUTIVE` 次答对升到已掌握，证据少于 `MASTERY_GATE_MIN_EVIDENCE` 时是"未知"而不是"薄弱"——`partial` 既不算对也不算错，它重置连续计数但不降档。复习间隔是一条**自己的曲线**，读的是证据序列而不是题目的连对计数。

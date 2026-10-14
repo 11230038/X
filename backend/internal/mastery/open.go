@@ -40,13 +40,23 @@ type OpenRequest struct {
 //     a turn that has to announce it in its first event, and an id invented twice
 //     would be two paths (NewPathID);
 //   - it has never been anywhere and is already in the middle of
-//     MaxActivePaths paths: ErrTooManyPaths.
+//     MaxActivePaths paths: ErrTooManyPaths. This build cannot reach that case;
+//     see below.
 //
 // The limit counts *active* paths, and "active" is the topic metadata's status —
 // which is why the count is a read of the link table joined to the metadata
-// rather than a count of rows. A person's paths are bounded because the surface
-// shows them at once, and the bound is configuration because how many a person
-// can hold in mind is a product decision, not this package's (MASTERY_MAX_ACTIVE_PATHS).
+// rather than a count of rows. It counts one conversation's paths and not one
+// person's, because a path's owner here is a conversation.
+//
+// What it does today is refuse nothing. The count is read only after
+// PathOfSession has said this conversation is on no path, and both reads go to
+// the same links: a conversation that has an active path returns above and never
+// arrives at the count, and one with no links has nothing to count. The bound is
+// configuration because how many paths a person can hold in mind is a product
+// decision rather than this package's (MASTERY_MAX_ACTIVE_PATHS), and a decision
+// that makes it fire has to say what it counts and what it refuses. What the code
+// does in the meantime is pinned by
+// TestDBArrivingIsNeverRefusedForHavingTooManyPaths.
 func (s *Service) Open(ctx context.Context, request OpenRequest, caller authz.Caller) (Path, error) {
 	if err := request.Actor.Validate(); err != nil {
 		return Path{}, err

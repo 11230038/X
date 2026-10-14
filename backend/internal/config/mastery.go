@@ -30,8 +30,10 @@ type MasteryConfig struct {
 	// tested yet" from being reported as "weak".
 	GateMinEvidence int
 	// MaxActivePaths is how many paths one conversation may be in the middle of
-	// at once. It bounds *starting* a path, not having one: a turn arriving on a
-	// path it already has is never refused, however many it has.
+	// at once. It was meant to bound *starting* a path rather than having one,
+	// and this build refuses nothing with it: the count it is compared against is
+	// read only when the conversation is on no path, so the comparison never
+	// fires (mastery.Open).
 	MaxActivePaths int
 }
 
