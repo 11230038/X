@@ -109,6 +109,9 @@ func TestLoadReadsCompleteDotenv(t *testing.T) {
 	if cfg.KB.MaxCharsPerDocument != 200000 || cfg.KB.MaxCharsPerTurn != 150000 {
 		t.Errorf("text budgets were not loaded: %+v", cfg.KB)
 	}
+	if cfg.Audit.RetentionDays != 180 || cfg.Audit.MaxPageSize != 200 {
+		t.Errorf("audit settings were not loaded: %+v", cfg.Audit)
+	}
 	if cfg.KB.VectorLease != 5*time.Minute || cfg.KB.IndexWorkers != 2 {
 		t.Errorf("index worker settings were not loaded: %+v", cfg.KB)
 	}
@@ -481,6 +484,11 @@ func validValues() map[string]string {
 		"MEMORY_SENSITIVE_KINDS":       "preference,health,relationship,credential",
 		"MEMORY_SYNTHESIS_WINDOW_DAYS": "30",
 		"MEMORY_MAX_FACTS_PER_SURFACE": "200",
+		"AUTHZ_DEFAULT_PRESET":         "standard",
+		"AUTHZ_LEARNER_CAPABILITIES":   "chat",
+		"AUTHZ_LEARNER_SURFACES":       "chat",
+		"AUDIT_RETENTION_DAYS":         "180",
+		"AUDIT_MAX_PAGE_SIZE":          "200",
 	}
 }
 

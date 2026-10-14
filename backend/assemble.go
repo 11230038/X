@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"backend/internal/audit"
 	"backend/internal/authz"
 	"backend/internal/capability"
 	"backend/internal/chat"
@@ -67,6 +68,11 @@ type ai struct {
 	// only consumer: the audit records what it decided, and the governance
 	// routes write the rows it reads.
 	authorization *authz.Service
+	// auditLog is the append-only record of what was done to whom (§2.6). It is
+	// built beside the authorization for the same reason: the two are one
+	// subject seen twice — the policy answers, and the record says it answered
+	// — and the refusal middleware writes to this on every denied request.
+	auditLog *audit.Service
 }
 
 // assemble builds the turn runtime from configuration.
@@ -151,6 +157,18 @@ func assemble(
 	))
 	if err != nil {
 		return nil, fmt.Errorf("initialize authorization: %w", err)
+	}
+
+	// The two governance services are built before the domains that write to
+	// them, because a domain that records something is built from the recorder.
+	// An audit and an authorization that disagreed about who an account is
+	// would be an audit of a different instance.
+	auditLog, err := audit.NewService(audit.NewGORMStore(db), audit.Options{
+		MaxPageSize:   cfg.Audit.MaxPageSize,
+		RetentionDays: cfg.Audit.RetentionDays,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize audit: %w", err)
 	}
 
 	parsers, err := parse.NewRegistry(parse.Options{
@@ -297,7 +315,7 @@ func assemble(
 		materials: materials, indexing: worker,
 		questions: questions, reviews: reviews, mastery: paths.service,
 		dashboard: overview, immersive: immersive, memory: memories,
-		authorization: authorization,
+		authorization: authorization, auditLog: auditLog,
 	}, nil
 }
 

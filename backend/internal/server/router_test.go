@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/audit"
 	"backend/internal/auth"
 	"backend/internal/authz"
 	"backend/internal/handler"
@@ -64,6 +65,7 @@ func newTestRouterWithAuthorizer(
 		Permissions:   handler.NewPermissionsHandler(routerPermissionsStub{}, logger),
 		Admin:         handler.NewAdminHandler(routerAdminStub{}, routerAdminStub{}, logger),
 		Guardians:     handler.NewGuardianHandler(routerGuardianStub{}, logger),
+		Audit:         handler.NewAuditHandler(routerAuditStub{}, logger),
 		TokenVerifier: authenticator,
 		Authorizer:    authorizer,
 		// KnowledgeBase is deliberately left out. This file is about which
@@ -187,6 +189,17 @@ func (routerGuardianStub) GrantPermission(context.Context, authz.Caller, string,
 func (routerGuardianStub) RevokePermission(context.Context, string, authz.Permission) error {
 	return nil
 }
+
+// routerAuditStub answers the audit read. It holds nothing, which is also the
+// interesting answer: an instance with no entries is what a fresh deployment
+// looks like, and the route has to be reachable in that state.
+type routerAuditStub struct{}
+
+func (routerAuditStub) List(context.Context, audit.Filter) ([]audit.Event, error) {
+	return nil, nil
+}
+
+func (routerAuditStub) MaxPageSize() int { return 50 }
 
 // routerAuthStub accepts exactly one token and rejects everything else.
 type routerAuthStub struct{}
@@ -616,6 +629,11 @@ func TestRouterRegistersGovernanceUnderTheAdministrativeSurface(t *testing.T) {
 		// because the two are different accounts: the standard baseline reaches
 		// both, and a learner reaches neither.
 		{http.MethodGet, "/api/v1/guardian/learners", "", authz.SurfaceGuardian},
+		// The audit is the governance record read back, and it is the one route
+		// here that answers about the whole instance rather than about one
+		// account: what it is mounted under is therefore the whole of who may
+		// read it.
+		{http.MethodGet, "/api/v1/audit", "", authz.SurfaceAdmin},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.method+" "+testCase.path, func(t *testing.T) {

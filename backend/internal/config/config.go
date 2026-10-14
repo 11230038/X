@@ -93,6 +93,8 @@ var requiredKeys = []string{
 	"AUTHZ_DEFAULT_PRESET",
 	"AUTHZ_LEARNER_CAPABILITIES",
 	"AUTHZ_LEARNER_SURFACES",
+	"AUDIT_RETENTION_DAYS",
+	"AUDIT_MAX_PAGE_SIZE",
 }
 
 // Config contains all settings required to run the service.
@@ -115,6 +117,7 @@ type Config struct {
 	Reading         ReadingConfig
 	Memory          MemoryConfig
 	Authz           AuthzConfig
+	Audit           AuditConfig
 }
 
 // Load reads configuration exclusively from the dotenv file at path. The path
@@ -193,6 +196,10 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	audit, err := loadAuditConfig(values)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
 		HTTPAddr:        strings.TrimSpace(values["HTTP_ADDR"]),
@@ -213,6 +220,7 @@ func Load(path string) (Config, error) {
 		Reading:         reading,
 		Memory:          memory,
 		Authz:           authorization,
+		Audit:           audit,
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -275,5 +283,8 @@ func (c Config) Validate() error {
 	if err := c.Memory.Validate(); err != nil {
 		return err
 	}
-	return c.Authz.Validate()
+	if err := c.Authz.Validate(); err != nil {
+		return err
+	}
+	return c.Audit.Validate()
 }

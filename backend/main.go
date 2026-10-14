@@ -129,11 +129,21 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		// questions: the administrator reads every account and every
 		// relationship, and a guardian reads the ones it holds. Both are mounted
 		// behind the surface that decides who may ask at all.
-		Admin:         handler.NewAdminHandler(ai.authorization, ai.authorization, logger),
-		Guardians:     handler.NewGuardianHandler(ai.authorization, logger),
+		Admin:     handler.NewAdminHandler(ai.authorization, ai.authorization, logger),
+		Guardians: handler.NewGuardianHandler(ai.authorization, logger),
+		// The audit is its own surface's read: it is where the decisions the
+		// other routes make are read back, and it is mounted behind the
+		// administrative surface rather than beside them.
+		Audit:         handler.NewAuditHandler(ai.auditLog, logger),
 		WebSocket:     ai.socket,
 		TokenVerifier: authService,
 		Authorizer:    ai.authorization,
+		// Every refusal is written down from here rather than from a handler,
+		// because the middleware is the one place a refusal is produced: a
+		// record kept per handler is a record omitted per handler, and an
+		// omitted record does not fail — it makes the audit say nothing
+		// happened.
+		Refusals: refusalRecorder{audit: ai.auditLog},
 	})
 	httpServer := server.NewHTTPServer(cfg, router)
 

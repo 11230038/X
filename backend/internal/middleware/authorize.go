@@ -33,6 +33,40 @@ type Authorizer interface {
 	Decide(ctx context.Context, caller authz.Caller, action authz.Action, subject int64) (authz.Decision, error)
 }
 
+// Refusal is one request the policy said no to.
+//
+// It carries what an audit entry needs and nothing else: who asked, in which
+// name, what they were reaching for, and which layer said no. There is no
+// subject here — a refusal is about the person who was refused (§7.1) — and no
+// body of any kind, which is the same discipline the audit's own columns keep
+// (§2.6).
+type Refusal struct {
+	Caller authz.Caller
+	// Name is the account's name at the moment of the request. It is carried
+	// rather than looked up by whoever writes the entry down, because it is
+	// already in hand: RequireAuth reloads the account on every request, so the
+	// name cost nothing to get here and would cost a read on the refusal path
+	// there — at the moment an instance with a broken policy is busiest.
+	Name     string
+	Decision authz.Decision
+	Surface  string
+	// RequestID is the id the access log line for this request carries. It is
+	// what makes an audit entry and a log line the same request rather than two
+	// records that happen to be about the same account.
+	RequestID string
+}
+
+// Recorder writes a refusal down. It is satisfied by the audit service.
+//
+// The refusal is recorded from here rather than from each handler because this
+// is the one place a refusal is *produced*: a handler cannot be asked to record
+// a decision it never saw, so a check written per handler would be a record
+// omitted per handler — and an omitted record does not fail, it makes the audit
+// say nothing happened.
+type Recorder interface {
+	RecordRefusal(ctx context.Context, refusal Refusal) error
+}
+
 // Requirement is what one route needs of the account making the request.
 //
 // Surface is required and Permission is not, because they answer two different
@@ -63,6 +97,19 @@ func Surface(name string) Requirement { return Requirement{Surface: name} }
 // different things for the person to do something about, and one status would
 // make which one it is a guess.
 func Authorize(authorizer Authorizer, requirement Requirement, logger *slog.Logger) gin.HandlerFunc {
+	return AuthorizeWith(authorizer, requirement, nil, logger)
+}
+
+// AuthorizeWith is Authorize with somewhere to write a refusal down.
+//
+// A nil recorder is not an error and not a silent downgrade: it is what the
+// tests of every other route in this repository mount, where the question is
+// whether a request is refused rather than whether the refusal was recorded.
+// The application always passes one, and the one place that is visible is
+// main.go, next to the audit service it comes from.
+func AuthorizeWith(
+	authorizer Authorizer, requirement Requirement, recorder Recorder, logger *slog.Logger,
+) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user, ok := CurrentUser(c)
 		if !ok || user.UserID <= 0 {
@@ -92,6 +139,10 @@ func Authorize(authorizer Authorizer, requirement Requirement, logger *slog.Logg
 			return
 		}
 		if !decision.Allowed {
+			recordRefusal(c, recorder, logger, Refusal{
+				Caller: caller, Name: user.Username, Decision: decision,
+				Surface: requirement.Surface, RequestID: httpx.RequestID(c),
+			})
 			// The reason is in the body because the two refusals a person can
 			// act on are different: a surface they do not have, and a
 			// relationship they do not hold. The layer is in it as well so that
@@ -106,6 +157,23 @@ func Authorize(authorizer Authorizer, requirement Requirement, logger *slog.Logg
 		}
 		c.Set(decisionKey, decision)
 		c.Next()
+	}
+}
+
+// recordRefusal writes a refusal down, and the answer does not depend on whether
+// it worked.
+//
+// The request is refused either way. A failure to record it is logged and the
+// refusal stands, and the direction matters: a version that answered 200 because
+// the audit was unreachable would be a version where the audit's availability is
+// what decides whether somebody may read somebody else's material.
+func recordRefusal(c *gin.Context, recorder Recorder, logger *slog.Logger, refusal Refusal) {
+	if recorder == nil {
+		return
+	}
+	if err := recorder.RecordRefusal(c.Request.Context(), refusal); err != nil && logger != nil {
+		logger.Error("recording a refusal failed",
+			"request_id", httpx.RequestID(c), "surface", refusal.Surface, "error", err)
 	}
 }
 

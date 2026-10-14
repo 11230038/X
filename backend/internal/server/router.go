@@ -28,12 +28,19 @@ type Handlers struct {
 	Permissions   *handler.PermissionsHandler
 	Admin         *handler.AdminHandler
 	Guardians     *handler.GuardianHandler
+	Audit         *handler.AuditHandler
 	WebSocket     *ws.Handler
 	TokenVerifier middleware.TokenVerifier
 	// Authorizer answers what an account may reach. It is what the routes below
 	// are narrowed by, and it is required: a router built without one refuses
 	// every authenticated request rather than serving them unchecked.
 	Authorizer middleware.Authorizer
+	// Refusals is where a refusal is written down. It is optional, and the only
+	// place that passes one is main.go, next to the audit service it comes from:
+	// a router built without one still refuses, it just does not leave a record
+	// — which is what every test in this repository wants, since what they are
+	// about is whether a request is refused (§2.16).
+	Refusals middleware.Recorder
 }
 
 // NewRouter builds the application router without binding a network port.
@@ -72,7 +79,8 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// it on `authenticated` instead, which is a visible thing to do in review.
 	reach := func(surface string) *gin.RouterGroup {
 		return authenticated.Group("",
-			middleware.Authorize(handlers.Authorizer, middleware.Surface(surface), logger))
+			middleware.AuthorizeWith(
+				handlers.Authorizer, middleware.Surface(surface), handlers.Refusals, logger))
 	}
 	// What this account is, and what it may reach, before anything else: it is
 	// mounted without a surface so that an account restricted out of every area
@@ -241,6 +249,11 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// none rather than refused.
 	guardian := reach(authz.SurfaceGuardian)
 	guardian.GET("/guardian/learners", handlers.Guardians.ListLearners)
+	// The audit is the governance record, and it is read across the whole
+	// instance rather than narrowed to the caller: what an administrator is
+	// asking is what happened here, and a version filtered by the account on the
+	// token would answer a different question under the same name.
+	admin.GET("/audit", handlers.Audit.List)
 	// The socket is authenticated by the middleware above before it is
 	// upgraded, so an unauthenticated request is answered as an HTTP request
 	// rather than becoming a connection (WS-06).
