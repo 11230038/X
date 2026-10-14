@@ -87,7 +87,6 @@ func validValues() map[string]string {
 		"MASTERY_LEASE_TTL":            "2m",
 		"MASTERY_GATE_CONSECUTIVE":     "3",
 		"MASTERY_GATE_MIN_EVIDENCE":    "2",
-		"MASTERY_MAX_ACTIVE_PATHS":     "5",
 		"DASHBOARD_RECENT_LIMIT":       "10",
 		"READING_UNIT_MAX_CHARS":       "4000",
 		"READING_TUTOR_MAX_TOKENS":     "2048",

@@ -81,11 +81,6 @@ type Repository interface {
 	// when it has never been on one, which is the ordinary state of a new
 	// conversation rather than a failure.
 	PathOfSession(ctx context.Context, sessionID string, caller authz.Caller) (string, error)
-	// ActivePathsOfSession reads the paths a conversation is still working on,
-	// by the status of their topic metadata. It is the same link table read for a
-	// different question: not "where is this conversation" but "how many paths is
-	// it in the middle of".
-	ActivePathsOfSession(ctx context.Context, sessionID string, caller authz.Caller) ([]string, error)
 	// SessionsOn reads the conversations linked to a path, most recently seen
 	// first.
 	SessionsOn(ctx context.Context, pathID string, caller authz.Caller) ([]string, error)

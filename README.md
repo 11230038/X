@@ -83,7 +83,7 @@ docker start seekdb
 - 解析（V2）：`PARSER_DEFAULT_ENGINE`、`PARSER_DOCLING_BASE_URL`、`PARSER_TIMEOUT`
 - 知识库（V2）：`KB_CHUNK_SIZE`、`KB_CHUNK_OVERLAP`、`KB_RETRIEVAL_TOP_K`、`KB_RETRIEVAL_CANDIDATES`、`KB_RRF_K`、`KB_MAX_CHARS_PER_DOCUMENT`、`KB_MAX_CHARS_PER_TURN`、`KB_VECTOR_LEASE`、`KB_INDEX_WORKERS`
 - 出题与练习（V3）：`QUESTION_DEFAULT_COUNT`、`QUESTION_MAX_COUNT`、`PRACTICE_QUEUE_SIZE`、`PRACTICE_JUDGE_MAX_TOKENS`
-- 掌握路径（V4）：`MASTERY_LEASE_TTL`、`MASTERY_GATE_CONSECUTIVE`、`MASTERY_GATE_MIN_EVIDENCE`、`MASTERY_MAX_ACTIVE_PATHS`
+- 掌握路径（V4）：`MASTERY_LEASE_TTL`、`MASTERY_GATE_CONSECUTIVE`、`MASTERY_GATE_MIN_EVIDENCE`
 - 沉浸阅读（V4）：`READING_UNIT_MAX_CHARS`、`READING_TUTOR_MAX_TOKENS`、`READING_EXTENSION_TIMEOUT`
 - Memory（V4）：`MEMORY_CONFIDENCE_THRESHOLD`、`MEMORY_MIN_CORROBORATION`、`MEMORY_MIN_SURFACES`、`MEMORY_SENSITIVE_KINDS`、`MEMORY_SYNTHESIS_WINDOW_DAYS`、`MEMORY_MAX_FACTS_PER_SURFACE`
 - 继续学习（V4）：`DASHBOARD_RECENT_LIMIT`
@@ -415,7 +415,7 @@ V4 加两个能力（`mastery_path`、`immersive_reading`）、一个只读的"�
 
 **掌握路径（MP-01–05）** 把一门要学的东西拆成知识点，然后按证据推进每一条的档位。它**不是一个请求-应答的接口**，是一轮对话：
 
-- **路径在一轮 turn 里开启**，不在 REST 上（没有 `POST /mastery/paths`）。MP-01 的五个来源——目标、材料、Notebook、Reading——都要先有一次会话才谈得上"从哪个来源来"。所以 `GET /mastery/paths` 是读，建是 `mastery_path` 能力在 `Start` 时做的事。同时推进的路径数上限是 `MASTERY_MAX_ACTIVE_PATHS`，但**这一版它拦不住任何请求**——一个会话只要有活跃路径就直接回到那条路径上，要数路径得先没有路径可回（见 [backend/.env.example](backend/.env.example) 里这个键的说明）：**这个键今天什么也不拦**，本仓库对它的说明一律按代码的实际行为写。上限要真的生效，得先说清它数的是什么、拦的是什么。
+- **路径在一轮 turn 里开启**，不在 REST 上（没有 `POST /mastery/paths`）。MP-01 的五个来源——目标、材料、Notebook、Reading——都要先有一次会话才谈得上"从哪个来源来"。所以 `GET /mastery/paths` 是读，建是 `mastery_path` 能力在 `Start` 时做的事。同时推进的路径数**没有上限**：曾经有一个配置键想当这个上限（`MASTERY_MAX_ACTIVE_PATHS`），但它拦不住任何请求——一个会话只要有活跃路径就直接回到那条路径上，要数路径得先没有路径可回，而这两件事读的是同一张表——于是整条链连同那个键一起删掉了（见 [backend/.env.example](backend/.env.example)）。要再定一条上限，得先说清它数的是什么、拦的是什么。
 - **九个工具**是这一版的全部动作：`mastery_state`（读树与档位）、`mastery_question`（出题）、`mastery_grade`（判卷）、`mastery_skip`、`mastery_assess`（记一条证据）、`mastery_map` / `mastery_edit`（建图与改知识点）、`mastery_switch`、`mastery_leave`。能力本身只有一个阶段（`responding`），因为"这一轮在干什么"是**工具**说的，一轮按学习者的下一句话在九个工具之间走。
 - **一题只存一处**：`mastery_question` 出的题就在 `notebook_entries` 里，只是多带了 `mastery_path_id` 与 `knowledge_point_id` 两列。掌握路径**没有自己的题表**，所以题库的每一个过滤器在它上面都照常有效。
 - **档位由证据算出来，不由模型说**：连续 `MASTERY_GATE_CONSECUTIVE` 次答对升到已掌握，证据少于 `MASTERY_GATE_MIN_EVIDENCE` 时是"未知"而不是"薄弱"——`partial` 既不算对也不算错，它重置连续计数但不降档。复习间隔是一条**自己的曲线**，读的是证据序列而不是题目的连对计数。
@@ -444,7 +444,7 @@ V4 加两个能力（`mastery_path`、`immersive_reading`）、一个只读的"�
 
 **QN-05 批量导入**：`POST /questions/import` 的 body 是一个 JSON 行文件（每行一道题，与 `save_question` 参数同形），`?dry_run=true` 只报告不写。两次请求共用同一份解析与判定，所以 preview 不会说谎；冲突分"同一道题"（同 `question_id`）与"同一题干不同 id"（重复）两种，都进报告。两次都是 **200**——一份"写了 3 条、拒了 2 条"的报告不是失败的请求。
 
-**已知缺口（V4）**：`MASTERY_MAX_ACTIVE_PATHS` 与它背后的 `ErrTooManyPaths` 当前到达不了（同一条判断读两次同一张表，见上）；~~掌握路径与阅读材料都还没有 owner 列，权限仍只到"有没有登录"~~（V5 补上了）；阅读的推荐要读目录里每份材料的开头一窗（材料没有语言列，语言是从正文推断的）；`mastery_interactions` 的"同一路径最多一个活跃交互"是服务层的事务内读，不是数据库唯一键；租约接管会让一个过期的长 turn 退化成只追加证据；`LLM_CAPABILITY_CONFIG_JSON` 里两个新能力各有一条条目，`immersive_reading` 的上下文预算单独大一档。
+**已知缺口（V4）**：掌握路径同时推进的条数没有上限，因为那个上限从没被回答过（`MASTERY_MAX_ACTIVE_PATHS` 与它背后的 `ErrTooManyPaths` 已随定义一起删除，见上）；~~掌握路径与阅读材料都还没有 owner 列，权限仍只到"有没有登录"~~（V5 补上了）；阅读的推荐要读目录里每份材料的开头一窗（材料没有语言列，语言是从正文推断的）；`mastery_interactions` 的"同一路径最多一个活跃交互"是服务层的事务内读，不是数据库唯一键；租约接管会让一个过期的长 turn 退化成只追加证据；`LLM_CAPABILITY_CONFIG_JSON` 里两个新能力各有一条条目，`immersive_reading` 的上下文预算单独大一档。
 
 ### 治理与运维（V5）
 
@@ -519,7 +519,7 @@ V5 加的不是"能做什么"，是**"不能做什么"**和**"做过的每一件
 
 `GET /api/v1/system/version` 报版本、构建时间、Go 版本、migration 版本（`go run` 下如实说 `(devel)`，不报空串）。`GET /api/v1/system/status` 报运行模式（`APP_ENV`）、依赖的逐项 readiness、活跃回合数、索引 worker 是否在跑、以及 `llm_calls` 里**未收尾**的行数。**物理路径不报**（`UPLOAD_ROOT` / `WORKSPACE_ARCHIVE_ROOT` 只存在 runtime），**内存不报**，**可写设置与更新检查不做**。
 
-**已知缺口（V5）**：`internal/outbound` 零调用方；`cmd/seed` 不指派 `owner_id`（种子数据是无主的）；导出的包没有下载路由；限流按账号不按设备，且多实例下会静默放大；`MASTERY_MAX_ACTIVE_PATHS` 那一条仍在等产品裁决（现在它有可能被回答成一条 grants，见 `V5实施进度.md` 横切表第 2 条）；审计与用量的保留期只被一条按窗口删的语句读到，没有到点就删的作业；导入的恢复是"回到这次导入之前"，不是"接着导"；V5 这一版的四条迁移只在空库上向前跑过，把既有部署的库升上来的那条路没有用例（见「验证命令」）；包的六条路由一个面都不挂（`/workspace/*`、`/workspace/jobs/*` 那一组），这是有意的——一个包是"账号自己的东西出去再回来"，没有哪个面能表达这条规矩，但也没有用例钉着它。
+**已知缺口（V5）**：`internal/outbound` 零调用方；`cmd/seed` 不指派 `owner_id`（种子数据是无主的）；导出的包没有下载路由；限流按账号不按设备，且多实例下会静默放大；~~`MASTERY_MAX_ACTIVE_PATHS` 那一条仍在等产品裁决~~（已按代码处置：整条链删掉，见上）；审计与用量的保留期只被一条按窗口删的语句读到，没有到点就删的作业；导入的恢复是"回到这次导入之前"，不是"接着导"；V5 这一版的四条迁移只在空库上向前跑过，把既有部署的库升上来的那条路没有用例（见「验证命令」）；包的六条路由一个面都不挂（`/workspace/*`、`/workspace/jobs/*` 那一组），这是有意的——一个包是"账号自己的东西出去再回来"，没有哪个面能表达这条规矩，但也没有用例钉着它。
 
 ## 前端
 

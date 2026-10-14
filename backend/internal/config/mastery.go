@@ -5,11 +5,18 @@ import (
 	"time"
 )
 
-// MasteryConfig holds the four knobs a mastery path has, and there are four
+// MasteryConfig holds the three knobs a mastery path has, and there are three
 // because everything else about a path is an algorithm rather than a setting
 // (§5, V3 §5's rule): how many right answers promote a point, what a level means
-// with little evidence, how long a claim stands, and how many paths a person may
-// hold at once are the four questions whose answers are genuinely choices.
+// with little evidence, and how long a claim stands are the questions whose
+// answers are genuinely choices.
+//
+// How many paths a person may hold at once used to be a fourth. It is gone
+// rather than answered: the key was required, validated and wired, and it
+// refused nothing — the count it was compared against was read only when the
+// conversation was on no path at all (V4设计方案 §0.3 第 10 条). A limit that
+// fires has to say what it counts and what it refuses, and nothing here has said
+// so.
 //
 // The other half of the split is worth naming too, because it is what keeps this
 // file short: the *closed set* of an observation's result and the arithmetic of
@@ -29,20 +36,14 @@ type MasteryConfig struct {
 	// the gate will call it anything but unknown — the threshold that keeps "not
 	// tested yet" from being reported as "weak".
 	GateMinEvidence int
-	// MaxActivePaths is how many paths one conversation may be in the middle of
-	// at once. It was meant to bound *starting* a path rather than having one,
-	// and this build refuses nothing with it: the count it is compared against is
-	// read only when the conversation is on no path, so the comparison never
-	// fires (mastery.Open).
-	MaxActivePaths int
 }
 
 // Validate checks the mastery thresholds.
 //
-// All four are positive-integer rules and none of them is a range, which is the
-// shape the domain imposes: a zero lease would be a lease that expires before it
-// is written, a zero consecutive threshold would promote on no evidence, and a
-// zero evidence floor would make every untested knowledge point weak.
+// All three are positive rules and none of them is a range, which is the shape
+// the domain imposes: a zero lease would be a lease that expires before it is
+// written, a zero consecutive threshold would promote on no evidence, and a zero
+// evidence floor would make every untested knowledge point weak.
 func (c MasteryConfig) Validate() error {
 	if c.LeaseTTL <= 0 {
 		return fmt.Errorf("MASTERY_LEASE_TTL must be a positive duration")
@@ -53,7 +54,6 @@ func (c MasteryConfig) Validate() error {
 	}{
 		{"MASTERY_GATE_CONSECUTIVE", c.GateConsecutive},
 		{"MASTERY_GATE_MIN_EVIDENCE", c.GateMinEvidence},
-		{"MASTERY_MAX_ACTIVE_PATHS", c.MaxActivePaths},
 	} {
 		if field.value <= 0 {
 			return fmt.Errorf("%s must be a positive integer", field.key)
@@ -75,14 +75,9 @@ func loadMasteryConfig(values map[string]string) (MasteryConfig, error) {
 	if err != nil {
 		return MasteryConfig{}, err
 	}
-	maxActivePaths, err := parsePositiveInt(values, "MASTERY_MAX_ACTIVE_PATHS")
-	if err != nil {
-		return MasteryConfig{}, err
-	}
 	return MasteryConfig{
 		LeaseTTL:        leaseTTL,
 		GateConsecutive: gateConsecutive,
 		GateMinEvidence: gateMinEvidence,
-		MaxActivePaths:  maxActivePaths,
 	}, nil
 }

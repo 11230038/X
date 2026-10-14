@@ -54,40 +54,6 @@ func (r *GORMRepository) PathOfSession(ctx context.Context, sessionID string, ca
 	return row.PathID, nil
 }
 
-// ActivePathsOfSession reads the paths a conversation is still working on, most
-// recently seen first.
-//
-// The join is what makes "still working on" mean something: the link table says
-// a conversation has been on a path, and mastery_topic_meta says whether the
-// path is still active. A LEFT JOIN with a COALESCE rather than an inner one,
-// because a path whose metadata row is missing is treated as active everywhere
-// else in this package (Service.Load reports such a path rather than refusing
-// it), and a count that quietly left those out would be a count of the wrong
-// thing.
-func (r *GORMRepository) ActivePathsOfSession(ctx context.Context, sessionID string, caller authz.Caller) ([]string, error) {
-	if err := r.ready(); err != nil {
-		return nil, err
-	}
-	var rows []struct {
-		PathID string `gorm:"column:path_id"`
-	}
-	err := r.db.WithContext(ctx).Table("mastery_path_sessions AS s").
-		Select("s.path_id AS path_id").
-		Joins("LEFT JOIN mastery_topic_meta AS m ON m.path_id = s.path_id").
-		Where("s.session_id = ? AND COALESCE(m.status, ?) = ?", sessionID, StatusActive, StatusActive).
-		Where("s.path_id IN (?)", pathScope(r.db.WithContext(ctx), caller)).
-		Order("s.last_seen_time DESC, s.path_id ASC").
-		Find(&rows).Error
-	if err != nil {
-		return nil, fmt.Errorf("read the active paths of session %s: %w", sessionID, err)
-	}
-	paths := make([]string, 0, len(rows))
-	for _, row := range rows {
-		paths = append(paths, row.PathID)
-	}
-	return paths, nil
-}
-
 // SessionsOn reads the conversations linked to a path, most recently seen first.
 func (r *GORMRepository) SessionsOn(ctx context.Context, pathID string, caller authz.Caller) ([]string, error) {
 	if err := r.ready(); err != nil {

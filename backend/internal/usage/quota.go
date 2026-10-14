@@ -157,10 +157,10 @@ func (q *Quota) Allow(ctx context.Context, ownerID int64) error {
 // Exceeded is the refusal: which limit ran out, where the account stands, and
 // when the count starts over.
 //
-// It is a type rather than a sentence (§2.9, and the shape V4's ErrTooManyPaths
-// already had) because the three facts have three readers: a client draws where
-// to look at its usage and when it may come back, an operator reads which number
-// is too low, and the sentence is for whoever has neither.
+// It is a type rather than a sentence (§2.9) because the three facts have three
+// readers: a client draws where to look at its usage and when it may come back,
+// an operator reads which number is too low, and the sentence is for whoever has
+// neither.
 type Exceeded struct {
 	// Item is which limit this is — one of the two names above.
 	Item string

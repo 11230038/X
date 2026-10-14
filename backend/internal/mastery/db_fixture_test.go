@@ -93,9 +93,8 @@ func newHarness(t *testing.T) *harness {
 	testdb.Reset(t, resource, dbTables...)
 	repository := NewGORMRepository(resource.GORM())
 	service, err := NewService(repository, Options{
-		LeaseTTL:       time.Hour,
-		Gate:           GateOptions{Consecutive: 3, MinEvidence: 2},
-		MaxActivePaths: 3,
+		LeaseTTL: time.Hour,
+		Gate:     GateOptions{Consecutive: 3, MinEvidence: 2},
 	})
 	if err != nil {
 		t.Fatalf("build the mastery service: %v", err)

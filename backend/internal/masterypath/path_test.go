@@ -121,9 +121,8 @@ func newFixture(t *testing.T) *fixture {
 		"trn_1", "ses_1", atSecond(0))
 
 	service, err := mastery.NewService(mastery.NewGORMRepository(resource.GORM()), mastery.Options{
-		LeaseTTL:       2 * time.Minute,
-		Gate:           mastery.GateOptions{Consecutive: 2, MinEvidence: 3},
-		MaxActivePaths: 3,
+		LeaseTTL: 2 * time.Minute,
+		Gate:     mastery.GateOptions{Consecutive: 2, MinEvidence: 3},
 	})
 	if err != nil {
 		t.Fatalf("new mastery service: %v", err)

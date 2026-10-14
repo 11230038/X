@@ -118,48 +118,26 @@ func TestDBArrivingAgainComesBackToTheSamePath(t *testing.T) {
 	}
 }
 
-func TestDBArrivingIsNeverRefusedForHavingTooManyPaths(t *testing.T) {
+func TestDBWhereIWasIsOneAnswerWhenTheLinksTie(t *testing.T) {
 	h := newHarness(t)
 	actor := h.conversation(t, "s_1", "t_1")
 	ctx := context.Background()
 
-	// Three paths in one conversation, which is exactly what this harness's
-	// MaxActivePaths allows. They are made by Create and not by Open, because
-	// Open can only ever start a conversation's first one.
+	// Three paths on one conversation, made by Create and not by arriving: an
+	// arrival can only ever start a conversation's first one, so a conversation
+	// in this state is one that has been put on paths by other means.
 	for _, id := range []string{"mp_a", "mp_b", "mp_c"} {
 		h.create(t, id, "目标 "+id, actor)
 	}
-	active, err := h.repository.ActivePathsOfSession(ctx, "s_1", h.caller)
+	// The fixture's clock only moves when it is told to, so all three links carry
+	// the same last_seen_time and the read has to break the tie itself.
+	arrival, err := h.service.Arrive(ctx, ArriveRequest{Actor: actor, Goal: "再来一次"}, h.caller)
 	if err != nil {
-		t.Fatalf("read the active paths: %v", err)
+		t.Fatalf("arrive on a conversation that has three paths: %v", err)
 	}
-	if len(active) != 3 {
-		t.Fatalf("%d paths are active, want the three just created", len(active))
-	}
-
-	// The count is at the limit and arriving is still not refused. That is not
-	// the check failing to fire — it is the check being unreachable, and the
-	// reason is the two reads that would have to disagree: Open returns as soon
-	// as PathOfSession names a path, and PathOfSession and ActivePathsOfSession
-	// read the *same* links, so a conversation that has an active path is a
-	// conversation that never reaches the count, while a conversation with no
-	// links has nothing to count.
-	//
-	// This case is written to pin what happens rather than what was intended:
-	// `MASTERY_MAX_ACTIVE_PATHS` bounds nothing today (V4设计方案 §0.3 第 10 条).
-	// The descriptions elsewhere in this repository are written from the code, so
-	// what is pinned here is what the key does: it counts one conversation's
-	// paths and it refuses no arrival. A bound that fires would have to say what
-	// it counts and what it refuses, and that is not this package's decision.
-	arrival, err := h.service.Arrive(ctx, ArriveRequest{Actor: actor, Goal: "第四条"}, h.caller)
-	if err != nil {
-		t.Fatalf("arriving at the limit: %v, want the path the conversation is already on: %v",
-			err, ErrTooManyPaths)
-	}
-	// The three links were all written in the same second, so the tie breaker is
-	// the one the read names: the path id, ascending. That is the same order the
-	// link table's own case pins, and it is what makes "where was I" a question
-	// with one answer rather than whichever row the engine reached first.
+	// The tie breaker is the one the read names, the path id ascending, and that
+	// is what makes "where was I" a question with one answer rather than whichever
+	// row the engine reached first.
 	if arrival.Path.ID != "mp_a" {
 		t.Errorf("the arrival is on path %s, want mp_a — the tie on last_seen is broken by id",
 			arrival.Path.ID)

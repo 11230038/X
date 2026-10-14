@@ -133,54 +133,6 @@ func TestDBTheListingIsMostRecentlySeenFirstAndAnUntouchedPathComesLast(t *testi
 	}
 }
 
-func TestDBOnlyTheLinksOnActivePathsCount(t *testing.T) {
-	h := newHarness(t)
-	actor := h.conversation(t, "s_1", "t_1")
-	// The id that sorts first is the one worked on first, so that "most recently
-	// seen first" and "by path id" are different answers and the case can tell
-	// which one it got.
-	h.create(t, "mp_a", "甲", actor)
-	h.clock.advance(time.Hour)
-	h.create(t, "mp_z", "乙", actor)
-	ctx := context.Background()
-
-	paths, err := h.repository.ActivePathsOfSession(ctx, "s_1", h.caller)
-	if err != nil {
-		t.Fatalf("read the active paths: %v", err)
-	}
-	if !equal(paths, []string{"mp_z", "mp_a"}) {
-		t.Errorf("the conversation is working on %v, want both, most recently seen first", paths)
-	}
-
-	// A path whose status is not "active" is one the person has put down. The
-	// column is written here rather than through the domain because this version
-	// writes only one status (UpdateMeta), and the read is what is being checked.
-	if err := h.resource.GORM().Exec("UPDATE mastery_topic_meta SET status = 'archived' " +
-		"WHERE path_id = 'mp_a'").Error; err != nil {
-		t.Fatalf("put a path down: %v", err)
-	}
-	paths, err = h.repository.ActivePathsOfSession(ctx, "s_1", h.caller)
-	if err != nil {
-		t.Fatalf("read the active paths again: %v", err)
-	}
-	if !equal(paths, []string{"mp_z"}) {
-		t.Errorf("the conversation is working on %v, want only the one still active", paths)
-	}
-	// A path with no metadata row at all counts as active: the LEFT JOIN's COALESCE
-	// is there because a path this version has not renamed is reported everywhere
-	// else rather than refused.
-	if err := h.resource.GORM().Exec("DELETE FROM mastery_topic_meta WHERE path_id = 'mp_a'").Error; err != nil {
-		t.Fatalf("drop a metadata row: %v", err)
-	}
-	paths, err = h.repository.ActivePathsOfSession(ctx, "s_1", h.caller)
-	if err != nil {
-		t.Fatalf("read the active paths once more: %v", err)
-	}
-	if !equal(paths, []string{"mp_z", "mp_a"}) {
-		t.Errorf("a path with no metadata reads as %v, want it counted as active", paths)
-	}
-}
-
 // ids is a listing by path id, which is what its order is about.
 func ids(listed []Summary) []string {
 	out := make([]string, 0, len(listed))

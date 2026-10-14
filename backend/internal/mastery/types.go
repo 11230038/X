@@ -44,10 +44,6 @@ var (
 	// computed from is no longer the state on the row, and the caller has to read
 	// again rather than write.
 	ErrStaleState = errors.New("mastery: the path moved on")
-	// ErrTooManyPaths is a conversation that has as many active paths as one may
-	// have. It is not a defect and not a race: it is a product limit being
-	// reached, and the caller's answer is to finish or leave one of them.
-	ErrTooManyPaths = errors.New("mastery: too many active paths")
 )
 
 // Result is the outcome of one piece of evidence, and it is a closed set.

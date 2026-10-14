@@ -101,7 +101,6 @@ func newMasteryPaths(
 			Consecutive: cfg.Mastery.GateConsecutive,
 			MinEvidence: cfg.Mastery.GateMinEvidence,
 		},
-		MaxActivePaths: cfg.Mastery.MaxActivePaths,
 	})
 	if err != nil {
 		return masteryPath{}, fmt.Errorf("initialize the mastery path domain: %w", err)
