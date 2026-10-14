@@ -14,6 +14,11 @@
 // than six.
 package authz
 
+import (
+	"errors"
+	"time"
+)
+
 // The two roles. PRD §5.1 and §23.1 第 7 条 are explicit that this is the whole
 // list: standard, learner and custom are presets carried by an ordinary account,
 // not a third kind of account. A build that invented a "learner role" would be
@@ -198,3 +203,87 @@ func union(base, added []string) []string {
 	}
 	return joined
 }
+
+// ── what the store keeps ────────────────────────────────────────────────────
+
+// Link is one guardian relationship, with the permissions it carries.
+//
+// The permissions travel with the link rather than being asked for separately
+// because they are always needed together: a decision about somebody else's
+// material is "is there a link" and "does it carry this", and two reads would
+// let the two answers come from two different moments.
+type Link struct {
+	ID          string
+	GuardianID  int64
+	LearnerID   int64
+	CreatedBy   int64
+	Permissions []Permission
+	CreatedAt   time.Time
+}
+
+// Holds reports whether the link carries a permission.
+func (l Link) Holds(permission Permission) bool {
+	for _, held := range l.Permissions {
+		if held == permission {
+			return true
+		}
+	}
+	return false
+}
+
+// Assignment is one row of user_grants as stored: which item, whether it is
+// turned on or off, and who wrote it down.
+type Assignment struct {
+	GrantID   int64
+	UserID    int64
+	Item      Item
+	Allowed   bool
+	GrantedBy int64
+	CreatedAt time.Time
+}
+
+// Grant is the assignment as the policy reads it.
+func (a Assignment) Grant() Grant { return Grant{Item: a.Item, Allowed: a.Allowed} }
+
+// Grants converts a set of assignments to the policy's form. It exists so that
+// only one place does the conversion, and that place is next to the two types.
+func Grants(assignments []Assignment) []Grant {
+	grants := make([]Grant, 0, len(assignments))
+	for _, assignment := range assignments {
+		grants = append(grants, assignment.Grant())
+	}
+	return grants
+}
+
+// The refusals the store and the service answer with. They are sentinels
+// because each of them is a different sentence to a caller — a link that
+// already exists is not the same mistake as an account that is not a learner —
+// and a caller reading strings would be matching on prose.
+var (
+	// ErrSelfLink reports an account named as its own guardian. Migration
+	// 00016's CHECK refuses it as well; this is the sentence rather than the
+	// constraint violation.
+	ErrSelfLink = errors.New("authz: an account may not be its own guardian")
+	// ErrNotALearner reports a relationship whose watched account is not a
+	// learner. It is a cross-table question — it reads users.preset — so a
+	// CHECK cannot ask it and this is the only place it is asked.
+	ErrNotALearner = errors.New("authz: the watched account is not a learner")
+	// ErrGuardianIsLearner reports a learner named as somebody's guardian,
+	// which is the third of AUTH-04's prohibitions.
+	ErrGuardianIsLearner = errors.New("authz: a learner may not be a guardian")
+	// ErrLinkExists reports a relationship already in the table. It is the
+	// unique key's 1062 mapped to something callers can branch on.
+	ErrLinkExists = errors.New("authz: the relationship already exists")
+	// ErrLinkNotFound reports a relationship that is not there — including one
+	// that was revoked, because revoking deletes the row (§2.3).
+	ErrLinkNotFound = errors.New("authz: no such relationship")
+	// ErrPermissionNotHeld reports a permission the link does not carry, on the
+	// path that removes one.
+	ErrPermissionNotHeld = errors.New("authz: the link does not carry that permission")
+	// ErrGrantNotFound reports a grant that is not there.
+	ErrGrantNotFound = errors.New("authz: no such grant")
+	// ErrUnknownPermission reports a permission outside AUTH-05's four.
+	ErrUnknownPermission = errors.New("authz: not a permission this build recognises")
+	// ErrUnknownUser reports an account id the users table does not have.
+	ErrUnknownUser = errors.New("authz: no such account")
+)
