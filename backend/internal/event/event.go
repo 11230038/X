@@ -24,6 +24,18 @@ const (
 	MetaStatus = "status"
 	// MetaTurnTerminal marks an error event as ending the turn.
 	MetaTurnTerminal = "turn_terminal"
+	// MetaQuotaItem and MetaQuotaResetsAt say which of the account's limits ran
+	// out and when it starts over, on the error event of a turn that ended
+	// because it could not call a model at all.
+	//
+	// They are here because §7 asks a refusal to name both, and the code alone
+	// cannot: `quota_exceeded` says the account is out of something, and a
+	// client that cannot say what or until when can only tell the user to wait
+	// without saying how long. The item is one of the two names in
+	// internal/usage, and the moment is an RFC 3339 instant — the same pair the
+	// HTTP surfaces carry in their own refusal.
+	MetaQuotaItem     = "quota_item"
+	MetaQuotaResetsAt = "quota_resets_at"
 	// MetaRouting says which capability a turn was routed to, on what grounds,
 	// and with what weight. It is on the turn's first event — the session event —
 	// and only on a turn that was routed rather than asked for by name, so that

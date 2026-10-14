@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"backend/internal/event"
 	"backend/internal/session"
@@ -126,6 +127,13 @@ func (r *turnRun) announce(ctx context.Context, outcome Status, failure *Failure
 			event.MetaPartialResponse: failure.PartialResponse,
 			event.MetaTurnTerminal:    true,
 			event.MetaStatus:          string(outcome),
+		}
+		// A quota refusal says which limit and until when, because the code
+		// alone cannot: a client that knows only "out of something" can tell the
+		// user to wait without being able to say how long or where to look.
+		if failure.Quota != nil {
+			metadata[event.MetaQuotaItem] = failure.Quota.Item
+			metadata[event.MetaQuotaResetsAt] = failure.Quota.ResetsAt.UTC().Format(time.RFC3339)
 		}
 		message, ok := clientMessages[failure.Code]
 		if !ok {

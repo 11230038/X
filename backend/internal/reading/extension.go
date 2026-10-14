@@ -3,6 +3,7 @@ package reading
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -161,19 +162,39 @@ func (r *Registry) Catalogue() []Availability {
 	return listed
 }
 
+// refuser is a failure that says the request may not be made at all, as opposed
+// to work that was asked for and did not finish.
+//
+// It is how a refusal gets past this file. Everything an extension does wrong is
+// reported as a skipped outcome, and that is right for an extension that could
+// not answer — one broken panel must not fail the page. It is wrong for an
+// account that may not make the call: that is a fact about the request, and a
+// client that sees it as a greyed-out panel with a sentence under it has been
+// told the extension is what failed. The interface is unexported here and
+// unexported where it is implemented, and discovered structurally, the same way
+// the turn runtime finds a failure that knows whether it is retryable.
+type refuser interface{ Refused() bool }
+
+// isRefusal reports whether a failure is one of those.
+func isRefusal(err error) bool {
+	var refused refuser
+	return errors.As(err, &refused) && refused.Refused()
+}
+
 // Run runs one extension by name.
 //
 // The error return is for an extension that does not exist, which is a missing
-// resource. Everything else — the extension being unavailable, panicking,
-// running out of time, or answering in the wrong shape — comes back as a skipped
-// Outcome, because those are states of the extension rather than failures of the
-// request that asked for it.
+// resource, and for a refusal that stopped the request before any extension ran.
+// Everything else — the extension being unavailable, panicking, running out of
+// time, or answering in the wrong shape — comes back as a skipped Outcome,
+// because those are states of the extension rather than failures of the request
+// that asked for it.
 func (r *Registry) Run(ctx context.Context, name string, reading Context) (Outcome, error) {
 	extension, ok := r.lookup(name)
 	if !ok {
 		return Outcome{}, fmt.Errorf("%w: extension %s", ErrNotFound, name)
 	}
-	return r.runOne(ctx, extension, reading), nil
+	return r.runOne(ctx, extension, reading)
 }
 
 // RunAll runs every extension, each one independently of the others.
@@ -181,13 +202,20 @@ func (r *Registry) Run(ctx context.Context, name string, reading Context) (Outco
 // The results come back in the catalogue's order, one per registered extension,
 // so a caller can pair them up by position as well as by name. One extension
 // failing is one skipped entry and never a shorter list.
+//
+// A refusal is the one failure dropped here, and it is dropped because this
+// answer has no room for it: the list is a list, and it cannot be refused as a
+// whole by one extension. What the caller sees is the extension skipped with the
+// refusal as its reason, which names the item and the moment it comes back —
+// the same two facts, in the only place this shape can carry them.
 func (r *Registry) RunAll(ctx context.Context, reading Context) []Outcome {
 	if r == nil {
 		return []Outcome{}
 	}
 	outcomes := make([]Outcome, 0, len(r.extensions))
 	for _, extension := range r.extensions {
-		outcomes = append(outcomes, r.runOne(ctx, extension, reading))
+		outcome, _ := r.runOne(ctx, extension, reading)
+		outcomes = append(outcomes, outcome)
 	}
 	return outcomes
 }
@@ -216,10 +244,10 @@ type extensionRun struct {
 // with a deadline and then let go — a late extension is a goroutine that
 // finishes into a channel nobody is reading, which is a buffered channel of one,
 // and not a leak.
-func (r *Registry) runOne(ctx context.Context, extension Extension, reading Context) Outcome {
+func (r *Registry) runOne(ctx context.Context, extension Extension, reading Context) (Outcome, error) {
 	outcome := Outcome{Name: extension.Name(), Schema: extension.ResultSchema()}
 	if available, reason := extension.Available(); !available {
-		return skipped(outcome, reason)
+		return skipped(outcome, reason), nil
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, r.timeout)
@@ -241,18 +269,23 @@ func (r *Registry) runOne(ctx context.Context, extension Extension, reading Cont
 		// being slow, and the two are told apart here rather than collapsed: a
 		// turn the user stopped is not a broken extension.
 		if ctx.Err() != nil {
-			return skipped(outcome, "the request was cancelled before the extension answered")
+			return skipped(outcome, "the request was cancelled before the extension answered"), nil
 		}
-		return skipped(outcome, "the extension did not answer within "+r.timeout.String())
+		return skipped(outcome, "the extension did not answer within "+r.timeout.String()), nil
 	case run := <-done:
 		if run.err != nil {
-			return skipped(outcome, run.err.Error())
+			// The one failure that is not the extension's, and the one reason
+			// this returns an error at all: see refuser above.
+			if isRefusal(run.err) {
+				return outcome, run.err
+			}
+			return skipped(outcome, run.err.Error()), nil
 		}
 		if err := validateResult(outcome.Schema, run.payload); err != nil {
-			return skipped(outcome, err.Error())
+			return skipped(outcome, err.Error()), nil
 		}
 		outcome.Result = run.payload
-		return outcome
+		return outcome, nil
 	}
 }
 

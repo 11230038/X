@@ -6,6 +6,7 @@ import (
 
 	"backend/internal/agentloop"
 	"backend/internal/capability"
+	"backend/internal/usage"
 )
 
 // retryDecider is a failure that knows whether repeating it could ever work.
@@ -26,6 +27,7 @@ var clientMessages = map[string]string{
 	CodeInputTimeout:      "等待回复超过时限，本轮已结束",
 	CodeRoundsExhausted:   "模型反复调用工具，已达到上限",
 	CodeTimeout:           "模型响应超时",
+	CodeQuotaExceeded:     "本账号的模型调用额度已用完，本轮没有开始",
 	CodeInternalError:     "服务内部错误，请稍后再试",
 }
 
@@ -39,6 +41,15 @@ func describe(failure error) Failure {
 		described.Code, described.Retryable = CodeInputTimeout, true
 	case errors.Is(failure, agentloop.ErrRoundsExhausted):
 		described.Code, described.Retryable = CodeRoundsExhausted, false
+	case errors.Is(failure, usage.ErrQuotaExceeded):
+		// Retryable, and the client is told why the wait is a long one: the
+		// refusal carries the item and the moment the period ends, and both
+		// travel on the error event (§7).
+		described.Code, described.Retryable = CodeQuotaExceeded, true
+		var exceeded *usage.Exceeded
+		if errors.As(failure, &exceeded) {
+			described.Quota = exceeded
+		}
 	case errors.Is(failure, context.DeadlineExceeded):
 		described.Code, described.Retryable = CodeTimeout, true
 	}

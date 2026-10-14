@@ -3,6 +3,8 @@ package turn
 import (
 	"fmt"
 	"time"
+
+	"backend/internal/usage"
 )
 
 // transitions is the lifecycle: what a turn in each status may become.
@@ -93,4 +95,13 @@ type Failure struct {
 	// PartialResponse says whether any answer text had already reached the
 	// client, so it knows what it is looking at when the turn ends.
 	PartialResponse bool
+	// Quota is the refusal behind a CodeQuotaExceeded failure, when there was
+	// one, and nil for every other failure.
+	//
+	// It has no column: the code, the account and the moment are what the turn
+	// row keeps, and the row is not the place to copy a number out of another
+	// table. What it is for is the error event — a client told its allowance is
+	// used up is told which one and when it comes back, and neither of those two
+	// has a column here to travel on.
+	Quota *usage.Exceeded
 }

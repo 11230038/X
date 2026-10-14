@@ -6,9 +6,17 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"backend/internal/practice"
+	"backend/internal/usage"
 )
+
+// handlerQuotaResets is the moment the quota refusals in these cases come back
+// at — the end of the day the refusal is about. It is written out rather than
+// computed, because a case that derived it would be asserting the code's own
+// arithmetic back at it.
+var handlerQuotaResets = time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 
 // TestPracticeHandlerMapsItsRefusals is the table this file exists for: one row
 // per way the domain can say no, and the status and code a client acts on.
@@ -70,6 +78,17 @@ func TestPracticeHandlerMapsItsRefusals(t *testing.T) {
 			// good and the provider was simply not answering (§7.3 第 6 条).
 			wantStatus: http.StatusServiceUnavailable, wantCode: "judge_unavailable",
 		},
+		{
+			name: "a call the account's quota refused",
+			// The refusal arrives inside the judging failure because that is what
+			// was being attempted, and the answer is the refusal: a retry offered
+			// for `judge_unavailable` is a retry that will be refused the same way
+			// until the period ends (§2.9).
+			err: fmt.Errorf("%w: %w", practice.ErrJudgeUnavailable, &usage.Exceeded{
+				Item: usage.ItemDailyCalls, Limit: 2, Used: 2, ResetsAt: handlerQuotaResets,
+			}),
+			wantStatus: http.StatusTooManyRequests, wantCode: "quota_exceeded",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -103,6 +122,52 @@ func TestPracticeHandlerMapsItsRefusals(t *testing.T) {
 				t.Errorf("the refusal quotes the sentinel: %q", envelope.Error.Message)
 			}
 		})
+	}
+}
+
+// TestTheQuotaRefusalCarriesWhichItemAndWhenItComesBack: §7 asks a refusal to
+// name the item that ran out and the moment it recovers, and the sentence above
+// cannot — a client that drew a countdown from prose would be parsing English.
+// The fields are the answer, and they are the same four the socket's error event
+// carries, which is what keeps one refusal one thing across two transports.
+func TestTheQuotaRefusalCarriesWhichItemAndWhenItComesBack(t *testing.T) {
+	stub := &practiceStub{err: fmt.Errorf("%w: %w", practice.ErrJudgeUnavailable, &usage.Exceeded{
+		Item: usage.ItemDailyCalls, Limit: 2, Used: 3, ResetsAt: handlerQuotaResets,
+	})}
+	recorder := callAs(t, newPracticeRouter(stub, 20), http.MethodPost,
+		"/api/v1/practice/reviews",
+		`{"request_id":"req_1","question_id":"qn_1","user_answer":"答"}`)
+
+	if recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429; body=%s", recorder.Code, recorder.Body.String())
+	}
+	var envelope struct {
+		Error struct {
+			Code    string `json:"code"`
+			Details struct {
+				Item     string    `json:"item"`
+				Limit    int64     `json:"limit"`
+				Used     int64     `json:"used"`
+				ResetsAt time.Time `json:"resets_at"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	decodeBody(t, recorder, &envelope)
+	if envelope.Error.Code != "quota_exceeded" {
+		t.Errorf("error code = %q, want quota_exceeded", envelope.Error.Code)
+	}
+	details := envelope.Error.Details
+	if details.Item != usage.ItemDailyCalls || details.Limit != 2 || details.Used != 3 {
+		t.Errorf("details = %+v, want the item and the two numbers behind the refusal", details)
+	}
+	if !details.ResetsAt.Equal(handlerQuotaResets) {
+		t.Errorf("resets_at = %v, want %v", details.ResetsAt, handlerQuotaResets)
+	}
+	// Retry-After belongs to the other refusal. This wait is the end of a day or
+	// a month — something to explain to a user rather than to sleep through — and
+	// a client that honoured a header automatically would wait in silence.
+	if header := recorder.Header().Get("Retry-After"); header != "" {
+		t.Errorf("Retry-After = %q, want none on a refusal about a period", header)
 	}
 }
 

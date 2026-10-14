@@ -29,6 +29,7 @@ const callIDPrefix = "call_"
 type Recorder struct {
 	provider llm.Provider
 	store    Store
+	quota    *Quota
 	name     string
 	logger   *slog.Logger
 	// now and newID are the two things a test cannot otherwise pin: a clock that
@@ -46,6 +47,12 @@ type Options struct {
 	// from the provider itself, because no OpenAI-compatible client is told
 	// which service it is talking to.
 	Provider string
+	// Quota is asked before every call, and it is required. A recorder built
+	// without one is a recorder whose calls nobody is charged for, which is
+	// precisely the arrangement §2.7 exists to make impossible, and the mistake
+	// would be invisible from outside: the calls work, the answers are right and
+	// the numbers are small.
+	Quota *Quota
 	// Logger receives the one failure this recorder does not turn into a failed
 	// call: the second half of a write that could not be stored. It may be nil.
 	Logger *slog.Logger
@@ -62,6 +69,9 @@ func New(provider llm.Provider, store Store, options Options) (*Recorder, error)
 	if store == nil {
 		return nil, fmt.Errorf("usage: a recorder needs a store")
 	}
+	if options.Quota == nil {
+		return nil, fmt.Errorf("usage: a recorder needs a quota")
+	}
 	name := strings.TrimSpace(options.Provider)
 	if name == "" {
 		return nil, fmt.Errorf("usage: a recorder needs the provider's name")
@@ -69,6 +79,7 @@ func New(provider llm.Provider, store Store, options Options) (*Recorder, error)
 	recorder := &Recorder{
 		provider: provider,
 		store:    store,
+		quota:    options.Quota,
 		name:     name,
 		logger:   options.Logger,
 		now:      options.Now,
@@ -85,6 +96,9 @@ func New(provider llm.Provider, store Store, options Options) (*Recorder, error)
 
 // Stream runs one completion and writes both halves of its record.
 //
+// It is also the one gate every call passes: the account's quota is asked here
+// and nowhere else, so a call site cannot forget to ask and a call site cannot
+// ask twice.
 // The first half is written before the provider is called, and a failure to
 // write it stops the call: a call that cannot be recorded is not made, because
 // the alternative is a model call that happened and left nothing behind, which
@@ -106,6 +120,18 @@ func (r *Recorder) Stream(
 	if err != nil {
 		return llm.Response{}, err
 	}
+
+	// The quota is asked here: after the account is known, and before anything
+	// at all is written or sent. Nothing about this call exists yet — no id, no
+	// row, no request — so a refusal leaves no trace of a call that did not
+	// happen (§8 第 10 条), and the next call an account is allowed looks
+	// exactly like its first. A failure to read the table is not a refusal: it
+	// stops the call too, because the alternative is spending an allowance
+	// nobody could count.
+	if err := r.quota.Allow(ctx, call.OwnerID); err != nil {
+		return llm.Response{}, err
+	}
+
 	callID, err := r.newID()
 	if err != nil {
 		return llm.Response{}, fmt.Errorf("usage: could not name a call: %w", err)

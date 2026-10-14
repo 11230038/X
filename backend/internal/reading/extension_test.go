@@ -110,6 +110,46 @@ func TestABrokenExtensionIsSkippedAndTheOthersRun(t *testing.T) {
 	}
 }
 
+// refusing is a failure that says the request may not be made at all — the shape
+// the usage quota's refusal has. It is declared here rather than imported, and
+// that is the mechanism: the registry finds it structurally, so the two packages
+// need not know about each other, and what this case pins is that the registry
+// lets such a failure through rather than filing it under "this extension did
+// not answer".
+type refusing struct{ reason string }
+
+func (r refusing) Error() string { return r.reason }
+func (r refusing) Refused() bool { return true }
+
+func TestARefusalIsNotAnExtensionThatFailed(t *testing.T) {
+	refusal := refusing{reason: "usage: daily_calls reached 2 of 2"}
+	registry := newTestRegistry(t,
+		&stubExtension{name: "explain", schema: ResultText, ready: true, err: refusal},
+	)
+	passage := Context{MaterialID: "rm_a", Text: "原文"}
+
+	// One extension at a time: the refusal is the request's answer, so it comes
+	// back as an error and not as a panel with a sentence under it.
+	outcome, err := registry.Run(context.Background(), "explain", passage)
+	if !errors.Is(err, refusal) {
+		t.Fatalf("Run() error = %v, want the refusal", err)
+	}
+	if outcome.Skipped || outcome.Reason != "" {
+		t.Errorf("a refusal came back as a skip: %+v", outcome)
+	}
+
+	// The whole catalogue at once has nowhere to put it — the list is a list and
+	// one extension cannot refuse it as a whole — so there it is a skip, with the
+	// refusal's own words as the reason, which name the item and the moment.
+	outcomes := registry.RunAll(context.Background(), passage)
+	if len(outcomes) != 1 {
+		t.Fatalf("RunAll() returned %d outcomes, want one per extension", len(outcomes))
+	}
+	if !outcomes[0].Skipped || !strings.Contains(outcomes[0].Reason, "daily_calls") {
+		t.Errorf("RunAll() = %+v, want the refusal as a skipped reason", outcomes[0])
+	}
+}
+
 func TestAnExtensionThatTookTooLongIsLetGo(t *testing.T) {
 	registry, err := NewRegistry(20*time.Millisecond,
 		&stubExtension{name: "slow", schema: ResultText, ready: true, delay: time.Hour})

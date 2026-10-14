@@ -279,7 +279,15 @@ func (h *PracticeHandler) ready(c *gin.Context) bool {
 // Judging is the one failure that is neither the client's nor ours: the provider
 // was not there, the answer may be perfectly good, and the surface offers a
 // retry for this code and for nothing else (§7.3 第 6 条).
+//
+// A quota refusal is asked about before all of that, because it arrives wrapped
+// in the judging failure that carried it: the submit was refused before the
+// model was called, and answering `judge_unavailable` would offer a retry that
+// is going to be refused the same way until the period ends.
 func (h *PracticeHandler) fail(c *gin.Context, code string, err error) {
+	if writeQuotaRefusal(c, err) {
+		return
+	}
 	var stale *practice.StaleReview
 	switch {
 	case errors.As(err, &stale):

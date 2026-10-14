@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"backend/internal/reading"
+	"backend/internal/usage"
 )
 
 // aidStub is one reading extension, recording the context it was handed.
@@ -25,7 +26,10 @@ type aidStub struct {
 	ready   bool
 	reason  string
 	payload string
-	seen    *reading.Context
+	// err is what the run failed with, for the extensions that ask a model for
+	// something: the model call is where an account's quota refuses one.
+	err  error
+	seen *reading.Context
 }
 
 func (a *aidStub) Name() string                       { return a.name }
@@ -35,6 +39,9 @@ func (a *aidStub) Available() (bool, string)          { return a.ready, a.reason
 func (a *aidStub) Run(_ context.Context, reading reading.Context) (json.RawMessage, error) {
 	copied := reading
 	a.seen = &copied
+	if a.err != nil {
+		return nil, a.err
+	}
 	return json.RawMessage(a.payload), nil
 }
 func TestReadingHandlerExtensionsAnswersForAMaterialThatIsThere(t *testing.T) {
@@ -123,6 +130,60 @@ func TestReadingHandlerRunExtensionHandsOverTheResolvedPassage(t *testing.T) {
 	decodeBody(t, recorder, &envelope)
 	if envelope.Data.Extension.Skipped || len(envelope.Data.Extension.Result) == 0 {
 		t.Errorf("the extension came back as %+v", envelope.Data.Extension)
+	}
+}
+
+// TestReadingHandlerRunExtensionAnswersARefusalAsOne: an extension that could
+// not answer is a skipped panel, and an account that may not make the call is
+// not — the same failure travels to the client as a 429 with the item and the
+// moment, rather than as a panel saying something went wrong with the extension,
+// which would tell the user to try again about a limit that has not moved.
+func TestReadingHandlerRunExtensionAnswersARefusalAsOne(t *testing.T) {
+	registry, err := reading.NewRegistry(time.Second, &aidStub{
+		name: "explain", ready: true,
+		err: &usage.Exceeded{
+			Item: usage.ItemDailyCalls, Limit: 2, Used: 2, ResetsAt: handlerQuotaResets,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	recorder := callAs(t, newReadingRouter(&readingStub{}, registry), http.MethodPost,
+		"/api/v1/reading/materials/rm_1/extensions/explain",
+		`{"locator":{"char_start":0,"char_end":10}}`)
+
+	if recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429; body=%s", recorder.Code, recorder.Body.String())
+	}
+	var envelope struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Details struct {
+				Item     string    `json:"item"`
+				Limit    int64     `json:"limit"`
+				Used     int64     `json:"used"`
+				ResetsAt time.Time `json:"resets_at"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	decodeBody(t, recorder, &envelope)
+	if envelope.Error.Code != "quota_exceeded" {
+		t.Errorf("error code = %q, want quota_exceeded", envelope.Error.Code)
+	}
+	// The same four facts the other two transports carry, from the same type: one
+	// refusal is one thing however it travels.
+	details := envelope.Error.Details
+	if details.Item != usage.ItemDailyCalls || details.Limit != 2 || details.Used != 2 {
+		t.Errorf("details = %+v, want the item and the two numbers behind the refusal", details)
+	}
+	if !details.ResetsAt.Equal(handlerQuotaResets) {
+		t.Errorf("resets_at = %v, want %v", details.ResetsAt, handlerQuotaResets)
+	}
+	// The refusal is not folded into the panel body: a client reading `extension`
+	// finds nothing to draw, because there is no panel — there was no call.
+	if containsJSON(recorder.Body.String(), `"skipped":true`) {
+		t.Errorf("a refusal came back as a skipped panel: %s", recorder.Body.String())
 	}
 }
 

@@ -483,7 +483,15 @@ func (h *ReadingHandler) ready(c *gin.Context) bool {
 // A coordinate the material does not have is the client's to fix and is a 400;
 // a coordinate that has moved underneath it is a conflict and a 409, because the
 // reader's answer is to read again and decide rather than to reword anything.
+//
+// A quota refusal is asked about first, and it is the one failure here that is
+// not about the material at all: the extension asked for a model call and the
+// account may not make one, which is the requester's answer rather than the
+// material's.
 func (h *ReadingHandler) fail(c *gin.Context, code string, err error) {
+	if writeQuotaRefusal(c, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, reading.ErrNotFound):
 		httpx.WriteError(c, http.StatusNotFound, "not_found", "no such material")

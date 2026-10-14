@@ -223,10 +223,22 @@ func assemble(
 	if err != nil {
 		return nil, fmt.Errorf("initialize the model client: %w", err)
 	}
+	// One ledger over this table, read by both halves: the report a client asks
+	// for, and the quota it is refused on. They are the same read on purpose
+	// (§2.9) — an account close to its limit can compare the two numbers, so
+	// the two numbers have to be one answer.
+	ledger := usage.NewGORMLedger(db)
+	quota, err := usage.NewQuota(ledger, usage.Limits{
+		DailyCalls:    int64(cfg.Usage.DailyCallsPerAccount),
+		MonthlyTokens: int64(cfg.Usage.MonthlyTokensPerAccount),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize the usage quota: %w", err)
+	}
 	provider, err := usage.New(
 		client,
 		usage.NewGORMStore(db),
-		usage.Options{Provider: cfg.LLM.Provider, Logger: logger},
+		usage.Options{Provider: cfg.LLM.Provider, Quota: quota, Logger: logger},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("initialize the usage record: %w", err)
@@ -236,7 +248,7 @@ func assemble(
 	// is checked at startup like every other configured number, so a deployment
 	// that wrote a window nobody could serve is refused before the first
 	// request rather than at the first report.
-	usageReport, err := usage.NewService(usage.NewGORMLedger(db), cfg.Usage.RetentionDays)
+	usageReport, err := usage.NewService(ledger, cfg.Usage.RetentionDays)
 	if err != nil {
 		return nil, fmt.Errorf("initialize the usage report: %w", err)
 	}

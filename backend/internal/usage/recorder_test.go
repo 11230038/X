@@ -127,6 +127,14 @@ func newRecorder(t *testing.T, provider llm.Provider, store Store, options Optio
 	if options.Provider == "" {
 		options.Provider = "deepseek"
 	}
+	// A gate that refuses nothing and reads nothing, so that the cases in this
+	// file stay about the write. What the quota does when it does have limits is
+	// in quota_test.go, and the two cases at the end of this file are about the
+	// one thing only this file can see: that a refusal is handed out before the
+	// call is made and the row is written.
+	if options.Quota == nil {
+		options.Quota = freeQuota(t)
+	}
 	if options.Now == nil {
 		options.Now = ticking(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC), 100*time.Millisecond)
 	}
@@ -440,20 +448,73 @@ func TestACallThatCouldNotBeNamedIsNotMade(t *testing.T) {
 	}
 }
 
+// TestACallTheQuotaRefusesIsNotMade is §8 第 10 条, and it is here rather than in
+// quota_test.go because it needs both halves: a real refusal, and a store that
+// can say what was written. The refusal is handed out before anything at all
+// happens — no id is spent, no row is opened, and the provider is never called —
+// so the call the account was refused leaves nothing behind that a later count
+// could find. A refused call that still wrote its row would be a limit that
+// counts itself.
+func TestACallTheQuotaRefusesIsNotMade(t *testing.T) {
+	store := &scriptStore{}
+	provider := &scriptProvider{response: aResponse()}
+	quota := at(t, noon, Limits{DailyCalls: 2}, usedToday(2, 0, 0))
+	recorder := newRecorder(t, provider, store, Options{Quota: quota})
+
+	_, err := recorder.Stream(WithCall(context.Background(), aCall()), aRequest(), collect(new([]string)))
+
+	var exceeded *Exceeded
+	if !errors.As(err, &exceeded) {
+		t.Fatalf("Stream() error = %v, want the quota's refusal to reach the caller", err)
+	}
+	if provider.calls != 0 {
+		t.Error("a refused call reached the provider")
+	}
+	if len(store.writes) != 0 {
+		t.Errorf("a refused call wrote %v, want nothing at all", store.writes)
+	}
+}
+
+// TestACallThatCouldNotBeCountedIsNotMade is the other half of the same rule. A
+// quota that cannot read the table is not a quota that allows the call, and it is
+// not a refusal either: the account has done nothing, and what comes back is the
+// read's own failure so that the surface answers it as one.
+func TestACallThatCouldNotBeCountedIsNotMade(t *testing.T) {
+	store := &scriptStore{}
+	provider := &scriptProvider{response: aResponse()}
+	broken := errors.New("the database is gone")
+	quota := at(t, noon, Limits{DailyCalls: 2},
+		&ledgerStub{answer: func(Query) (Report, error) { return Report{}, broken }})
+	recorder := newRecorder(t, provider, store, Options{Quota: quota})
+
+	_, err := recorder.Stream(WithCall(context.Background(), aCall()), aRequest(), collect(new([]string)))
+
+	if !errors.Is(err, broken) {
+		t.Fatalf("Stream() error = %v, want the read's own failure", err)
+	}
+	if provider.calls != 0 || len(store.writes) != 0 {
+		t.Error("a call nobody could count was made anyway")
+	}
+}
+
 func TestNewRefusesWhatItCannotRecordWith(t *testing.T) {
 	store := &scriptStore{}
 	cases := map[string]struct {
 		provider llm.Provider
 		store    Store
+		quota    *Quota
 		name     string
 	}{
-		"no provider": {provider: nil, store: store, name: "deepseek"},
-		"no store":    {provider: &scriptProvider{}, store: nil, name: "deepseek"},
-		"no name":     {provider: &scriptProvider{}, store: store, name: "  "},
+		"no provider": {provider: nil, store: store, quota: freeQuota(t), name: "deepseek"},
+		"no store":    {provider: &scriptProvider{}, store: nil, quota: freeQuota(t), name: "deepseek"},
+		"no name":     {provider: &scriptProvider{}, store: store, quota: freeQuota(t), name: "  "},
+		// No quota is the one of the four that would fail invisibly: the calls
+		// would work, the answers would be right, and nobody would be charged.
+		"no quota": {provider: &scriptProvider{}, store: store, quota: nil, name: "deepseek"},
 	}
 	for name, refused := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := New(refused.provider, refused.store, Options{Provider: refused.name})
+			_, err := New(refused.provider, refused.store, Options{Provider: refused.name, Quota: refused.quota})
 			if err == nil {
 				t.Error("a recorder was built that could not record")
 			}

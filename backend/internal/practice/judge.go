@@ -185,7 +185,11 @@ func (j *Judge) judgeWithModel(ctx context.Context, question notebook.Question, 
 		if ctx.Err() != nil {
 			return Judgment{}, err
 		}
-		return Judgment{}, fmt.Errorf("%w: %v", ErrJudgeUnavailable, err)
+		// Both errors stay in the chain: the wrap says the judging is what could
+		// not happen, and the cause is still the caller's to recognise — a call
+		// refused because the account is out of quota is not a judge that was
+		// unavailable, and a caller told only the second cannot tell them apart.
+		return Judgment{}, fmt.Errorf("%w: %w", ErrJudgeUnavailable, err)
 	}
 	return parseJudgment(reply.String(), j.model)
 }

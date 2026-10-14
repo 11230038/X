@@ -3,6 +3,7 @@ package turn
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"backend/internal/event"
 	"backend/internal/llm"
 	"backend/internal/tool"
+	"backend/internal/usage"
 )
 
 // asking is a model that asks the user a question, then answers with what it
@@ -259,6 +261,45 @@ func TestAModelThatStopsAnsweringEndsTheTurn(t *testing.T) {
 	}
 	if got := failed.Metadata[event.MetaPartialResponse]; got != false {
 		t.Errorf("partial_response = %v, want false for a turn that said nothing", got)
+	}
+}
+
+// TestATurnRefusedByTheQuotaSaysWhichLimitAndUntilWhen: a turn whose model call
+// was refused ends with the code for it, and the error event carries the two
+// facts the code cannot — which item ran out and when the period ends — because
+// a client that knows only "the account is out of something" can tell the user to
+// wait without being able to say how long or where to look (§7, §2.10).
+func TestATurnRefusedByTheQuotaSaysWhichLimitAndUntilWhen(t *testing.T) {
+	fixture := newRunnerFixture(t)
+	fixture.provider.err = &usage.Exceeded{
+		Item: usage.ItemDailyCalls, Limit: 2, Used: 2,
+		ResetsAt: time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC),
+	}
+	fixture.register(t, looping("chat", agentRequest()))
+
+	started := fixture.start(t, StartRequest{Content: "在吗"})
+	seen := fixture.watch(t, started.Turn.ID)
+
+	failed := only(t, seen, event.TypeError)
+	if got := failed.Metadata[event.MetaErrorCode]; got != CodeQuotaExceeded {
+		t.Errorf("error_code = %v, want %q", got, CodeQuotaExceeded)
+	}
+	if got := failed.Metadata[event.MetaQuotaItem]; got != usage.ItemDailyCalls {
+		t.Errorf("quota_item = %v, want %q", got, usage.ItemDailyCalls)
+	}
+	if got := failed.Metadata[event.MetaQuotaResetsAt]; got != "2026-10-15T00:00:00Z" {
+		t.Errorf("quota_resets_at = %v, want the end of the day", got)
+	}
+	if failed.Content == "" || strings.Contains(failed.Content, usage.ItemDailyCalls) {
+		t.Errorf("Content = %q, want a sentence for the client", failed.Content)
+	}
+
+	stored := fixture.repository.awaitStatus(t, started.Turn.ID, StatusFailed)
+	if !stored.Retryable {
+		t.Error("Retryable = false, want the wait to be reported as one")
+	}
+	if stored.FailureCode != CodeQuotaExceeded {
+		t.Errorf("FailureCode = %q, want %q", stored.FailureCode, CodeQuotaExceeded)
 	}
 }
 

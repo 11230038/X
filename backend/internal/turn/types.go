@@ -111,6 +111,12 @@ const (
 	// CodeAbandoned means the process running the turn stopped before it
 	// finished, so the turn was ended by whoever found it next.
 	CodeAbandoned = "abandoned"
+	// CodeQuotaExceeded means the account has used up the allowance a call
+	// would have been charged against, so no call was made (§2.9). It is
+	// retryable, and unlike every other retryable code here the wait is not a
+	// moment: it is the end of a day or a month, which the client is told with
+	// this event.
+	CodeQuotaExceeded = "quota_exceeded"
 	// CodeInternalError is everything else: a failure this service did not
 	// classify. It is the default rather than an absence, so a client never has
 	// to interpret a missing code.
