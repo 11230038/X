@@ -29,6 +29,18 @@ type AuditReader interface {
 	MaxPageSize() int
 }
 
+// AuditWriter is the audit as a handler reaches it: one entry, written. It is
+// satisfied by the audit service.
+//
+// It is a separate interface from AuditReader on purpose. A route that reads the
+// audit is not a route that writes to it, and the two are declared apart so that
+// neither can be handed to the other's caller by accident — a handler given the
+// reader cannot quietly become a writer, and one given the writer cannot read
+// the stream.
+type AuditWriter interface {
+	Record(ctx context.Context, event audit.Event) error
+}
+
 // AuditHandler serves the audit stream.
 type AuditHandler struct {
 	audit  AuditReader

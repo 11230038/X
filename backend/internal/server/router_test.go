@@ -15,6 +15,7 @@ import (
 	"backend/internal/audit"
 	"backend/internal/auth"
 	"backend/internal/authz"
+	"backend/internal/dashboard"
 	"backend/internal/handler"
 	"backend/internal/kb"
 	"backend/internal/library"
@@ -66,6 +67,7 @@ func newTestRouterWithAuthorizer(
 		Admin:         handler.NewAdminHandler(routerAdminStub{}, routerAdminStub{}, logger),
 		Guardians:     handler.NewGuardianHandler(routerGuardianStub{}, logger),
 		Audit:         handler.NewAuditHandler(routerAuditStub{}, logger),
+		Reports:       handler.NewReportsHandler(routerDashboardStub{}, routerAuditWriterStub{}, logger),
 		TokenVerifier: authenticator,
 		Authorizer:    authorizer,
 		// KnowledgeBase is deliberately left out. This file is about which
@@ -200,6 +202,27 @@ func (routerAuditStub) List(context.Context, audit.Filter) ([]audit.Event, error
 }
 
 func (routerAuditStub) MaxPageSize() int { return 50 }
+
+// routerDashboardStub answers the reports route with a view that is
+// recognisable as this stub's, so that the one route which answers with another
+// account's material cannot be quietly registered against the wrong handler.
+// What the view *says* is handler/dashboard_test.go's business.
+type routerDashboardStub struct{}
+
+func (routerDashboardStub) Read(
+	_ context.Context, actor authz.Caller,
+) (dashboard.View, error) {
+	return dashboard.View{
+		Sessions: []dashboard.Entry{{ID: "ses_1", Title: "algebra", Context: "session"}},
+	}, nil
+}
+
+// routerAuditWriterStub accepts the entry the reports route writes. A router
+// test is about which routes exist and which group they sit in; what an entry
+// says is internal/audit's and handler/'s business.
+type routerAuditWriterStub struct{}
+
+func (routerAuditWriterStub) Record(context.Context, audit.Event) error { return nil }
 
 // routerAuthStub accepts exactly one token and rejects everything else.
 type routerAuthStub struct{}
@@ -634,6 +657,11 @@ func TestRouterRegistersGovernanceUnderTheAdministrativeSurface(t *testing.T) {
 		// account: what it is mounted under is therefore the whole of who may
 		// read it.
 		{http.MethodGet, "/api/v1/audit", "", authz.SurfaceAdmin},
+		// The one route that answers with another account's material. It is in
+		// the guardian area and it also carries a permission, and the surface in
+		// the refusal is what says it was mounted as part of this group rather
+		// than as its own thing.
+		{http.MethodGet, "/api/v1/guardian/learners/42/reports", "", authz.SurfaceGuardian},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.method+" "+testCase.path, func(t *testing.T) {

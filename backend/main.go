@@ -134,7 +134,12 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		// The audit is its own surface's read: it is where the decisions the
 		// other routes make are read back, and it is mounted behind the
 		// administrative surface rather than beside them.
-		Audit:         handler.NewAuditHandler(ai.auditLog, logger),
+		Audit: handler.NewAuditHandler(ai.auditLog, logger),
+		// A guardian's report is the learner's own dashboard read by somebody
+		// else, so it is the dashboard service with the audit beside it: the
+		// answer is the one the learner would get, and the entry is what says
+		// somebody else looked at it.
+		Reports:       handler.NewReportsHandler(ai.dashboard, ai.auditLog, logger),
 		WebSocket:     ai.socket,
 		TokenVerifier: authService,
 		Authorizer:    ai.authorization,

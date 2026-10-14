@@ -2,6 +2,7 @@ package server
 
 import (
 	"log/slog"
+	"strconv"
 
 	"backend/internal/authz"
 	"backend/internal/handler"
@@ -29,6 +30,7 @@ type Handlers struct {
 	Admin         *handler.AdminHandler
 	Guardians     *handler.GuardianHandler
 	Audit         *handler.AuditHandler
+	Reports       *handler.ReportsHandler
 	WebSocket     *ws.Handler
 	TokenVerifier middleware.TokenVerifier
 	// Authorizer answers what an account may reach. It is what the routes below
@@ -41,6 +43,22 @@ type Handlers struct {
 	// — which is what every test in this repository wants, since what they are
 	// about is whether a request is refused (§2.16).
 	Refusals middleware.Recorder
+}
+
+// learnerInPath is the account a guardian route names in its path, for the
+// policy to decide about.
+//
+// An id it cannot read is zero, and zero is what the policy reads as "the
+// caller's own" — the harmless direction rather than a hole. The handler parses
+// the same segment and answers 400 before it reads anything, so what an
+// unreadable id reaches is a malformed request answered as one, and not a
+// permission decision made about the wrong account.
+func learnerInPath(c *gin.Context) int64 {
+	learnerID, err := strconv.ParseInt(c.Param("userID"), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return learnerID
 }
 
 // NewRouter builds the application router without binding a network port.
@@ -77,10 +95,17 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// total — a route added inside one of these groups is covered by
 	// construction, and the only way to leave a route unchecked is to register
 	// it on `authenticated` instead, which is a visible thing to do in review.
-	reach := func(surface string) *gin.RouterGroup {
+	// reachAs mounts a group behind one requirement. It is the general form, and
+	// it exists for the routes whose requirement is more than a surface: a route
+	// that reads somebody else's material is about a permission on a
+	// relationship, and it says so here rather than inside its handler, where
+	// the check would be a second place a policy decision is made.
+	reachAs := func(requirement middleware.Requirement) *gin.RouterGroup {
 		return authenticated.Group("",
-			middleware.AuthorizeWith(
-				handlers.Authorizer, middleware.Surface(surface), handlers.Refusals, logger))
+			middleware.AuthorizeWith(handlers.Authorizer, requirement, handlers.Refusals, logger))
+	}
+	reach := func(surface string) *gin.RouterGroup {
+		return reachAs(middleware.Surface(surface))
 	}
 	// What this account is, and what it may reach, before anything else: it is
 	// mounted without a surface so that an account restricted out of every area
@@ -249,6 +274,18 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// none rather than refused.
 	guardian := reach(authz.SurfaceGuardian)
 	guardian.GET("/guardian/learners", handlers.Guardians.ListLearners)
+	// Reading a learner's report is the one route in the product that answers
+	// with another account's material, so it is the one that carries a
+	// permission: the surface says the caller may be here at all, and
+	// `view_reports` on the relationship is what lets them look at *this*
+	// learner (§2.10, AC-11). Revoking either takes effect on the next request,
+	// because both are rows that are read per request and neither is cached.
+	reports := reachAs(middleware.Requirement{
+		Surface:    authz.SurfaceGuardian,
+		Permission: authz.PermViewReports,
+		Subject:    learnerInPath,
+	})
+	reports.GET("/guardian/learners/:userID/reports", handlers.Reports.Get)
 	// The audit is the governance record, and it is read across the whole
 	// instance rather than narrowed to the caller: what an administrator is
 	// asking is what happened here, and a version filtered by the account on the
