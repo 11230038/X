@@ -150,7 +150,25 @@ func (r *GORMRepository) SetFencingToken(ctx context.Context, turnID string, tok
 	if result.Error != nil {
 		return fmt.Errorf("raise the fence of turn %s: %w", turnID, result.Error)
 	}
-	if result.RowsAffected == 0 {
+	if result.RowsAffected > 0 {
+		return nil
+	}
+	// No rows affected has two causes on this engine, and telling them apart is the
+	// whole of this branch. `RowsAffected` counts the rows a statement *changed*,
+	// not the rows it matched, so a turn whose fence is already the value being
+	// written — one that released a path and took it again, or one taking a second
+	// path, whose chain starts at one again — comes back as zero rows exactly like a
+	// turn that is not in the table. Reporting the first as the second would fail a
+	// claim that has nothing wrong with it, and it would do it only sometimes.
+	var present struct {
+		Count int64 `gorm:"column:present"`
+	}
+	err := r.db.WithContext(ctx).Raw("SELECT COUNT(*) AS present FROM turns WHERE turn_id = ?", turnID).
+		Scan(&present).Error
+	if err != nil {
+		return fmt.Errorf("look for turn %s: %w", turnID, err)
+	}
+	if present.Count == 0 {
 		// A turn that is not in the table cannot carry a fence, and saying so is
 		// better than a lease that looks fenced and is not: the fence is what a
 		// late writer is recognised by, and a lease taken under no fence would be
