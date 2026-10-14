@@ -78,6 +78,12 @@ const (
 	ActionWorkspaceExported Action = "workspace.exported"
 	// ActionWorkspaceImported is a workspace packed in.
 	ActionWorkspaceImported Action = "workspace.imported"
+	// ActionWorkspaceRecovered is an import that did not commit having its rows
+	// taken back out (§2.13). It is its own action rather than an import recorded
+	// with a reason, because it is the one action in this list that *removes*
+	// somebody's rows: an auditor reading "imported, ok" beside a failed import
+	// would be reading the opposite of what happened.
+	ActionWorkspaceRecovered Action = "workspace.recovered"
 )
 
 // Actions is every action, in the order the areas are listed above. It is the
@@ -91,7 +97,7 @@ var Actions = []Action{
 	ActionReportsViewed,
 	ActionSessionClaimed, ActionSessionDeleted,
 	ActionFileDeleted, ActionFileRestored, ActionFilePurged,
-	ActionWorkspaceExported, ActionWorkspaceImported,
+	ActionWorkspaceExported, ActionWorkspaceImported, ActionWorkspaceRecovered,
 }
 
 // KnownAction reports whether a name is one this build records.

@@ -161,6 +161,65 @@ func (r *GORMRepository) SetArchivePath(ctx context.Context, jobID, archivePath 
 	return nil
 }
 
+// SaveWritten writes what an import has committed so far.
+func (r *GORMRepository) SaveWritten(ctx context.Context, jobID string, written []Written) error {
+	if err := r.ready(); err != nil {
+		return err
+	}
+	for _, row := range written {
+		if !KnownKind(row.Kind) || !isIdentifier(row.ID) {
+			return fmt.Errorf("workspace: %s is not a row this table may record", row.Ref())
+		}
+	}
+	encoded, err := encodeWritten(written)
+	if err != nil {
+		return err
+	}
+	return r.update(ctx, jobID, "written_json", encoded)
+}
+
+// List reads one account's jobs of one direction, newest first.
+//
+// The order is `creat_time DESC, job_id DESC` and the id is the tiebreak for the
+// reason every ordering in this repository has one: DATETIME keeps whole
+// seconds, so two packages written in the same second would otherwise come back
+// in whatever order the storage chose, and a list that reshuffles between two
+// identical requests is a list nobody can page through.
+//
+// The owner is part of the query and not a filter applied afterwards. A read
+// that fetched the table and narrowed it in Go would be a read that once, in one
+// version, forgot to narrow it (§2.3).
+func (r *GORMRepository) List(ctx context.Context, ownerID int64, kind JobKind, limit int) ([]Job, error) {
+	if err := r.ready(); err != nil {
+		return nil, err
+	}
+	if ownerID <= 0 {
+		return nil, fmt.Errorf("workspace: a listing belongs to an account")
+	}
+	if !KnownJobKind(kind) {
+		return nil, fmt.Errorf("workspace: %q is not a kind of job this table has", kind)
+	}
+	query := r.db.WithContext(ctx).
+		Where("owner_id = ? AND kind = ?", ownerID, string(kind)).
+		Order("creat_time DESC, job_id DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	var rows []models.WorkspaceJob
+	if err := query.Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list workspace jobs: %w", err)
+	}
+	jobs := make([]Job, 0, len(rows))
+	for _, row := range rows {
+		job, err := jobOf(row)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, nil
+}
+
 func (r *GORMRepository) update(ctx context.Context, jobID, column string, value any) error {
 	updated, err := r.touch(ctx, jobID, map[string]any{column: value}, time.Now().UTC())
 	if err != nil {

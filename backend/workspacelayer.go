@@ -56,10 +56,7 @@ func (s workspaceSessions) Objects(ctx context.Context, caller authz.Caller, ref
 		if err != nil {
 			return nil, err
 		}
-		data, err := encodePayload(struct {
-			Session  session.Session   `json:"session"`
-			Messages []session.Message `json:"messages"`
-		}{Session: record, Messages: messages})
+		data, err := encodePayload(sessionPayload{Session: record, Messages: messages})
 		if err != nil {
 			return nil, err
 		}
@@ -87,9 +84,7 @@ func (m workspaceMaterials) Objects(ctx context.Context, caller authz.Caller, re
 		if err != nil {
 			return nil, err
 		}
-		data, err := encodePayload(struct {
-			Material reading.Material `json:"material"`
-		}{Material: record})
+		data, err := encodePayload(materialPayload{Material: record})
 		if err != nil {
 			return nil, err
 		}
@@ -115,9 +110,7 @@ func (q workspaceQuestions) Objects(ctx context.Context, caller authz.Caller, re
 		if err != nil {
 			return nil, err
 		}
-		data, err := encodePayload(struct {
-			Entry notebook.Entry `json:"entry"`
-		}{Entry: entry})
+		data, err := encodePayload(questionPayload{Entry: entry})
 		if err != nil {
 			return nil, err
 		}
@@ -149,10 +142,7 @@ func (c workspaceKnowledgeBases) Objects(ctx context.Context, caller authz.Calle
 		if err != nil {
 			return nil, err
 		}
-		data, err := encodePayload(struct {
-			KnowledgeBase kb.KnowledgeBase `json:"knowledge_base"`
-			Documents     []kb.Document    `json:"documents"`
-		}{KnowledgeBase: record, Documents: documents})
+		data, err := encodePayload(knowledgeBasePayload{KnowledgeBase: record, Documents: documents})
 		if err != nil {
 			return nil, err
 		}
@@ -174,12 +164,33 @@ func encodePayload(payload any) ([]byte, error) {
 	return data, nil
 }
 
-// newWorkspace builds the package service over the four sources.
+// workspaceStores are the repositories the four sinks write through.
+//
+// They are the domains' own storage adapters rather than a second set of writes
+// invented beside them, and they are handed here rather than reached for inside
+// a service because two of the four things an import has to be able to do —
+// taking a material or a question back — are repository methods with no service
+// call around them (reading.Repository.DeleteMaterial, notebook.Repository.
+// DeleteQuestion: their one caller is this recovery, §2.13).
+type workspaceStores struct {
+	sessions  session.Repository
+	materials reading.Repository
+	questions notebook.Repository
+	documents kb.Repository
+}
+
+// newWorkspace builds the package service over the four sources and the four
+// sinks.
 //
 // It is built last among the domains, and only after the five it reads exist:
 // the reading layer and the collection service are the ones a material and a
 // collection come from, and the sessions arrive as a parameter because the file
 // library needed them before this function ran.
+//
+// Both directions are required, even of a deployment that only exports: a
+// service with half a feature is a wiring mistake, and this is the last place
+// the mistake is still a startup error rather than a route that answers 500
+// (§12.5).
 func newWorkspace(
 	cfg config.Config,
 	db *gorm.DB,
@@ -188,6 +199,7 @@ func newWorkspace(
 	questions *notebook.Service,
 	immersive *readingLayer,
 	auditLog *audit.Service,
+	stores workspaceStores,
 ) (*workspace.Service, error) {
 	sources, err := workspace.NewSources(map[workspace.Kind]workspace.Source{
 		workspace.KindSession:       workspaceSessions{service: sessions},
@@ -198,12 +210,23 @@ func newWorkspace(
 	if err != nil {
 		return nil, fmt.Errorf("initialize the package sources: %w", err)
 	}
+	sinks, err := workspace.NewSinks(map[workspace.Kind]workspace.Sink{
+		workspace.KindSession:       sessionSink{store: stores.sessions},
+		workspace.KindMaterial:      materialSink{store: stores.materials},
+		workspace.KindQuestion:      questionSink{service: questions, store: stores.questions},
+		workspace.KindKnowledgeBase: knowledgeBaseSink{store: stores.documents},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize the package sinks: %w", err)
+	}
 	service, err := workspace.NewService(workspace.Options{
 		Root:            cfg.Workspace.ArchiveRoot,
 		MaxArchiveBytes: cfg.Workspace.MaxArchiveBytes,
 		JobTimeout:      cfg.Workspace.JobTimeout,
 		Repository:      workspace.NewGORMRepository(db),
 		Collector:       sources,
+		Writer:          sinks,
+		Busy:            runningTurns{db: db},
 		Auditor:         auditLog,
 	})
 	if err != nil {

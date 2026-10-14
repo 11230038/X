@@ -19,7 +19,12 @@ import (
 // with, and the runtime's own view of a reader's selection.
 type readingLayer struct {
 	service *reading.Service
-	// extensions is the closed set of reading aids this build has. It is a value
+	// repository is the layer's own storage, kept here because one caller needs
+	// it rather than the service: a workspace import takes back the materials it
+	// wrote by deleting their rows, and DeleteMaterial is a repository method
+	// with no service call around it (§2.13 — nothing in the product removes a
+	// material). It is the same handle the service was built over.
+	repository reading.Repository // extensions is the closed set of reading aids this build has. It is a value
 	// and not a package-level map, so which extensions exist is decided here with
 	// every other dependency (§2.9).
 	extensions *reading.Registry
@@ -37,8 +42,9 @@ type readingLayer struct {
 // own service, so the extractor, the offsets and the unit of "a character" are
 // V2's rather than a second reader's (§2.8).
 func newReadingLayer(cfg config.Config, db *gorm.DB, materials *kb.Service, provider llm.Provider) (*readingLayer, error) {
+	repository := reading.NewGORMRepository(db)
 	service, err := reading.NewService(
-		reading.NewGORMRepository(db),
+		repository,
 		readingDocuments{materials: materials},
 		reading.Options{UnitMaxChars: cfg.Reading.UnitMaxChars},
 	)
@@ -59,6 +65,7 @@ func newReadingLayer(cfg config.Config, db *gorm.DB, materials *kb.Service, prov
 	}
 	return &readingLayer{
 		service:    service,
+		repository: repository,
 		extensions: extensions,
 		selection:  readingSelection{readings: service},
 	}, nil

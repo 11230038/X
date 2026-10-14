@@ -35,6 +35,7 @@ type Handlers struct {
 	Audit            *handler.AuditHandler
 	Reports          *handler.ReportsHandler
 	Usage            *handler.UsageHandler
+	Workspace        *handler.WorkspaceHandler
 	WebSocket        *ws.Handler
 	TokenVerifier    middleware.TokenVerifier
 	// Authorizer answers what an account may reach. It is what the routes below
@@ -308,6 +309,26 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	memory.GET("/memory/synthesis", handlers.Memory.Synthesis)
 	memory.GET("/memory/audit", handlers.Memory.Audit)
 	memory.GET("/memory/export", handlers.Memory.Export)
+	// The package routes are the one group here mounted with no surface at all,
+	// and that is deliberate rather than an oversight (recorded as a divergence
+	// from §1.2's arrow for `workspace`). A package is not a body of work like
+	// the library or the reading layer: it is an account's own copy of its own
+	// work leaving and coming back, and every read and write behind these routes
+	// is already narrowed to the account on the token. The two permissions that
+	// could be said to apply — "may I export" and "may I import" — are the
+	// question of whether this account may use the product at all, which is the
+	// preset, and a surface would let a preset deny an account the ability to
+	// take its own work out. What is NOT reachable from here is somebody else's
+	// work: the ids in a selection are read through each domain's own scoped
+	// read, and the job status route applies the account itself.
+	authenticated.POST("/workspace/exports", handlers.Workspace.Export)
+	authenticated.GET("/workspace/exports", handlers.Workspace.ListExports)
+	// The preview takes the package itself, and the commit names the preview by
+	// its job id — which is why there is no route that carries a package twice.
+	authenticated.POST("/workspace/imports/preview", handlers.Workspace.Preview)
+	authenticated.POST("/workspace/imports", handlers.Workspace.Import)
+	authenticated.GET("/workspace/jobs/:jobID", handlers.Workspace.Job)
+	authenticated.POST("/workspace/jobs/:jobID/recover", handlers.Workspace.Recover)
 	// Governance is the one area no preset opens: what may reach it is decided by
 	// the role layer and nothing else (§2.1). It is written after every surface
 	// group because it is the only one whose reach depends on *who* is asking

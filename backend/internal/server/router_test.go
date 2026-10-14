@@ -92,15 +92,19 @@ func newTestRouterWithGates(
 		// the bytes a download hands over are the bytes the parsers read (§2.14).
 		LibraryLifecycle: handler.NewLibraryLifecycleHandler(
 			routerLibraryLifecycleStub{}, routerOpenerStub{}, logger),
-		Auth:          handler.NewAuthHandler(authenticator, logger),
-		Questions:     handler.NewQuestionHandler(routerQuestionsStub{}, logger),
-		Practice:      handler.NewPracticeHandler(routerPracticeStub{err: practiceErr}, routerQueueSize, logger),
-		Permissions:   handler.NewPermissionsHandler(routerPermissionsStub{}, logger),
-		Admin:         handler.NewAdminHandler(routerAdminStub{}, routerAdminStub{}, logger),
-		Guardians:     handler.NewGuardianHandler(routerGuardianStub{}, logger),
-		Audit:         handler.NewAuditHandler(routerAuditStub{}, logger),
-		Reports:       handler.NewReportsHandler(routerDashboardStub{}, routerAuditWriterStub{}, logger),
-		Usage:         handler.NewUsageHandler(routerUsageStub{}, logger),
+		Auth:        handler.NewAuthHandler(authenticator, logger),
+		Questions:   handler.NewQuestionHandler(routerQuestionsStub{}, logger),
+		Practice:    handler.NewPracticeHandler(routerPracticeStub{err: practiceErr}, routerQueueSize, logger),
+		Permissions: handler.NewPermissionsHandler(routerPermissionsStub{}, logger),
+		Admin:       handler.NewAdminHandler(routerAdminStub{}, routerAdminStub{}, logger),
+		Guardians:   handler.NewGuardianHandler(routerGuardianStub{}, logger),
+		Audit:       handler.NewAuditHandler(routerAuditStub{}, logger),
+		Reports:     handler.NewReportsHandler(routerDashboardStub{}, routerAuditWriterStub{}, logger),
+		Usage:       handler.NewUsageHandler(routerUsageStub{}, logger),
+		// The package routes are the one group here mounted with no surface, and
+		// the stub beside them is what lets router_workspace_test.go say so: a
+		// policy that refuses everything refuses the library and not these.
+		Workspace:     handler.NewWorkspaceHandler(routerWorkspaceStub{}, logger),
 		TokenVerifier: authenticator,
 		Authorizer:    authorizer,
 		Limiter:       limiter,

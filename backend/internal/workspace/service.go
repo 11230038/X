@@ -58,25 +58,43 @@ type Options struct {
 	Repository Repository
 	// Collector is how the objects a selection names are read.
 	Collector Collector
+	// Writer is how the objects of a package are written back (stage 17). It is
+	// required even by a deployment that only exports, because the routes are
+	// built from one service and a service with half a feature is a wiring
+	// mistake that would otherwise be found by a user.
+	Writer Writer
+	// Busy reports whether anything is running that a write would collide with
+	// (§12.4's second discipline). It is a port and not a query here because the
+	// answer is about turns, which this package has no business knowing about.
+	Busy Busy
 	// Auditor is required. A package is a copy of an account's work leaving the
 	// instance, and "who took it" is a question the audit exists to answer
 	// (§2.6). The requirement is at construction rather than at the first
 	// export, because this is a wiring mistake and a wiring mistake belongs at
 	// startup.
 	Auditor Auditor
+	// BatchSize is how many objects one write covers before the job's record of
+	// what has landed is updated. Zero means defaultBatchSize. It is here as a
+	// seam for tests, which is the only reason a deployment would not want the
+	// default: the size of a batch is what an interrupted import can lose.
+	BatchSize int
 	// Now is the clock, for tests.
 	Now func() time.Time
 	// NewJobID makes a job id, for tests.
 	NewJobID func() (string, error)
 }
 
-// Service packs a selection out, and reads back what it did.
+// Service packs a selection out, writes a package back in, and reads back what
+// it did.
 type Service struct {
 	root            string
 	maxArchiveBytes int64
 	jobTimeout      time.Duration
+	batchSize       int
 	repository      Repository
 	collector       Collector
+	writer          Writer
+	busy            Busy
 	auditor         Auditor
 	now             func() time.Time
 	newJobID        func() (string, error)
@@ -84,7 +102,8 @@ type Service struct {
 
 // NewService builds the service.
 func NewService(options Options) (*Service, error) {
-	if options.Repository == nil || options.Collector == nil || options.Auditor == nil {
+	if options.Repository == nil || options.Collector == nil || options.Writer == nil ||
+		options.Busy == nil || options.Auditor == nil {
 		return nil, ErrNotConfigured
 	}
 	if options.Root == "" {
@@ -104,12 +123,19 @@ func NewService(options Options) (*Service, error) {
 	if newJobID == nil {
 		newJobID = newJobIDValue
 	}
+	batchSize := options.BatchSize
+	if batchSize <= 0 {
+		batchSize = defaultBatchSize
+	}
 	return &Service{
 		root:            options.Root,
 		maxArchiveBytes: options.MaxArchiveBytes,
 		jobTimeout:      options.JobTimeout,
+		batchSize:       batchSize,
 		repository:      options.Repository,
 		collector:       options.Collector,
+		writer:          options.Writer,
+		busy:            options.Busy,
 		auditor:         options.Auditor,
 		now:             now,
 		newJobID:        newJobID,
@@ -199,7 +225,7 @@ func (s *Service) Export(ctx context.Context, request ExportRequest) (Job, error
 	job.Manifest = manifest.Entries
 	job.Counts = counts
 	job.UpdatedAt = s.now().UTC()
-	s.record(ctx, request.Actor, jobID, audit.ResultOK, "", audit.Detail{Counts: counts})
+	s.record(ctx, request.Actor, job, audit.ResultOK, audit.Detail{Counts: counts})
 	return job, nil
 }
 
@@ -304,7 +330,9 @@ func (s *Service) reject(ctx context.Context, actor Actor, job Job, code string,
 	job.State = StateFailed
 	job.FailureCode = code
 	job.UpdatedAt = now
-	s.record(recordCtx, actor, job.ID, audit.ResultFailed, code, audit.Detail{})
+	detail := audit.Detail{Counts: job.Counts}
+	detail.Reason = code
+	s.record(recordCtx, actor, job, audit.ResultFailed, detail)
 	return job, cause
 }
 
@@ -314,22 +342,38 @@ func (s *Service) reject(ctx context.Context, actor Actor, job Job, code string,
 // export that succeeded and then refused to say so would be a worse answer than
 // one whose audit line is missing — which is the same call the library's
 // download makes for the same reason.
-func (s *Service) record(ctx context.Context, actor Actor, jobID string, result audit.Result, reason string, detail audit.Detail) {
+//
+// The action comes from the job rather than from the caller, because the two
+// directions are two actions (§2.6) and a call site that had to remember which
+// one it was is a call site that will one day record an import as an export.
+func (s *Service) record(ctx context.Context, actor Actor, job Job, result audit.Result, detail audit.Detail) {
+	s.recordAs(ctx, actor, job, actionOf(job), result, detail)
+}
+
+// recordAs is record under an action the job's direction does not name, which is
+// the recovery and nothing else.
+func (s *Service) recordAs(ctx context.Context, actor Actor, job Job, action audit.Action, result audit.Result, detail audit.Detail) {
 	event := audit.Event{
 		Actor:  actor.auditActor(),
-		Action: audit.ActionWorkspaceExported,
-		Target: audit.Ref{Kind: audit.TargetWorkspaceJob, ID: jobID},
+		Action: action,
+		Target: audit.Ref{Kind: audit.TargetWorkspaceJob, ID: job.ID},
 		Result: result,
+		Detail: detail,
 	}
-	if reason != "" {
-		detail.Reason = reason
-	}
-	event.Detail = detail
 	_ = s.auditor.Record(ctx, event)
 }
 
+// actionOf is the audit action one job's direction is recorded under.
+func actionOf(job Job) audit.Action {
+	if job.Kind == JobImport {
+		return audit.ActionWorkspaceImported
+	}
+	return audit.ActionWorkspaceExported
+}
+
 func (s *Service) ready() error {
-	if s == nil || s.repository == nil || s.collector == nil || s.auditor == nil {
+	if s == nil || s.repository == nil || s.collector == nil || s.writer == nil ||
+		s.busy == nil || s.auditor == nil {
 		return ErrNotConfigured
 	}
 	return nil

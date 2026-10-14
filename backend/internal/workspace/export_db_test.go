@@ -130,6 +130,30 @@ func seedConversation(t *testing.T, resource *data.Resource) (*session.Service, 
 	return service, caller, record.ID
 }
 
+// refusingWriter is the import half of a service built to export. A service
+// needs all of its parts (see NewService), and a double that answered instead of
+// refusing would hide the one thing this file would need to hear about: an
+// export that wrote something.
+type refusingWriter struct{}
+
+func (refusingWriter) Plan(context.Context, authz.Caller, []Object) ([]Item, error) {
+	return nil, fmt.Errorf("this service only exports")
+}
+
+func (refusingWriter) Write(context.Context, authz.Caller, []Object) ([]Written, error) {
+	return nil, fmt.Errorf("this service only exports")
+}
+
+func (refusingWriter) Undo(context.Context, authz.Caller, []Written) error {
+	return fmt.Errorf("this service only exports")
+}
+
+// idleTurns is a deployment with nothing running, which is the state an export
+// does not even ask about: the two writes are what the port is consulted by.
+type idleTurns struct{}
+
+func (idleTurns) Running(context.Context) (int64, error) { return 0, nil }
+
 func newExportService(t *testing.T, resource *data.Resource, collector Collector, auditor Auditor) *Service {
 	t.Helper()
 	service, err := NewService(Options{
@@ -138,6 +162,8 @@ func newExportService(t *testing.T, resource *data.Resource, collector Collector
 		JobTimeout:      time.Minute,
 		Repository:      NewGORMRepository(resource.GORM()),
 		Collector:       collector,
+		Writer:          refusingWriter{},
+		Busy:            idleTurns{},
 		Auditor:         auditor,
 	})
 	if err != nil {

@@ -106,14 +106,15 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 	if err != nil {
 		return fmt.Errorf("initialize authentication: %w", err)
 	}
-	sessionService, err := session.NewService(session.NewGORMRepository(database.GORM()))
+	sessionStore := session.NewGORMRepository(database.GORM())
+	sessionService, err := session.NewService(sessionStore)
 	if err != nil {
 		return fmt.Errorf("initialize sessions: %w", err)
 	}
 	// The file source is the one place that knows both the library and the
 	// knowledge base domain, so neither has to know the other: the knowledge
 	// base reads a file by id through this, and never learns where bytes live.
-	ai, err := assemble(ctx, cfg, logger, database.GORM(), sessionService,
+	ai, err := assemble(ctx, cfg, logger, database.GORM(), sessionService, sessionStore,
 		fileSource{library: libraryService}, auditLog)
 	if err != nil {
 		return err
@@ -193,7 +194,13 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		// different type: the recorder cannot read a window and the ledger
 		// cannot write a call, which is what keeps "how much have I spent" from
 		// being a question the writing path is able to answer for anybody.
-		Usage:         handler.NewUsageHandler(ai.usage, logger),
+		Usage: handler.NewUsageHandler(ai.usage, logger),
+		// The package routes are mounted with no surface at all, which makes
+		// this the only area here whose reach is the preset alone. The router
+		// says why; the short version is that a package is an account's own
+		// work leaving and coming back, and a surface would be a way to refuse
+		// somebody their own copy of it.
+		Workspace:     handler.NewWorkspaceHandler(ai.packages, logger),
 		WebSocket:     ai.socket,
 		TokenVerifier: authService,
 		Authorizer:    ai.authorization,

@@ -110,6 +110,7 @@ func assemble(
 	logger *slog.Logger,
 	db *gorm.DB,
 	sessions *session.Service,
+	sessionStore session.Repository,
 	files kb.FileSource,
 	auditLog *audit.Service,
 ) (*ai, error) {
@@ -266,7 +267,8 @@ func assemble(
 	// else, and each gets its own service over it: a question is written by the
 	// turns that generate it, read by the bank's endpoints, and advanced by a
 	// review somebody submits.
-	questions, err := notebook.NewService(notebook.NewGORMRepository(db))
+	questionStore := notebook.NewGORMRepository(db)
+	questions, err := notebook.NewService(questionStore)
 	if err != nil {
 		return nil, fmt.Errorf("initialize the question bank: %w", err)
 	}
@@ -383,7 +385,11 @@ func assemble(
 	// from the services under it, because a material is the reading layer's
 	// subject and asking the knowledge base for one would be a second answer to
 	// what a material is (§2.8).
-	packages, err := newWorkspace(cfg, db, sessions, materials, questions, immersive, auditLog)
+	packages, err := newWorkspace(cfg, db, sessions, materials, questions, immersive, auditLog,
+		workspaceStores{
+			sessions: sessionStore, materials: immersive.repository,
+			questions: questionStore, documents: documents,
+		})
 	if err != nil {
 		return nil, err
 	}

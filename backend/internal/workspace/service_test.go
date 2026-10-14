@@ -156,8 +156,11 @@ func newHarness(t *testing.T, options ...func(*Options)) *harness {
 		Root:            root,
 		MaxArchiveBytes: 1 << 20,
 		JobTimeout:      time.Minute,
+		BatchSize:       2,
 		Repository:      repository,
 		Collector:       collector,
+		Writer:          &stubWriter{},
+		Busy:            &busyStub{},
 		Auditor:         auditor,
 		Now:             func() time.Time { return time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC) },
 		NewJobID:        func() (string, error) { return "job_test", nil },
@@ -400,7 +403,8 @@ func TestTheServiceRefusesToBeBuiltWithoutItsParts(t *testing.T) {
 	full := func() Options {
 		return Options{
 			Root: "/tmp", MaxArchiveBytes: 1, JobTimeout: time.Second,
-			Repository: newFakeRepository(), Collector: &stubCollector{}, Auditor: &recordingAuditor{},
+			Repository: newFakeRepository(), Collector: &stubCollector{},
+			Writer: &stubWriter{}, Busy: &busyStub{}, Auditor: &recordingAuditor{},
 		}
 	}
 	tests := []struct {
@@ -409,6 +413,8 @@ func TestTheServiceRefusesToBeBuiltWithoutItsParts(t *testing.T) {
 	}{
 		{"no store", func(o *Options) { o.Repository = nil }},
 		{"no collector", func(o *Options) { o.Collector = nil }},
+		{"no writer", func(o *Options) { o.Writer = nil }},
+		{"no turn check", func(o *Options) { o.Busy = nil }},
 		{"no auditor", func(o *Options) { o.Auditor = nil }},
 		{"no root", func(o *Options) { o.Root = "" }},
 		{"no bound", func(o *Options) { o.MaxArchiveBytes = 0 }},

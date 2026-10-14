@@ -275,6 +275,13 @@ type Repository interface {
 	SaveCounts(ctx context.Context, jobID string, counts map[string]int) error
 	// SetArchivePath writes where the package landed.
 	SetArchivePath(ctx context.Context, jobID, archivePath string) error
+	// SaveWritten writes what an import has committed so far. It is called after
+	// every batch rather than once at the end (see Sink), because it is the whole
+	// of §2.13's recovery: what is not written down is what a recovery cannot
+	// take back.
+	SaveWritten(ctx context.Context, jobID string, written []Written) error
+	// List reads one account's jobs of one direction, newest first.
+	List(ctx context.Context, ownerID int64, kind JobKind, limit int) ([]Job, error)
 }
 
 // Collector is how the service gets hold of the objects a selection names.
@@ -290,6 +297,18 @@ type Repository interface {
 // anything if the two agree.
 type Collector interface {
 	Collect(ctx context.Context, caller authz.Caller, refs []Ref) ([]Object, error)
+}
+
+// Busy reports whether anything is running that a write would collide with.
+//
+// It is one number for the whole instance and not a question about the
+// conversations a package names, which is §12.4's second discipline as this
+// repository can keep it: an import reaches four domains, a session is one of
+// them, and "is anything in flight" is the question that can be answered once.
+// The count rather than a bool because the refusal says how many — a user told
+// "something is running" has been told nothing they can act on.
+type Busy interface {
+	Running(ctx context.Context) (int64, error)
 }
 
 // Auditor records what happened to a package (§2.6).
@@ -338,6 +357,10 @@ var (
 	// ErrNotPreview is what committing something that never previewed is refused
 	// with (§2.13's first discipline).
 	ErrNotPreview = errors.New("workspace: this job has not previewed")
+	// ErrNotRecoverable is what recovering a job that has nothing to take back is
+	// refused with. A committed job is the case that matters: its work is kept,
+	// and a recovery that ran on it would be a delete wearing recovery's name.
+	ErrNotRecoverable = errors.New("workspace: this job has nothing to recover")
 	// ErrBusy is what any of it is refused with while a turn is running
 	// (AC-09's first sentence). The refusal is about the *instance* rather than
 	// about the conversations a job names, because one import touches several

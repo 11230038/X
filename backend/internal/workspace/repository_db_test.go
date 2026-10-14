@@ -25,7 +25,13 @@ import (
 
 // jobTableOrder is child first: a job points at an account, so the rows that
 // point at an account go before the account does.
-var jobTableOrder = []string{"workspace_jobs", "messages", "sessions", "users"}
+//
+// The turns are in the list because import_db_test.go writes one: a turn hangs
+// off a conversation, so a turn left behind by one case would make the next
+// case's cleanup of `sessions` a foreign-key failure.
+var jobTableOrder = []string{
+	"turn_events", "turns", "workspace_jobs", "messages", "sessions", "users",
+}
 
 func newDBStore(t *testing.T) (*GORMRepository, *data.Resource) {
 	t.Helper()
