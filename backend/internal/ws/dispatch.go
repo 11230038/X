@@ -100,6 +100,7 @@ func (c *conn) startTurn(ctx context.Context, cmd command) (any, func() error, e
 		Content:        cmd.Content,
 		Attachments:    cmd.Attachments,
 		KnowledgeBases: cmd.KnowledgeBases,
+		Selection:      selectionOf(cmd.Selection),
 	})
 	if err != nil {
 		return nil, nil, err
@@ -116,6 +117,23 @@ func (c *conn) startTurn(ctx context.Context, cmd command) (any, func() error, e
 		}, func() error {
 			return c.watch(ctx, watchName(cmd, turnID), turnID, 0)
 		}, nil
+}
+
+// selectionOf carries a reader's selection from the wire into the runtime, and
+// it is the one place the two spellings of it meet.
+//
+// An absent selection stays absent rather than becoming an empty one: a turn
+// with no selection and a turn whose selection names nothing are different
+// things, and only the second is the client's mistake.
+func selectionOf(selected *selection) *turn.Selection {
+	if selected == nil {
+		return nil
+	}
+	return &turn.Selection{
+		MaterialID: selected.MaterialID,
+		Locator:    selected.Locator,
+		Text:       selected.Text,
+	}
 }
 
 // subscribe starts watching a turn, or whichever turn a session is running.
@@ -309,6 +327,11 @@ func describe(err error) (code, message string) {
 		return CodeNotWaiting, "this turn is not waiting for an answer"
 	case errors.Is(err, turn.ErrEmptyMessage):
 		return CodeEmptyContent, "the message is empty"
+	case errors.Is(err, turn.ErrInvalidSelection):
+		// The command's own payload cannot be acted on, which is what this code
+		// says; the sentence is the runtime's, because only it can say which part
+		// of the coordinate is not a span.
+		return CodeMalformedCommand, err.Error()
 	case errors.Is(err, turn.ErrEmptyReply):
 		return CodeEmptyContent, "the reply is empty"
 	case errors.Is(err, session.ErrInvalidTitle):

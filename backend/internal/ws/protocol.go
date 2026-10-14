@@ -10,6 +10,8 @@ package ws
 import (
 	"encoding/json"
 	"fmt"
+
+	"backend/internal/event"
 )
 
 // ProtocolVersion is the only version this build speaks. A client that asks for
@@ -159,10 +161,30 @@ type command struct {
 	// are read from the wire rather than made required.
 	Attachments    []string `json:"attachments"`
 	KnowledgeBases []string `json:"knowledge_bases"`
+	// Selection is the passage the reader had chosen in a reading material, for
+	// the turn that asks about one (§2.8). It is absent for every other turn, and
+	// it is one turn's and not a conversation's: what a reader was looking at is
+	// not stored, so a client sends it with each turn it is about.
+	Selection *selection `json:"selection,omitempty"`
 	// AfterSeq is where a subscription starts reading. Absent means zero, which
 	// is the beginning of the turn — the zero value is already the useful
 	// default, so a client that omits it is asking for everything.
 	AfterSeq *int64 `json:"after_seq"`
+}
+
+// selection is the passage a reader had chosen, as a client sends it: which
+// material they were reading, where in it they had got to, and the text they
+// believe is there.
+//
+// The text is what lets the two ends be compared when they disagree, and it is
+// not what the turn reads by: a client can be a stale tab, so what the model is
+// given is what the coordinate resolves to. The locator is the same coordinate
+// a citation carries, spelled the same way, because it is the same thing — where
+// in a document a passage is (§2.8).
+type selection struct {
+	MaterialID string        `json:"material_id"`
+	Locator    event.Locator `json:"locator"`
+	Text       string        `json:"text"`
 }
 
 // errProtocolVersion reports a frame this build cannot read.
