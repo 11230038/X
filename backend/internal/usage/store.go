@@ -314,9 +314,13 @@ func (l *GORMLedger) groups(ctx context.Context, query Query) ([]Group, error) {
 	key := groupExpression(query.GroupBy)
 
 	var buckets []totalsRow
+	// The key is selected under the name the row reads it by, and the same name is
+	// what the ORDER BY asks for. `bucket` is not a column of the table, so an
+	// unaliased key leaves the ORDER BY naming something no table has — which is
+	// an error rather than a silently unsorted report, but only a database says so.
 	err := l.scope(ctx, query).
 		Where("finished_at IS NOT NULL").
-		Select(key+", "+totalsSelection, outcomeArgs()...).
+		Select(key+" AS bucket, "+totalsSelection, outcomeArgs()...).
 		Group(key).
 		Order("bucket ASC").
 		Scan(&buckets).Error

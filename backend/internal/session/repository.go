@@ -208,6 +208,12 @@ func (r *GORMRepository) AppendMessage(ctx context.Context, record Message, call
 // child's owner is its parent's (migration 00014 gave it no column). The
 // subquery is what keeps that one rule in one place instead of a second copy of
 // it here.
+//
+// A read that returns no rows has two causes and they are different answers: a
+// conversation nobody has written in, and a conversation this caller cannot
+// read. The second is looked for the same way every other read here looks for a
+// session, so that another account's history is answered exactly as an id that
+// was never issued is.
 func (r *GORMRepository) Messages(ctx context.Context, sessionID string, caller authz.Caller) ([]Message, error) {
 	if err := r.ready(); err != nil {
 		return nil, err
@@ -226,6 +232,11 @@ func (r *GORMRepository) Messages(ctx context.Context, sessionID string, caller 
 		Find(&records).Error
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
+	}
+	if len(records) == 0 {
+		if _, err := r.Session(ctx, sessionID, caller); err != nil {
+			return nil, err
+		}
 	}
 	messages := make([]Message, 0, len(records))
 	for _, record := range records {

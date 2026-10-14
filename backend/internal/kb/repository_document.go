@@ -30,12 +30,27 @@ import (
 // swallow the caller's own conditions and widen the query instead of narrowing
 // it — the failure mode that returns more rows than asked for while every test
 // that reads one row passes.
+//
+// Each subquery is built on a session of its own, and that is not tidiness. A
+// GORM handle carries one statement, and every chained call after the first
+// writes to it: building both subqueries on the handle handed in here would
+// leave the second one's table on the outer statement, turn the caller's read
+// into a read of `library_files`, and — because a statement passed as an
+// argument is rendered as a subquery — inline the outer query into its own
+// WHERE. A session with NewDB starts a statement that keeps this handle's
+// connection and context, which is what a subquery of a transaction needs.
 func documentScope(db *gorm.DB, caller authz.Caller) *gorm.DB {
-	bases := data.OwnerScope(db.Model(&models.KnowledgeBase{}).Select("kb_id"),
+	bases := data.OwnerScope(subquery(db, &models.KnowledgeBase{}, "kb_id"),
 		caller.UserID, caller.IsAdmin(), "owner_id")
-	files := data.OwnerScope(db.Model(&models.LibraryFile{}).Select("file_id"),
+	files := data.OwnerScope(subquery(db, &models.LibraryFile{}, "file_id"),
 		caller.UserID, caller.IsAdmin(), "owner_id")
 	return db.Where("(kb_id IN (?) OR (kb_id IS NULL AND file_id IN (?)))", bases, files)
+}
+
+// subquery is one column of one table as a statement of its own, for the scopes
+// that are written as a subquery rather than as a join.
+func subquery(db *gorm.DB, model any, column string) *gorm.DB {
+	return db.Session(&gorm.Session{NewDB: true}).Model(model).Select(column)
 }
 
 func (r *GORMRepository) Document(ctx context.Context, documentID string, caller authz.Caller) (Document, error) {

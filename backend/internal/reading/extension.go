@@ -214,7 +214,14 @@ func (r *Registry) RunAll(ctx context.Context, reading Context) []Outcome {
 	}
 	outcomes := make([]Outcome, 0, len(r.extensions))
 	for _, extension := range r.extensions {
-		outcome, _ := r.runOne(ctx, extension, reading)
+		outcome, err := r.runOne(ctx, extension, reading)
+		// The refusal is the one error runOne hands back, and here it becomes the
+		// skip's own reason: dropped, the outcome would be a panel skipped with
+		// nothing under it, which reads as an extension that broke rather than an
+		// account that may not make the call.
+		if err != nil {
+			outcome = skipped(outcome, err.Error())
+		}
 		outcomes = append(outcomes, outcome)
 	}
 	return outcomes

@@ -71,6 +71,12 @@ func (r *GORMRepository) Create(ctx context.Context, job Job) error {
 		Written:     written,
 		Counts:      counts,
 		FailureCode: job.FailureCode,
+		// The row's moment is the one the service chose, not the one the insert
+		// happened at. GORM fills a timestamp column from the clock only when the
+		// value is zero, so a job that carries one keeps it — and a job whose
+		// state and whose start time are read together is one a client can show.
+		CreatedAt: job.CreatedAt,
+		UpdatedAt: job.UpdatedAt,
 	}
 	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
 		return fmt.Errorf("create workspace job: %w", err)
@@ -238,6 +244,14 @@ func (r *GORMRepository) update(ctx context.Context, jobID, column string, value
 // has — the same distinction `session` makes when it re-reads to tell an absent
 // row from an unchanged one.
 //
+// "Matched" is the word the re-read below is for. seekdb reports the rows a
+// statement *changed*, not the rows it found, so a write that sets a column to
+// the value it already holds answers zero — and so does the commit's own
+// clearing write when it lands in the same second as the write before it, since
+// `update_time` is part of every statement this makes. Zero would otherwise be
+// read as a job that is not there, which is why the answer is looked up rather
+// than inferred.
+//
 // `update_time` is set here rather than left to GORM's autoUpdateTime, because
 // the write is by column name: a column list is what keeps a state change from
 // also rewriting the manifest, and the timestamp is one of the columns it has to
@@ -253,6 +267,14 @@ func (r *GORMRepository) touch(ctx context.Context, jobID string, columns map[st
 		Updates(columns)
 	if result.Error != nil {
 		return 0, fmt.Errorf("update workspace job: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		var present int64
+		if err := r.db.WithContext(ctx).Model(&models.WorkspaceJob{}).
+			Where("job_id = ?", jobID).Count(&present).Error; err != nil {
+			return 0, fmt.Errorf("look for workspace job: %w", err)
+		}
+		return present, nil
 	}
 	return result.RowsAffected, nil
 }

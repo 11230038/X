@@ -337,6 +337,11 @@ func (s *Service) Recover(ctx context.Context, request RecoverRequest) (Job, err
 		return Job{}, err
 	}
 	job.State = StateRecovered
+	// The failure the job is being recovered from is cleared here as well as in
+	// the row, so that the job handed back is the row: a recovery that left the
+	// old code on it would tell a client the work was taken back and that it had
+	// failed, which is the state this call exists to end.
+	job.FailureCode = ""
 	job.UpdatedAt = s.now().UTC()
 	s.recordAs(ctx, request.Actor, job, audit.ActionWorkspaceRecovered, audit.ResultOK, audit.Detail{Counts: taken})
 	return job, nil
