@@ -44,6 +44,10 @@ var (
 	// computed from is no longer the state on the row, and the caller has to read
 	// again rather than write.
 	ErrStaleState = errors.New("mastery: the path moved on")
+	// ErrTooManyPaths is a conversation that has as many active paths as one may
+	// have. It is not a defect and not a race: it is a product limit being
+	// reached, and the caller's answer is to finish or leave one of them.
+	ErrTooManyPaths = errors.New("mastery: too many active paths")
 )
 
 // Result is the outcome of one piece of evidence, and it is a closed set.
@@ -229,6 +233,19 @@ type Evidence struct {
 	Actor     Actor
 	CreatedAt time.Time
 }
+
+// The two sources this package writes into that column. They are here rather
+// than in the tools because they are part of what the row means: an observation
+// that came from a question being answered and one that came from the model
+// saying what it saw are told apart by this string, and the insight endpoint
+// reports it. A third source — another capability observing something — would be
+// a constant beside these.
+const (
+	// SourceGradedAnswer is evidence from an answer that was judged.
+	SourceGradedAnswer = "graded_answer"
+	// SourceAssessment is evidence from an assessment the model made itself.
+	SourceAssessment = "assessment"
+)
 
 // Validate reports whether the evidence is fit to store.
 func (e Evidence) Validate() error {

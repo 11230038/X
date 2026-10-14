@@ -17,9 +17,11 @@ import (
 // eventually read by eye.
 const (
 	pathIDPrefix           = "mp_"
+	moduleIDPrefix         = "m_"
 	knowledgePointIDPrefix = "kp_"
 	eventIDPrefix          = "mev_"
 	evidenceIDPrefix       = "mle_"
+	interactionIDPrefix    = "min_"
 	idRandomBytes          = 16
 )
 
@@ -37,12 +39,26 @@ type Options struct {
 	// Gate is the two thresholds that decide what a knowledge point's evidence
 	// means.
 	Gate GateOptions
+	// MaxActivePaths is how many paths one conversation may be in the middle of
+	// at once. It is a limit on *starting* a path and not on having one: a turn
+	// that arrives on a path it already has is never refused, however many it has
+	// (Open).
+	//
+	// It is required rather than defaulted, and the reason is the shape of the
+	// mistake: a zero would not mean "no limit", it would mean no path could ever
+	// be started — the check is `len(active) >= MaxActivePaths` — and a
+	// deployment that forgot the key would find that out the first time a user
+	// tried to learn something.
+	MaxActivePaths int
 }
 
 // Validate reports whether the options are usable.
 func (o Options) Validate() error {
 	if o.LeaseTTL <= 0 {
 		return fmt.Errorf("mastery: the lease ttl must be positive, not %s", o.LeaseTTL)
+	}
+	if o.MaxActivePaths <= 0 {
+		return fmt.Errorf("mastery: the active path limit must be positive, not %d", o.MaxActivePaths)
 	}
 	return o.Gate.Validate()
 }
@@ -51,9 +67,10 @@ func (o Options) Validate() error {
 // change has to leave behind, who is allowed to write it, and what a version
 // guard means when it fails.
 type Service struct {
-	repository Repository
-	leaseTTL   time.Duration
-	gate       GateOptions
+	repository     Repository
+	leaseTTL       time.Duration
+	gate           GateOptions
+	maxActivePaths int
 	// clock is a field and not a call to time.Now inside the methods, because
 	// every write here stores a time and a case that cannot choose the time
 	// cannot pin the row it wrote.
@@ -69,10 +86,11 @@ func NewService(repository Repository, options Options) (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		repository: repository,
-		leaseTTL:   options.LeaseTTL,
-		gate:       options.Gate,
-		clock:      func() time.Time { return time.Now().UTC() },
+		repository:     repository,
+		leaseTTL:       options.LeaseTTL,
+		gate:           options.Gate,
+		maxActivePaths: options.MaxActivePaths,
+		clock:          func() time.Time { return time.Now().UTC() },
 	}, nil
 }
 

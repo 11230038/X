@@ -59,6 +59,38 @@ type Repository interface {
 	// time it was last seen.
 	TouchSession(ctx context.Context, pathID string, actor Actor, now time.Time) error
 
+	// PathOfSession reads the path a conversation was last seen on. ErrNotFound
+	// when it has never been on one, which is the ordinary state of a new
+	// conversation rather than a failure.
+	PathOfSession(ctx context.Context, sessionID string) (string, error)
+	// ActivePathsOfSession reads the paths a conversation is still working on,
+	// by the status of their topic metadata. It is the same link table read for a
+	// different question: not "where is this conversation" but "how many paths is
+	// it in the middle of".
+	ActivePathsOfSession(ctx context.Context, sessionID string) ([]string, error)
+	// SessionsOn reads the conversations linked to a path, most recently seen
+	// first.
+	SessionsOn(ctx context.Context, pathID string) ([]string, error)
+	// SeenAt reads when a conversation last touched a path. ErrNotFound when the
+	// two were never linked.
+	SeenAt(ctx context.Context, pathID, sessionID string) (time.Time, error)
+
+	// ActiveInteraction reads the path's open interaction — the one question put
+	// and not yet answered. ErrNotFound when there is none.
+	ActiveInteraction(ctx context.Context, pathID string) (Interaction, error)
+	// CreateInteraction records one question that has been put. ErrDuplicate when
+	// the id is taken.
+	CreateInteraction(ctx context.Context, interaction Interaction) error
+	// CloseInteraction closes an open interaction, storing the answer and how it
+	// ended, and reports whether this call is the one that closed it. A false is
+	// not an error: two calls grading the same answer is one of them losing a
+	// race it was allowed to lose.
+	//
+	// The outcome is bytes rather than a value because the two ways an
+	// interaction ends — judged, and declined — carry different things, and the
+	// column holds one JSON document either way.
+	CloseInteraction(ctx context.Context, interactionID, answer string, outcome []byte, now time.Time) (bool, error)
+
 	// AppendEvidence writes one observation. ErrDuplicate when the id is taken.
 	AppendEvidence(ctx context.Context, evidence Evidence) error
 	// AppendEvent writes one line of history. ErrDuplicate when the id is taken.
