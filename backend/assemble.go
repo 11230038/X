@@ -90,6 +90,14 @@ type ai struct {
 //
 // ctx is the process's own context, and it is what the background worker runs
 // on: the worker stops when the process is asked to stop, not when a request is.
+// assemble builds every domain that needs a database, and it is handed the two
+// things that had to exist before it: the audit, because the file library is
+// built from it and the file library is built first, and the sessions.
+//
+// The audit used to be constructed here. It moved out because a domain cannot
+// record something through a recorder that does not exist yet, and the file
+// library — the one domain built before this function runs, since the knowledge
+// base needs it as its file source — is such a domain (§2.14).
 func assemble(
 	ctx context.Context,
 	cfg config.Config,
@@ -97,6 +105,7 @@ func assemble(
 	db *gorm.DB,
 	sessions *session.Service,
 	files kb.FileSource,
+	auditLog *audit.Service,
 ) (*ai, error) {
 	tools := tool.NewRegistry()
 	policy := tool.DefaultPolicy()
@@ -166,18 +175,13 @@ func assemble(
 		return nil, fmt.Errorf("initialize authorization: %w", err)
 	}
 
-	// The two governance services are built before the domains that write to
-	// them, because a domain that records something is built from the recorder.
-	// An audit and an authorization that disagreed about who an account is
-	// would be an audit of a different instance.
-	auditLog, err := audit.NewService(audit.NewGORMStore(db), audit.Options{
-		MaxPageSize:   cfg.Audit.MaxPageSize,
-		RetentionDays: cfg.Audit.RetentionDays,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("initialize audit: %w", err)
-	}
-
+	// The authorization is built here and the audit is not: the audit arrives as
+	// a parameter because the file library is built from it and the file library
+	// is built before this function runs (see the signature). Both are still built
+	// before the domains that write to them, which is the rule that matters — a
+	// domain that records something is built from the recorder, and an audit and
+	// an authorization that disagreed about who an account is would be an audit of
+	// a different instance.
 	parsers, err := parse.NewRegistry(parse.Options{
 		DefaultEngine:  cfg.Parser.DefaultEngine,
 		DoclingBaseURL: cfg.Parser.DoclingBaseURL,

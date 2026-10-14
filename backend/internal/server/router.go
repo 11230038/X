@@ -14,28 +14,29 @@ import (
 
 // Handlers groups the HTTP handlers and verifiers registered by the application router.
 type Handlers struct {
-	System        *handler.SystemHandler
-	Ops           *handler.OpsHandler
-	LibraryFiles  *handler.LibraryFilesHandler
-	LibraryReads  *handler.LibraryReadHandler
-	KnowledgeBase *handler.KBHandler
-	Auth          *handler.AuthHandler
-	Sessions      *handler.SessionHandler
-	Questions     *handler.QuestionHandler
-	Practice      *handler.PracticeHandler
-	Mastery       *handler.MasteryHandler
-	Reading       *handler.ReadingHandler
-	Dashboard     *handler.DashboardHandler
-	Memory        *handler.MemoryHandler
-	Capabilities  *handler.CapabilityHandler
-	Permissions   *handler.PermissionsHandler
-	Admin         *handler.AdminHandler
-	Guardians     *handler.GuardianHandler
-	Audit         *handler.AuditHandler
-	Reports       *handler.ReportsHandler
-	Usage         *handler.UsageHandler
-	WebSocket     *ws.Handler
-	TokenVerifier middleware.TokenVerifier
+	System           *handler.SystemHandler
+	Ops              *handler.OpsHandler
+	LibraryFiles     *handler.LibraryFilesHandler
+	LibraryReads     *handler.LibraryReadHandler
+	LibraryLifecycle *handler.LibraryLifecycleHandler
+	KnowledgeBase    *handler.KBHandler
+	Auth             *handler.AuthHandler
+	Sessions         *handler.SessionHandler
+	Questions        *handler.QuestionHandler
+	Practice         *handler.PracticeHandler
+	Mastery          *handler.MasteryHandler
+	Reading          *handler.ReadingHandler
+	Dashboard        *handler.DashboardHandler
+	Memory           *handler.MemoryHandler
+	Capabilities     *handler.CapabilityHandler
+	Permissions      *handler.PermissionsHandler
+	Admin            *handler.AdminHandler
+	Guardians        *handler.GuardianHandler
+	Audit            *handler.AuditHandler
+	Reports          *handler.ReportsHandler
+	Usage            *handler.UsageHandler
+	WebSocket        *ws.Handler
+	TokenVerifier    middleware.TokenVerifier
 	// Authorizer answers what an account may reach. It is what the routes below
 	// are narrowed by, and it is required: a router built without one refuses
 	// every authenticated request rather than serving them unchecked.
@@ -160,8 +161,25 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// is this instance's disk, which is the resource an account can exhaust for
 	// everyone else on the machine, so it is the upload class (§2.10).
 	library.POST("/library/files", rateLimit(limit.Upload), handlers.LibraryFiles.Upload)
+	// The listing is mounted before the route that reads one file, and the router
+	// makes that free rather than necessary: gin's tree keeps `:fileID` from
+	// swallowing the bare path. What the order does say is that these five are
+	// about the library as a collection and a file's place in it, while the two
+	// below are about the contents of one file.
+	//
+	// `deleted=true` on the listing is the recycle bin, so the four writes that
+	// follow are the whole of a file's life after it is stored (§2.14).
+	library.GET("/library/files", handlers.LibraryLifecycle.List)
+	library.GET("/library/files/:fileID/content", handlers.LibraryLifecycle.Download)
 	library.GET("/library/files/:fileID", handlers.LibraryReads.Get)
 	library.GET("/library/files/:fileID/text", handlers.LibraryReads.Text)
+	// A soft delete is not a rate-limited operation and deliberately is not one of
+	// the classes (§2.10): it writes two columns, and the resource an account can
+	// exhaust for everybody else on this machine is the disk, which the purge
+	// below is what releases.
+	library.DELETE("/library/files/:fileID", handlers.LibraryLifecycle.SoftDelete)
+	library.POST("/library/files/:fileID/restore", handlers.LibraryLifecycle.Restore)
+	library.DELETE("/library/files/:fileID/purge", handlers.LibraryLifecycle.Purge)
 	knowledgeBase := reach(authz.SurfaceKnowledgeBase)
 	knowledgeBase.POST("/knowledge-bases", handlers.KnowledgeBase.Create)
 	knowledgeBase.GET("/knowledge-bases", handlers.KnowledgeBase.List)

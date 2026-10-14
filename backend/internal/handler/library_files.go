@@ -41,10 +41,15 @@ func (h *LibraryFilesHandler) Upload(c *gin.Context) {
 	// The account is read before the body is: every file that gets stored has to
 	// belong to somebody, and reading half a gigabyte before discovering that
 	// nobody is signed in is work done for a request that cannot succeed.
-	account, ok := caller(c)
+	//
+	// It is read as the account and not as the caller, because an upload can turn
+	// out to be a restore of a file this account had thrown away (§2.14), and a
+	// restore is recorded under the name the account had at the time.
+	account, ok := callerAccount(c)
 	if !ok {
 		return
 	}
+	c.Request = c.Request.WithContext(library.WithRequestID(c.Request.Context(), httpx.RequestID(c)))
 	if c.Request.ContentLength > h.maxRequestBytes {
 		httpx.WriteError(c, http.StatusRequestEntityTooLarge, "request_too_large", "upload request is too large")
 		return
@@ -97,7 +102,7 @@ func (h *LibraryFilesHandler) Upload(c *gin.Context) {
 	defer file.Close()
 	result, err := h.uploader.Upload(c.Request.Context(), library.UploadInput{
 		Filename: fileHeaders[0].Filename, DeclaredMIME: fileHeaders[0].Header.Get("Content-Type"),
-		Content: file, OwnerID: account.UserID,
+		Content: file, Actor: actorOf(account),
 	})
 	if err != nil {
 		h.writeUploadError(c, err)

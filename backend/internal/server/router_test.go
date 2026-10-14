@@ -84,10 +84,14 @@ func newTestRouterWithGates(
 		t.Fatalf("NewOpsHandler() error = %v", err)
 	}
 	return NewRouter(logger, "development", Handlers{
-		System:        system,
-		Ops:           ops,
-		LibraryFiles:  libraryFiles,
-		LibraryReads:  handler.NewLibraryReadHandler(routerFileStub{}, routerMaterialStub{}, logger),
+		System:       system,
+		Ops:          ops,
+		LibraryFiles: libraryFiles,
+		LibraryReads: handler.NewLibraryReadHandler(routerFileStub{}, routerMaterialStub{}, logger),
+		// One stub answering both halves, because in the server it is one service:
+		// the bytes a download hands over are the bytes the parsers read (§2.14).
+		LibraryLifecycle: handler.NewLibraryLifecycleHandler(
+			routerLibraryLifecycleStub{}, routerOpenerStub{}, logger),
 		Auth:          handler.NewAuthHandler(authenticator, logger),
 		Questions:     handler.NewQuestionHandler(routerQuestionsStub{}, logger),
 		Practice:      handler.NewPracticeHandler(routerPracticeStub{err: practiceErr}, routerQueueSize, logger),
@@ -150,6 +154,46 @@ type routerUploaderStub struct{}
 
 func (routerUploaderStub) Upload(context.Context, library.UploadInput) (library.UploadResult, error) {
 	return library.UploadResult{}, nil
+}
+
+// routerLibraryLifecycleStub answers the listing and the recycle bin. As with
+// the knowledge base stub above, what these routes *say* is
+// handler/library_recycle_test.go's business — this file is about which routes
+// exist, in which group, and behind which gate.
+type routerLibraryLifecycleStub struct{}
+
+func (routerLibraryLifecycleStub) Search(
+	context.Context, library.SearchQuery,
+) ([]library.FileSummary, error) {
+	return nil, nil
+}
+
+func (routerLibraryLifecycleStub) SoftDelete(
+	context.Context, string, library.Actor,
+) (library.FileSummary, error) {
+	return library.FileSummary{ID: "lib_1", Filename: "手册.pdf"}, nil
+}
+
+func (routerLibraryLifecycleStub) Restore(
+	context.Context, string, library.Actor,
+) (library.FileSummary, error) {
+	return library.FileSummary{ID: "lib_1", Filename: "手册.pdf"}, nil
+}
+
+func (routerLibraryLifecycleStub) Purge(context.Context, string, library.Actor) error {
+	return nil
+}
+
+// routerOpenerStub hands back a reader over nothing, which is all the download
+// route needs to answer: the bytes it streams are handler/library_recycle_test.go's
+// business.
+type routerOpenerStub struct{}
+
+func (routerOpenerStub) Open(context.Context, string, authz.Caller) (library.StoredFile, error) {
+	return library.StoredFile{
+		ID: "lib_1", Filename: "手册.pdf", MIMEType: "application/pdf",
+		SizeBytes: 4, Content: io.NopCloser(strings.NewReader("data")),
+	}, nil
 }
 
 // routerPermissionsStub answers a picture of the caller's reach. This file is
@@ -442,16 +486,39 @@ func TestRouterErrorsAndRequestID(t *testing.T) {
 	}
 }
 
-func TestRouterRegistersLibraryUploadAndRejectsWrongMethod(t *testing.T) {
+func TestRouterRegistersLibraryUploadAndListAndRejectsWrongMethod(t *testing.T) {
 	router := newTestRouter(t, readyChecker{})
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/library/files", nil))
-	if recorder.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("status = %d, want 405", recorder.Code)
-	}
-	if !strings.Contains(recorder.Body.String(), `"code":"method_not_allowed"`) {
-		t.Fatalf("body = %s", recorder.Body.String())
-	}
+
+	// Both methods on the collection are mounted, and neither is the other's
+	// answer: the upload is behind the rate limiter on top of the token, and the
+	// listing is the token alone. A GET that reached the uploader would be a
+	// listing request answered by a write.
+	t.Run("the upload is mounted", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/library/files", nil))
+		if recorder.Code == http.StatusMethodNotAllowed || recorder.Code == http.StatusNotFound {
+			t.Fatalf("status = %d, want the upload route to exist", recorder.Code)
+		}
+	})
+
+	t.Run("the listing is mounted", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/library/files", nil))
+		if recorder.Code == http.StatusMethodNotAllowed || recorder.Code == http.StatusNotFound {
+			t.Fatalf("status = %d, want the listing route to exist", recorder.Code)
+		}
+	})
+
+	t.Run("a method that is neither", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/api/v1/library/files", nil))
+		if recorder.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("status = %d, want 405", recorder.Code)
+		}
+		if !strings.Contains(recorder.Body.String(), `"code":"method_not_allowed"`) {
+			t.Fatalf("body = %s", recorder.Body.String())
+		}
+	})
 }
 
 func TestRouterRegistersAuthRoutes(t *testing.T) {

@@ -61,8 +61,19 @@ const (
 	ActionSessionClaimed Action = "session.claimed"
 	// ActionSessionDeleted is a conversation removed for good.
 	ActionSessionDeleted Action = "session.deleted"
-	// ActionFileDeleted is a file removed from the library.
+	// ActionFileDeleted is a file taken out of the library and put in the recycle
+	// bin. The bytes stay where they are; what changed is that the file is no
+	// longer in the library (§2.14).
 	ActionFileDeleted Action = "library.file_deleted"
+	// ActionFileRestored is a file coming back out of the recycle bin, whether it
+	// was asked for by name or by uploading the same bytes again — one action
+	// because it is one change of state, and the detail says which way it was
+	// asked for.
+	ActionFileRestored Action = "library.file_restored"
+	// ActionFilePurged is a file destroyed: the bytes, and the row. It is recorded
+	// when it is refused as well as when it is done, because "somebody tried to
+	// destroy this and was told no" is what AC-15 is asked about afterwards.
+	ActionFilePurged Action = "library.file_purged"
 	// ActionWorkspaceExported is a workspace packed out.
 	ActionWorkspaceExported Action = "workspace.exported"
 	// ActionWorkspaceImported is a workspace packed in.
@@ -78,7 +89,8 @@ var Actions = []Action{
 	ActionGuardianLinked, ActionGuardianRevoked,
 	ActionGuardianPermissionGranted, ActionGuardianPermissionRevoked,
 	ActionReportsViewed,
-	ActionSessionClaimed, ActionSessionDeleted, ActionFileDeleted,
+	ActionSessionClaimed, ActionSessionDeleted,
+	ActionFileDeleted, ActionFileRestored, ActionFilePurged,
 	ActionWorkspaceExported, ActionWorkspaceImported,
 }
 

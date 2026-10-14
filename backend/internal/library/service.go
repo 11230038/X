@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	"backend/internal/audit"
 	"backend/internal/authz"
 )
 
@@ -33,12 +34,22 @@ type Service struct {
 	root         string
 	maxFileBytes int64
 	repository   MetadataRepository
+	auditor      Auditor
 }
 
 // NewService initializes every local directory needed by the file library.
+//
+// An auditor is required and not defaulted, because the operations that take a
+// file away are the ones the audit exists for (§2.14), and a library built
+// without one would be a library where those operations cannot be recorded —
+// which is a wiring fault, and so belongs here where it refuses a deployment
+// rather than at the moment a user deletes something.
 func NewService(options Options, repository MetadataRepository) (*Service, error) {
 	if strings.TrimSpace(options.Root) == "" || options.MaxFileBytes <= 0 || repository == nil {
 		return nil, fmt.Errorf("invalid library configuration")
+	}
+	if options.Auditor == nil {
+		return nil, fmt.Errorf("invalid library configuration: no auditor")
 	}
 	root, err := filepath.Abs(filepath.Clean(options.Root))
 	if err != nil {
@@ -53,10 +64,30 @@ func NewService(options Options, repository MetadataRepository) (*Service, error
 			return nil, fmt.Errorf("verify upload directory %q: %w", directory, err)
 		}
 	}
-	return &Service{root: root, maxFileBytes: options.MaxFileBytes, repository: repository}, nil
+	return &Service{
+		root: root, maxFileBytes: options.MaxFileBytes,
+		repository: repository, auditor: options.Auditor,
+	}, nil
 }
 
 // Upload validates and stores one file before persisting its metadata.
+//
+// Dedup happens here and it happens before anything is moved into place (§2.14):
+// the bytes are hashed into staging, and then this account's library is asked
+// whether it already holds them. A yes is answered with the file that was already
+// there and nothing new is written — which is why two uploads of one file share
+// an id, and why the second one is told about a file it has seen before by the id
+// alone.
+//
+// A yes on a row in the recycle bin is a restore rather than a hit: the binned
+// row comes back instead of a second row being written, and that is not a
+// shortcut. `library_files_path_unique` is a unique key over every row, binned
+// ones included (seekdb has no partial index), so the binned row still holds the
+// path a new row would need — restoring and deduplicating are the same act
+// because a second row could not be written at all.
+//
+// Nothing is validated on a hit, and that is not an omission: these are the same
+// bytes, already validated, already on disk under a name this library wrote.
 func (s *Service) Upload(ctx context.Context, input UploadInput) (UploadResult, error) {
 	filename, err := cleanFilename(input.Filename)
 	if err != nil {
@@ -64,6 +95,9 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (UploadResult, 
 	}
 	if input.Content == nil {
 		return UploadResult{}, ErrInvalidFile
+	}
+	if !input.Actor.Valid() {
+		return UploadResult{}, ErrNoActor
 	}
 	id, err := newFileID()
 	if err != nil {
@@ -80,6 +114,17 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (UploadResult, 
 			_ = os.Remove(stagingPath)
 		}
 	}()
+
+	existing, err := s.repository.FindByDigest(ctx, digest, input.Actor.Caller)
+	switch {
+	case err == nil:
+		// The staging file is removed by the defer above: on this path nothing is
+		// ever moved out of it.
+		return s.reuse(ctx, existing, input.Actor)
+	case errors.Is(err, ErrNotFound):
+	default:
+		return UploadResult{}, err
+	}
 
 	classification, err := validateFile(stagingPath, filename, input.DeclaredMIME)
 	if err != nil {
@@ -98,7 +143,7 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (UploadResult, 
 	now := time.Now().UTC()
 	record := FileRecord{
 		ID: id, SHA256: digest, Filename: filename, MIMEType: classification.MIMEType,
-		SizeBytes: size, LibraryPath: relativePath, OwnerID: input.OwnerID,
+		SizeBytes: size, LibraryPath: relativePath, OwnerID: input.Actor.UserID,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.repository.Create(ctx, record); err != nil {
@@ -113,47 +158,66 @@ func (s *Service) Upload(ctx context.Context, input UploadInput) (UploadResult, 
 	}, nil
 }
 
+// reuse answers an upload with the file this account already had.
+//
+// The name returned is the stored row's name and not the one just uploaded, and
+// that is the point of a merge: there is one file here, it has one name, and the
+// name it has is the one it has always had. Answering with the new spelling would
+// be reporting a rename that did not happen.
+func (s *Service) reuse(ctx context.Context, existing FileRecord, actor Actor) (UploadResult, error) {
+	if !existing.InRecycleBin() {
+		return s.resultOf(existing)
+	}
+	// The same bytes the account threw away, so this is a restore (§2.14). The
+	// record is written before the row changes: a change with no record is
+	// unrecoverable, and a record for a change that then failed is an error the
+	// caller is told about and can be seen in the log.
+	if err := s.record(ctx, actor, audit.ActionFileRestored, existing.ID, audit.ResultOK, audit.Detail{
+		Reason: "restored_by_upload",
+	}); err != nil {
+		return UploadResult{}, err
+	}
+	now := time.Now().UTC()
+	if err := s.repository.SetDeleted(ctx, existing.ID, false, now, actor.Caller); err != nil {
+		return UploadResult{}, err
+	}
+	existing.Deleted = false
+	existing.DeletedAt = nil
+	return s.resultOf(existing)
+}
+
 // Find reads one stored file's metadata, without opening its bytes.
 //
 // It answers in the shape the upload answered in, because it is the same file
 // read at a different time: a client that stored a file and one that comes back
 // for it later are reading one resource, and two shapes for it would be two
 // things to keep in step.
+//
+// A file in the recycle bin is not found (§2.14). The bin is not a second
+// library with a flag on it — while a file is in there it is not in the library,
+// and every read that would have handed it over stops finding it.
 func (s *Service) Find(ctx context.Context, id string, caller authz.Caller) (UploadResult, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return UploadResult{}, ErrInvalidFile
-	}
-	record, err := s.repository.Find(ctx, id, caller)
+	record, err := s.live(ctx, id, caller)
 	if err != nil {
 		return UploadResult{}, err
 	}
-	// Read from the path rather than from a column, for the same reason Open
-	// does: the directory is the classification, and a second copy of it is a
-	// second thing that can disagree.
-	category, err := categoryOf(record.LibraryPath)
-	if err != nil {
-		return UploadResult{}, err
-	}
-	return UploadResult{
-		ID: record.ID, SHA256: record.SHA256, Filename: record.Filename,
-		MIMEType: record.MIMEType, SizeBytes: record.SizeBytes,
-		Category: category, CreatedAt: record.CreatedAt,
-	}, nil
+	return s.resultOf(record)
 }
 
 // Open reads one stored file back: its metadata, and a reader over its bytes.
+//
+// It serves both readers of a file — the download route, which hands the bytes
+// to a client, and the parsers, which stream them into a knowledge base — because
+// there is one answer to "may this caller have these bytes" and two methods for
+// it would be two places to get it right. What differs is what the caller does
+// with the reader, and that is the caller's business.
 //
 // The caller closes the reader. The path is resolved the same way it was when
 // the file was stored — the metadata's relative path joined to the root, then
 // checked to be inside it — so that a row that says something else cannot be
 // used to read outside the library.
 func (s *Service) Open(ctx context.Context, id string, caller authz.Caller) (StoredFile, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return StoredFile{}, ErrInvalidFile
-	}
-	record, err := s.repository.Find(ctx, id, caller)
+	record, err := s.live(ctx, id, caller)
 	if err != nil {
 		return StoredFile{}, err
 	}
@@ -179,6 +243,72 @@ func (s *Service) Open(ctx context.Context, id string, caller authz.Caller) (Sto
 		ID: record.ID, Filename: record.Filename, MIMEType: record.MIMEType,
 		Category: category, SizeBytes: record.SizeBytes, Content: content,
 	}, nil
+}
+
+// resultOf is one record as the upload reports it.
+//
+// The category is read from the path rather than from a column, for the same
+// reason Open does: the directory is the classification, and a second copy of it
+// is a second thing that can disagree.
+func (s *Service) resultOf(record FileRecord) (UploadResult, error) {
+	category, err := categoryOf(record.LibraryPath)
+	if err != nil {
+		return UploadResult{}, err
+	}
+	return UploadResult{
+		ID: record.ID, SHA256: record.SHA256, Filename: record.Filename,
+		MIMEType: record.MIMEType, SizeBytes: record.SizeBytes,
+		Category: category, CreatedAt: record.CreatedAt,
+	}, nil
+}
+
+// summaryOf is one record as a listing shows it.
+func (s *Service) summaryOf(record FileRecord) (FileSummary, error) {
+	category, err := categoryOf(record.LibraryPath)
+	if err != nil {
+		return FileSummary{}, err
+	}
+	return FileSummary{
+		ID: record.ID, SHA256: record.SHA256, Filename: record.Filename,
+		MIMEType: record.MIMEType, SizeBytes: record.SizeBytes, Category: category,
+		CreatedAt: record.CreatedAt, DeletedAt: record.DeletedAt,
+	}, nil
+}
+
+// record writes one entry about a file, and it is the only place this package
+// writes to the audit.
+//
+// The actor's name comes from the request and not from storage, for the reason
+// the audit stores a snapshot at all (§2.6): the entry has to say who the account
+// was when they did it, and a lookup here would be reading a name a rename may
+// already have changed.
+func (s *Service) record(ctx context.Context, actor Actor, action audit.Action, id string, result audit.Result, detail audit.Detail) error {
+	if s == nil || s.auditor == nil {
+		return audit.ErrNotConfigured
+	}
+	event := audit.Event{
+		Actor:  actor.auditActor(),
+		Action: action,
+		Target: audit.Ref{Kind: audit.TargetLibraryFile, ID: id},
+		// The subject is the account the file belongs to, and it is the same as
+		// the actor on every route this package serves: a library file is only
+		// ever touched by the account that uploaded it. It is written anyway,
+		// because "what has happened to this account's files" is one of the three
+		// questions an audit is read with (§2.6), and the column that answers it
+		// is this one.
+		SubjectID: actor.UserID,
+		Result:    result,
+		Detail:    detail,
+		// The request the operation was served for, when the caller marked the
+		// context (handler.WithRequestID). It is empty for work that came from
+		// somewhere other than a request, which is a real answer and not a
+		// missing one.
+		RequestID: requestIDOf(ctx),
+	}
+	if err := s.auditor.Record(ctx, event); err != nil {
+		return fmt.Errorf("record %s for file %s: %w", action, id, err)
+	}
+	return nil
 }
 
 // categoryOf reads the category back out of where the file was stored.

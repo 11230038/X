@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"backend/internal/audit"
 	"backend/internal/auth"
 	"backend/internal/config"
 	"backend/internal/data"
@@ -70,10 +71,23 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 	}
 
 	system := handler.NewSystemHandler(database, cfg.Database.PingTimeout, logger)
+	// The audit is built here rather than inside assemble, and the ordering is the
+	// reason: the file library is built from it (§2.14), and the file library is
+	// built before assemble runs because the knowledge base takes it as its file
+	// source. Nothing else about the audit is main's business — assemble is handed
+	// it and passes it to the domains that record.
+	auditLog, err := audit.NewService(audit.NewGORMStore(database.GORM()), audit.Options{
+		MaxPageSize:   cfg.Audit.MaxPageSize,
+		RetentionDays: cfg.Audit.RetentionDays,
+	})
+	if err != nil {
+		return fmt.Errorf("initialize audit: %w", err)
+	}
 	libraryRepository := library.NewGORMRepository(database.GORM())
 	libraryService, err := library.NewService(library.Options{
 		Root:         cfg.Upload.Root,
 		MaxFileBytes: cfg.Upload.MaxFileBytes,
+		Auditor:      auditLog,
 	}, libraryRepository)
 	if err != nil {
 		return fmt.Errorf("initialize file library: %w", err)
@@ -100,7 +114,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 	// knowledge base domain, so neither has to know the other: the knowledge
 	// base reads a file by id through this, and never learns where bytes live.
 	ai, err := assemble(ctx, cfg, logger, database.GORM(), sessionService,
-		fileSource{library: libraryService})
+		fileSource{library: libraryService}, auditLog)
 	if err != nil {
 		return err
 	}
@@ -141,21 +155,25 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		return fmt.Errorf("initialize the rate limiter: %w", err)
 	}
 	router := server.NewRouter(logger, cfg.AppEnv, server.Handlers{
-		System:        system,
-		Ops:           ops,
-		LibraryFiles:  libraryFiles,
-		LibraryReads:  handler.NewLibraryReadHandler(libraryService, ai.materials, logger),
-		KnowledgeBase: handler.NewKBHandler(ai.materials, logger),
-		Auth:          handler.NewAuthHandler(authService, logger),
-		Sessions:      handler.NewSessionHandler(sessionService, logger),
-		Questions:     handler.NewQuestionHandler(ai.questions, logger),
-		Practice:      handler.NewPracticeHandler(ai.reviews, cfg.Practice.QueueSize, logger),
-		Mastery:       handler.NewMasteryHandler(ai.mastery, logger),
-		Reading:       handler.NewReadingHandler(ai.immersive.service, ai.immersive.extensions, logger),
-		Dashboard:     handler.NewDashboardHandler(ai.dashboard, logger),
-		Memory:        handler.NewMemoryHandler(ai.memory, logger),
-		Capabilities:  handler.NewCapabilityHandler(ai.capabilities),
-		Permissions:   handler.NewPermissionsHandler(ai.authorization, logger),
+		System:       system,
+		Ops:          ops,
+		LibraryFiles: libraryFiles,
+		LibraryReads: handler.NewLibraryReadHandler(libraryService, ai.materials, logger),
+		// One service answering both halves of the library: the bytes it hands over
+		// for a download are the same bytes it hands the parsers, and the listing
+		// and the recycle bin are the same table read two ways (§2.14).
+		LibraryLifecycle: handler.NewLibraryLifecycleHandler(libraryService, libraryService, logger),
+		KnowledgeBase:    handler.NewKBHandler(ai.materials, logger),
+		Auth:             handler.NewAuthHandler(authService, logger),
+		Sessions:         handler.NewSessionHandler(sessionService, logger),
+		Questions:        handler.NewQuestionHandler(ai.questions, logger),
+		Practice:         handler.NewPracticeHandler(ai.reviews, cfg.Practice.QueueSize, logger),
+		Mastery:          handler.NewMasteryHandler(ai.mastery, logger),
+		Reading:          handler.NewReadingHandler(ai.immersive.service, ai.immersive.extensions, logger),
+		Dashboard:        handler.NewDashboardHandler(ai.dashboard, logger),
+		Memory:           handler.NewMemoryHandler(ai.memory, logger),
+		Capabilities:     handler.NewCapabilityHandler(ai.capabilities),
+		Permissions:      handler.NewPermissionsHandler(ai.authorization, logger),
 		// Governance and the guardian's own view are the same service asked two
 		// questions: the administrator reads every account and every
 		// relationship, and a guardian reads the ones it holds. Both are mounted

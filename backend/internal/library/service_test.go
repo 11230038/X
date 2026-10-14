@@ -25,6 +25,9 @@ type recordingRepository struct {
 	stored map[string]FileRecord
 	// findErr, when set, fails the read the way storage does.
 	findErr error
+	// references is what References answers, by file id. A file in use is a fact
+	// about two other tables, so a test that wants a purge refused has to say so.
+	references map[string][]Reference
 }
 
 func (r *recordingRepository) Create(_ context.Context, record FileRecord) error {
@@ -58,7 +61,7 @@ func (r *recordingRepository) Find(_ context.Context, id string, caller authz.Ca
 
 func TestNewServiceCreatesStorageDirectories(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "upload")
-	if _, err := NewService(Options{Root: root, MaxFileBytes: 1024}, &recordingRepository{}); err != nil {
+	if _, err := NewService(Options{Root: root, MaxFileBytes: 1024, Auditor: &auditRecorder{}}, &recordingRepository{}); err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
 	for _, directory := range append([]string{".staging"}, categories...) {
@@ -75,7 +78,7 @@ func TestNewServiceRejectsSymlinkCategory(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(root, "pdf")); err != nil {
 		t.Skipf("create symlink: %v", err)
 	}
-	if _, err := NewService(Options{Root: root, MaxFileBytes: 1024}, &recordingRepository{}); err == nil {
+	if _, err := NewService(Options{Root: root, MaxFileBytes: 1024, Auditor: &auditRecorder{}}, &recordingRepository{}); err == nil {
 		t.Fatal("NewService() error = nil, want symlink rejection")
 	}
 }
@@ -83,13 +86,13 @@ func TestNewServiceRejectsSymlinkCategory(t *testing.T) {
 func TestUploadStoresValidatedPDFAndMetadata(t *testing.T) {
 	root := t.TempDir()
 	repository := &recordingRepository{}
-	service, err := NewService(Options{Root: root, MaxFileBytes: 1024 * 1024}, repository)
+	service, err := NewService(Options{Root: root, MaxFileBytes: 1024 * 1024, Auditor: &auditRecorder{}}, repository)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
 	content := []byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n")
 
-	result, err := service.Upload(context.Background(), UploadInput{OwnerID: testOwnerID,
+	result, err := service.Upload(context.Background(), UploadInput{Actor: testActor(),
 		Filename:     "../../course-notes.pdf",
 		DeclaredMIME: "application/pdf",
 		Content:      bytes.NewReader(content),
@@ -127,11 +130,11 @@ func TestUploadAcceptsFileAtExactSizeLimit(t *testing.T) {
 	root := t.TempDir()
 	content := "12345678"
 	repository := &recordingRepository{}
-	service, err := NewService(Options{Root: root, MaxFileBytes: int64(len(content))}, repository)
+	service, err := NewService(Options{Root: root, MaxFileBytes: int64(len(content)), Auditor: &auditRecorder{}}, repository)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Upload(context.Background(), UploadInput{OwnerID: testOwnerID, Filename: "notes.md", Content: strings.NewReader(content)}); err != nil {
+	if _, err := service.Upload(context.Background(), UploadInput{Actor: testActor(), Filename: "notes.md", Content: strings.NewReader(content)}); err != nil {
 		t.Fatalf("Upload() error = %v", err)
 	}
 	if repository.record.SizeBytes != int64(len(content)) {
@@ -141,12 +144,12 @@ func TestUploadAcceptsFileAtExactSizeLimit(t *testing.T) {
 
 func TestUploadRejectsOversizedFileAndCleansStaging(t *testing.T) {
 	root := t.TempDir()
-	service, err := NewService(Options{Root: root, MaxFileBytes: 8}, &recordingRepository{})
+	service, err := NewService(Options{Root: root, MaxFileBytes: 8, Auditor: &auditRecorder{}}, &recordingRepository{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = service.Upload(context.Background(), UploadInput{OwnerID: testOwnerID,
+	_, err = service.Upload(context.Background(), UploadInput{Actor: testActor(),
 		Filename: "notes.md",
 		Content:  strings.NewReader("more than eight bytes"),
 	})
@@ -159,12 +162,12 @@ func TestUploadRejectsOversizedFileAndCleansStaging(t *testing.T) {
 func TestUploadRollsBackFileWhenRepositoryFails(t *testing.T) {
 	root := t.TempDir()
 	repository := &recordingRepository{err: errors.New("database unavailable")}
-	service, err := NewService(Options{Root: root, MaxFileBytes: 1024}, repository)
+	service, err := NewService(Options{Root: root, MaxFileBytes: 1024, Auditor: &auditRecorder{}}, repository)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = service.Upload(context.Background(), UploadInput{OwnerID: testOwnerID,
+	_, err = service.Upload(context.Background(), UploadInput{Actor: testActor(),
 		Filename: "notes.md",
 		Content:  strings.NewReader("plain markdown"),
 	})
@@ -182,14 +185,14 @@ func TestUploadRollsBackFileWhenRepositoryFails(t *testing.T) {
 
 func TestUploadHonorsCanceledContextAndCleansStaging(t *testing.T) {
 	root := t.TempDir()
-	service, err := NewService(Options{Root: root, MaxFileBytes: 1024}, &recordingRepository{})
+	service, err := NewService(Options{Root: root, MaxFileBytes: 1024, Auditor: &auditRecorder{}}, &recordingRepository{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err = service.Upload(ctx, UploadInput{OwnerID: testOwnerID,
+	_, err = service.Upload(ctx, UploadInput{Actor: testActor(),
 		Filename: "notes.md",
 		Content:  strings.NewReader("plain markdown"),
 	})
@@ -201,12 +204,12 @@ func TestUploadHonorsCanceledContextAndCleansStaging(t *testing.T) {
 
 func TestUploadRejectsInvalidFileAndCleansStaging(t *testing.T) {
 	root := t.TempDir()
-	service, err := NewService(Options{Root: root, MaxFileBytes: 1024}, &recordingRepository{})
+	service, err := NewService(Options{Root: root, MaxFileBytes: 1024, Auditor: &auditRecorder{}}, &recordingRepository{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = service.Upload(context.Background(), UploadInput{OwnerID: testOwnerID,
+	_, err = service.Upload(context.Background(), UploadInput{Actor: testActor(),
 		Filename: "fake.pdf",
 		Content:  strings.NewReader("not a pdf"),
 	})
@@ -220,12 +223,12 @@ func TestUploadRejectsInvalidFileAndCleansStaging(t *testing.T) {
 func TestOpenReadsAStoredFileBackWithItsCategory(t *testing.T) {
 	root := t.TempDir()
 	repository := &recordingRepository{}
-	service, err := NewService(Options{Root: root, MaxFileBytes: 1024}, repository)
+	service, err := NewService(Options{Root: root, MaxFileBytes: 1024, Auditor: &auditRecorder{}}, repository)
 	if err != nil {
 		t.Fatal(err)
 	}
 	content := "# 数学分析\n\n拉格朗日中值定理。\n"
-	uploaded, err := service.Upload(context.Background(), UploadInput{OwnerID: testOwnerID,
+	uploaded, err := service.Upload(context.Background(), UploadInput{Actor: testActor(),
 		Filename: "notes.md", DeclaredMIME: "text/markdown", Content: strings.NewReader(content),
 	})
 	if err != nil {
@@ -253,7 +256,7 @@ func TestOpenReadsAStoredFileBackWithItsCategory(t *testing.T) {
 }
 
 func TestOpenReportsAFileThatIsNotThere(t *testing.T) {
-	service, err := NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024}, &recordingRepository{})
+	service, err := NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024, Auditor: &auditRecorder{}}, &recordingRepository{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +273,7 @@ func TestOpenReportsAFileThatIsNotThere(t *testing.T) {
 	repository := &recordingRepository{stored: map[string]FileRecord{
 		"lib_gone": {ID: "lib_gone", Filename: "gone.md", LibraryPath: "md/lib_gone.md"},
 	}}
-	service, err = NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024}, repository)
+	service, err = NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024, Auditor: &auditRecorder{}}, repository)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +296,7 @@ func TestOpenRefusesAPathItWouldNotHaveWritten(t *testing.T) {
 			repository := &recordingRepository{stored: map[string]FileRecord{
 				"lib_odd": {ID: "lib_odd", Filename: "odd.md", LibraryPath: tt.path},
 			}}
-			service, err := NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024}, repository)
+			service, err := NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024, Auditor: &auditRecorder{}}, repository)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -314,12 +317,12 @@ func TestOpenRefusesAPathItWouldNotHaveWritten(t *testing.T) {
 // reading one resource, and the preview beside it names the file the same way.
 func TestFindReturnsTheFileAsUploadDid(t *testing.T) {
 	repository := &recordingRepository{}
-	service, err := NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024 * 1024}, repository)
+	service, err := NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024 * 1024, Auditor: &auditRecorder{}}, repository)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
 	content := []byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n")
-	uploaded, err := service.Upload(context.Background(), UploadInput{OwnerID: testOwnerID,
+	uploaded, err := service.Upload(context.Background(), UploadInput{Actor: testActor(),
 		Filename: "notes.pdf", DeclaredMIME: "application/pdf", Content: bytes.NewReader(content),
 	})
 	if err != nil {
@@ -348,7 +351,7 @@ func TestFindRefusesARecordWithNoCategory(t *testing.T) {
 	repository := &recordingRepository{stored: map[string]FileRecord{
 		"lib_odd": {ID: "lib_odd", Filename: "odd.md", LibraryPath: "loose.md"},
 	}}
-	service, err := NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024}, repository)
+	service, err := NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024, Auditor: &auditRecorder{}}, repository)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +362,7 @@ func TestFindRefusesARecordWithNoCategory(t *testing.T) {
 }
 
 func TestFindReportsAMissingFileAndAnEmptyId(t *testing.T) {
-	service, err := NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024}, &recordingRepository{})
+	service, err := NewService(Options{Root: t.TempDir(), MaxFileBytes: 1024, Auditor: &auditRecorder{}}, &recordingRepository{})
 	if err != nil {
 		t.Fatal(err)
 	}

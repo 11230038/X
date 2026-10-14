@@ -61,9 +61,16 @@ func TestLibraryFilesHandlerUploadsSingleFile(t *testing.T) {
 	// The file belongs to whoever held the token, and the request cannot say
 	// otherwise: there is no owner field in a multipart body, and a route that
 	// read one would let a caller upload into somebody else's library.
-	if uploader.input.OwnerID != handlerAccountID {
+	if uploader.input.Actor.UserID != handlerAccountID {
 		t.Errorf("the file was stored for account %d, want the token's %d",
-			uploader.input.OwnerID, handlerAccountID)
+			uploader.input.Actor.UserID, handlerAccountID)
+	}
+	// The name travels with the id because an audit entry is a snapshot: what
+	// the log says is what the account was called when somebody did this, and
+	// reading it back later would answer with whatever they are called now.
+	if uploader.input.Actor.Name != "alice" {
+		t.Errorf("the uploader was recorded as %q, want the token's name",
+			uploader.input.Actor.Name)
 	}
 	if strings.Contains(recorder.Body.String(), "library_path") {
 		t.Fatal("response exposed internal library path")
