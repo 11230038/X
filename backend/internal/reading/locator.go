@@ -43,10 +43,21 @@ func (s Selection) Validate() error {
 
 // Passage is the text a locator names, with the coordinates that were actually
 // read.
+//
+// It carries the document it was read out of as well as the material, because a
+// passage is handed to a turn as a source and a source is a citation: what opens
+// one is the file and the character span, and the revision is how a reader
+// opening it later can tell whether the document has been re-read underneath
+// them since. The material is what the reader was looking at; the document is
+// where the words actually are.
 type Passage struct {
 	MaterialID string
 	Locator    Locator
 	Text       string
+	DocumentID string
+	FileID     string
+	Filename   string
+	Revision   int
 }
 
 // Resolve reads the text one coordinate names.
@@ -110,7 +121,15 @@ func (s *Service) Resolve(ctx context.Context, materialID string, locator Locato
 	if err != nil {
 		return Passage{}, err
 	}
-	return Passage{MaterialID: materialID, Locator: locator, Text: text}, nil
+	return Passage{
+		MaterialID: materialID,
+		Locator:    locator,
+		Text:       text,
+		DocumentID: document.ID,
+		FileID:     document.FileID,
+		Filename:   document.Filename,
+		Revision:   document.Revision,
+	}, nil
 }
 
 // unitsOf cuts a document's chunks into the units a catalogue lists.

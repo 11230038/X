@@ -29,6 +29,10 @@ const (
 	// The largest knowledge base body carries a query, and this is far more
 	// than a query needs.
 	maxKBRequestBytes int64 = 8 << 10
+	// The largest reading body carries a coordinate and the note written beside
+	// one. A note is a sentence or two, so this is generous; what it must not be
+	// is unbounded, because a note is stored.
+	maxReadingRequestBytes int64 = 8 << 10
 )
 
 // readJSON reads a JSON body into into and reports whether the caller should go

@@ -59,6 +59,10 @@ type ai struct {
 	// dashboard is the read that fans in over the domains above. It is built last
 	// because it is the one thing built from the others.
 	dashboard *dashboard.Service
+	// immersive is the immersion layer: the same service the turns resolve a
+	// selection through, kept here because the routes that open a material, save
+	// a position and run an extension are built beside the other handlers.
+	immersive *readingLayer
 }
 
 // assemble builds the turn runtime from configuration.
@@ -195,6 +199,16 @@ func assemble(
 	if err != nil {
 		return nil, err
 	}
+	// The reading layer reads the same knowledge base the turns read through, so
+	// a passage a turn is handed and a passage a reader opens are read by the
+	// same code, at the same offsets, out of the same revision (§2.8). It is
+	// named for the capability rather than for the package, because the package
+	// is in scope here and one name for two things is how a shadowed import gets
+	// written by accident.
+	immersive, err := newReadingLayer(cfg, db, materials, provider)
+	if err != nil {
+		return nil, err
+	}
 	repository := turn.NewGORMRepository(db)
 	hub, err := turn.NewHub(repository)
 	if err != nil {
@@ -208,6 +222,7 @@ func assemble(
 		Questions:         questions,
 		Router:            questionRouting(),
 		Paths:             paths,
+		Readings:          immersive.selection,
 		Capabilities:      capabilities,
 		Tools:             tools,
 		Policy:            policy,
@@ -252,7 +267,7 @@ func assemble(
 		turns: runner, socket: socket, capabilities: capabilities,
 		materials: materials, indexing: worker,
 		questions: questions, reviews: reviews, mastery: paths.service,
-		dashboard: overview,
+		dashboard: overview, immersive: immersive,
 	}, nil
 }
 

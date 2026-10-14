@@ -121,6 +121,11 @@ type Document struct {
 	// TextChars is the length of the parsed text, so a catalogue can say how long
 	// a material is without reading a character of it.
 	TextChars int64
+	// Revision is which parse of the file this text came from. It rides along
+	// because a passage is handed to a turn as a citation, and a citation that
+	// cannot say which revision it was read at cannot tell a reader whether the
+	// document has moved underneath it since.
+	Revision int
 }
 
 // ChunkSpan is where one chunk of a document's text begins and ends. It carries

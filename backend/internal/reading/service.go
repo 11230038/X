@@ -65,6 +65,16 @@ func (s *Service) Materials(ctx context.Context, workspaceID string) ([]Material
 	return s.repository.Materials(ctx, strings.TrimSpace(workspaceID))
 }
 
+// Material reads one row of the catalogue.
+//
+// It is the read behind the routes that are about a material without being about
+// its text — the extension catalogue is the one that asks — and it exists so
+// those can answer "no such material" rather than describing a book that is not
+// there.
+func (s *Service) Material(ctx context.Context, materialID string) (Material, error) {
+	return s.repository.Material(ctx, strings.TrimSpace(materialID))
+}
+
 // Outline returns one material and what it is made of.
 //
 // A material whose row names no document comes back with the material and no

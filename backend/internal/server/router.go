@@ -20,6 +20,7 @@ type Handlers struct {
 	Questions     *handler.QuestionHandler
 	Practice      *handler.PracticeHandler
 	Mastery       *handler.MasteryHandler
+	Reading       *handler.ReadingHandler
 	Dashboard     *handler.DashboardHandler
 	Capabilities  *handler.CapabilityHandler
 	WebSocket     *ws.Handler
@@ -105,6 +106,23 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	authenticated.GET("/mastery/paths/:pathID/insight", handlers.Mastery.Insight)
 	authenticated.GET("/mastery/paths/:pathID/lease", handlers.Mastery.Lease)
 	authenticated.DELETE("/mastery/paths/:pathID/lease", handlers.Mastery.ReleaseLease)
+	// Reading is where the reader is, and every route here is one reader's own
+	// material: what they have opened, where they stopped in it, and what they
+	// wrote. A material is a row pointing at a document the knowledge base
+	// parsed, so the words come back through these routes and never as a file.
+	authenticated.GET("/reading/materials", handlers.Reading.List)
+	authenticated.POST("/reading/materials", handlers.Reading.Create)
+	authenticated.GET("/reading/materials/:materialID", handlers.Reading.Get)
+	authenticated.GET("/reading/materials/:materialID/content", handlers.Reading.Content)
+	authenticated.GET("/reading/materials/:materialID/marks", handlers.Reading.Marks)
+	authenticated.POST("/reading/materials/:materialID/marks", handlers.Reading.AddMark)
+	authenticated.POST("/reading/materials/:materialID/position", handlers.Reading.SavePosition)
+	// The two extension routes are the closed set of reading aids this build has
+	// and the run of one of them over one passage. The list is a read of the
+	// build; the run is the reader asking a question about the text in front of
+	// them, and neither is routed through a turn (§2.9).
+	authenticated.GET("/reading/materials/:materialID/extensions", handlers.Reading.Extensions)
+	authenticated.POST("/reading/materials/:materialID/extensions/:name", handlers.Reading.RunExtension)
 	// The dashboard is the one read that spans the domains, and it sits beside
 	// the resources it reads rather than under any of them (COURSE-03).
 	authenticated.GET("/dashboard", handlers.Dashboard.Get)

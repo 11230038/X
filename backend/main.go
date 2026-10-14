@@ -120,6 +120,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		Questions:     handler.NewQuestionHandler(ai.questions, logger),
 		Practice:      handler.NewPracticeHandler(ai.reviews, cfg.Practice.QueueSize, logger),
 		Mastery:       handler.NewMasteryHandler(ai.mastery, logger),
+		Reading:       handler.NewReadingHandler(ai.immersive.service, ai.immersive.extensions, logger),
 		Dashboard:     handler.NewDashboardHandler(ai.dashboard, logger),
 		Capabilities:  handler.NewCapabilityHandler(ai.capabilities),
 		WebSocket:     ai.socket,
