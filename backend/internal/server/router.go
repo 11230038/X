@@ -14,6 +14,7 @@ import (
 // Handlers groups the HTTP handlers and verifiers registered by the application router.
 type Handlers struct {
 	System        *handler.SystemHandler
+	Ops           *handler.OpsHandler
 	LibraryFiles  *handler.LibraryFilesHandler
 	LibraryReads  *handler.LibraryReadHandler
 	KnowledgeBase *handler.KBHandler
@@ -122,6 +123,13 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// any of the domains — and not with the audit, which is the one route here
 	// that answers about the whole instance.
 	system.GET("/usage", handlers.Usage.Get)
+	// What this build is and what the process running it is doing (§2.15). They
+	// are here rather than on the public health routes because they answer more
+	// than "is it up": a version and a set of service conclusions are read by
+	// whoever operates the deployment, and `/healthz` and `/readyz` stay exactly
+	// as they were — a probe is not a place to add fields.
+	system.GET("/system/version", handlers.Ops.Version)
+	system.GET("/system/status", handlers.Ops.Status)
 	// The file library is behind the token from the upload onwards. It used to be
 	// the one public write in this API, because a file had no owner: what you
 	// uploaded was stored for whoever came back for the id. That made every stored

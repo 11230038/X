@@ -110,8 +110,25 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 			runErr = errors.Join(runErr, err)
 		}
 	}()
+	// The operations routes read the process rather than a domain: what this
+	// build is, and what the process running it is doing. They are built here
+	// rather than inside assemble because three of their four sources — the
+	// environment, the schema this binary requires, the database the readiness
+	// probe already pings — are the process's, and only the fourth is the
+	// runtime's.
+	ops, err := handler.NewOpsHandler(handler.OpsConfig{
+		Env:              cfg.AppEnv,
+		SchemaVersion:    migration.LatestVersion(),
+		Readiness:        database,
+		ReadinessTimeout: cfg.Database.PingTimeout,
+		Runtime:          ai,
+	}, logger)
+	if err != nil {
+		return err
+	}
 	router := server.NewRouter(logger, cfg.AppEnv, server.Handlers{
 		System:        system,
+		Ops:           ops,
 		LibraryFiles:  libraryFiles,
 		LibraryReads:  handler.NewLibraryReadHandler(libraryService, ai.materials, logger),
 		KnowledgeBase: handler.NewKBHandler(ai.materials, logger),

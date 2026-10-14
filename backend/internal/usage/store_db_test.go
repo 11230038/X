@@ -325,6 +325,27 @@ func TestDBTheNarrowingsChooseTheRows(t *testing.T) {
 	}
 }
 
+// The status route's number: how many calls in the whole table did not come
+// back. It is the one read here that is not narrowed to an account, and the case
+// says so by writing two accounts' calls and expecting both — the number is a
+// property of the process, and a caller cannot name whose calls it covers.
+func TestDBTheCountOfCallsThatDidNotComeBackIsOverTheWholeTable(t *testing.T) {
+	ledger, resource, alice := newDBLedger(t)
+	bob := createAccount(t, resource, "bob")
+	insertRow(t, resource, anOpenCall("call_open_alice", alice, atNine))
+	insertRow(t, resource, anOpenCall("call_open_bob", bob, atNine))
+	insertRow(t, resource, aFinishedCall("call_done", alice, atNine))
+
+	count, err := ledger.Unfinished(context.Background())
+	if err != nil {
+		t.Fatalf("Unfinished() error = %v", err)
+	}
+
+	if count != 2 {
+		t.Errorf("Unfinished() = %d, want both accounts' calls that have not come back", count)
+	}
+}
+
 // Prune is a window and not an editing tool: it takes a moment and removes
 // everything that started before it, and there is no way to name the rows it
 // removes. A window that removed nothing is not an error.

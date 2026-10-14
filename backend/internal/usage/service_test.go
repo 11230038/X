@@ -26,6 +26,10 @@ type fakeLedger struct {
 	asked  []Query
 	pruned []time.Time
 	count  int64
+	// open is what the whole table's count of calls that did not come back
+	// answers. It is a field of its own rather than the prune count, because the
+	// two numbers are about different things.
+	open int64
 }
 
 func (l *fakeLedger) Read(_ context.Context, query Query) (Report, error) {
@@ -39,6 +43,10 @@ func (l *fakeLedger) Read(_ context.Context, query Query) (Report, error) {
 func (l *fakeLedger) Prune(_ context.Context, before time.Time) (int64, error) {
 	l.pruned = append(l.pruned, before)
 	return l.count, l.err
+}
+
+func (l *fakeLedger) Unfinished(context.Context) (int64, error) {
+	return l.open, l.err
 }
 
 func newTestService(t *testing.T, ledger Ledger, retentionDays int) *Service {
@@ -346,6 +354,23 @@ func TestServicePrunesFromTheConfiguredWindow(t *testing.T) {
 	}
 }
 
+// The status route's one question of this package: how many calls did not come
+// back. It is answered over the whole table and it is not a report — no account,
+// no window, no breakdown — which is why it is a method of its own rather than a
+// Query with every field left empty, and why nothing here checks an owner.
+func TestServiceCountsTheCallsThatDidNotComeBack(t *testing.T) {
+	ledger := &fakeLedger{open: 3}
+	service := newTestService(t, ledger, 365)
+
+	count, err := service.Unfinished(context.Background())
+	if err != nil {
+		t.Fatalf("Unfinished() error = %v", err)
+	}
+	if count != 3 {
+		t.Errorf("Unfinished() = %d, want the count the ledger reported", count)
+	}
+}
+
 // A window nobody could serve is refused where it is set rather than where it is
 // used: the same rule as every other configured number, and the reason the
 // service is built at startup.
@@ -378,5 +403,8 @@ func TestAnUnwiredServiceRefusesRatherThanAnsweringZero(t *testing.T) {
 	}
 	if _, err := service.Prune(ctx); !errors.Is(err, ErrNotConfigured) {
 		t.Errorf("Prune() error = %v, want ErrNotConfigured", err)
+	}
+	if _, err := service.Unfinished(ctx); !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("Unfinished() error = %v, want ErrNotConfigured", err)
 	}
 }

@@ -107,6 +107,19 @@ func (s *Service) Prune(ctx context.Context) (int64, error) {
 	return s.ledger.Prune(ctx, before)
 }
 
+// Unfinished counts the calls that have not come back, over the whole table.
+//
+// It is the one read in this package that is not a report: no account, no
+// window, no breakdown, and one number back. The status route asks it, and what
+// it is asking is whether the two-part write (§2.7) is losing rows — which is a
+// property of the process rather than of anybody's spending.
+func (s *Service) Unfinished(ctx context.Context) (int64, error) {
+	if s == nil || s.ledger == nil {
+		return 0, ErrNotConfigured
+	}
+	return s.ledger.Unfinished(ctx)
+}
+
 // RetentionDays is the configured window, for a caller that reports it.
 func (s *Service) RetentionDays() int { return s.retentionDays }
 

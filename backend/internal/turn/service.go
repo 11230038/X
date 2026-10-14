@@ -474,6 +474,14 @@ func (r *Runner) Close(ctx context.Context) error {
 	}
 }
 
+// Running is how many turns are in flight right now.
+//
+// It is exported for the status route (§2.15), and it is a count rather than a
+// list on purpose: what an operator asks is whether the process is loaded, and
+// which sessions those turns belong to is what the sessions routes answer to
+// the accounts that own them.
+func (r *Runner) Running() int { return r.running() }
+
 // running counts the turns still in flight.
 func (r *Runner) running() int {
 	r.mu.Lock()

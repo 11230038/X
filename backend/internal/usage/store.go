@@ -181,6 +181,14 @@ type Ledger interface {
 	// Prune lets go of the calls that started before a moment, and reports how
 	// many went.
 	Prune(ctx context.Context, before time.Time) (int64, error)
+	// Unfinished counts the calls in the whole table that have not come back.
+	//
+	// This is the one read here that is not narrowed to an account, and the
+	// exception is narrow on purpose: what comes back is a count with no row
+	// behind it and no owner in it. "Is the writer losing calls" is a question
+	// about the process rather than about anybody's spending (§2.15), and no
+	// account's data can be reached through a number (§7.2).
+	Unfinished(ctx context.Context) (int64, error)
 }
 
 // GORMLedger reads llm_calls through GORM.
@@ -246,6 +254,28 @@ func (l *GORMLedger) Prune(ctx context.Context, before time.Time) (int64, error)
 		return 0, fmt.Errorf("prune usage rows: %w", result.Error)
 	}
 	return result.RowsAffected, nil
+}
+
+// Unfinished counts the calls that have not come back, over the whole table.
+//
+// It is deliberately not built on scope: there is no account, no window and no
+// narrowing to read here, and the answer is one number. What it is asked is
+// whether the two-part write is losing rows, which is a property of the process
+// and not of anybody's usage.
+func (l *GORMLedger) Unfinished(ctx context.Context) (int64, error) {
+	if err := l.ready(); err != nil {
+		return 0, err
+	}
+	var row unfinishedRow
+	err := l.db.WithContext(ctx).
+		Model(&models.LLMCall{}).
+		Where("finished_at IS NULL").
+		Select("COUNT(*) AS unfinished").
+		Scan(&row).Error
+	if err != nil {
+		return 0, fmt.Errorf("count the calls that did not come back: %w", err)
+	}
+	return row.Unfinished, nil
 }
 
 // totals sums the columns over the calls that came back.
