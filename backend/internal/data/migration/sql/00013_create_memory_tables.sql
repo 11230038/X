@@ -79,6 +79,14 @@ CREATE INDEX idx_memory_traces_turn
 -- rather than recomputed so that what the gate decided can be explained later;
 -- the gate itself treats it as the weakest of its three conditions, because a
 -- model's confidence is the model talking (§2.7).
+--
+-- The column is is_sensitive and not sensitive because this engine will not take
+-- the second one: `sensitive` is a keyword in seekdb, and the DDL below was
+-- refused with ERROR 1064 pointing at that very word. Spelling it with the `is_`
+-- prefix also puts it with the other booleans here (is_correct, is_active,
+-- is_default, is_deleted), so the schema is not carrying one odd name for the
+-- sake of a word that would have to be back-quoted everywhere it is written. The
+-- rename is recorded in V4设计方案.md §0.3.
 CREATE TABLE memory_facts (
     fact_id      VARCHAR(128) PRIMARY KEY,
     owner_id     BIGINT NOT NULL,
@@ -88,7 +96,7 @@ CREATE TABLE memory_facts (
     fingerprint  CHAR(64) NOT NULL,
     confidence   SMALLINT NOT NULL,
     status       VARCHAR(16) NOT NULL,
-    sensitive    BOOLEAN NOT NULL DEFAULT FALSE,
+    is_sensitive BOOLEAN NOT NULL DEFAULT FALSE,
     confirmed_by VARCHAR(16) NOT NULL,
     version      INTEGER NOT NULL DEFAULT 1,
     creat_time   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

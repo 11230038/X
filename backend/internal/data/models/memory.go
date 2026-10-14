@@ -60,7 +60,7 @@ type MemoryFact struct {
 	Fingerprint string     `gorm:"column:fingerprint;not null"`
 	Confidence  int16      `gorm:"column:confidence;not null"`
 	Status      string     `gorm:"column:status;not null"`
-	Sensitive   bool       `gorm:"column:sensitive;not null"`
+	Sensitive   bool       `gorm:"column:is_sensitive;not null"`
 	ConfirmedBy string     `gorm:"column:confirmed_by;not null"`
 	Version     int32      `gorm:"column:version;not null"`
 	CreatedAt   time.Time  `gorm:"column:creat_time;autoCreateTime"`

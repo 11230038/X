@@ -190,13 +190,16 @@ func (r *GORMRepository) SaveFact(ctx context.Context, fact Fact, expected int32
 		return 0, err
 	}
 	reached := expected + 1
+	// These keys are column names, not fields: a map handed to Updates is written
+	// out as given and the struct tag is never consulted, so the `is_` prefix
+	// seekdb forced on this column (§0.3) has to be repeated here by hand.
 	columns := map[string]any{
 		"scope":        nullable(fact.Scope),
 		"statement":    fact.Statement,
 		"fingerprint":  fact.Fingerprint,
 		"confidence":   int16(fact.Confidence),
 		"status":       string(fact.Status),
-		"sensitive":    fact.Sensitive,
+		"is_sensitive": fact.Sensitive,
 		"confirmed_by": string(fact.ConfirmedBy),
 		"version":      reached,
 		"update_time":  now,

@@ -30,7 +30,7 @@ func TestMemoryModelMappings(t *testing.T) {
 				"statement", "fingerprint", "payload_json", "creat_time"}},
 		{"fact", &MemoryFact{}, "memory_facts", []string{"fact_id"},
 			[]string{"fact_id", "owner_id", "surface", "scope", "statement", "fingerprint",
-				"confidence", "status", "sensitive", "confirmed_by", "version",
+				"confidence", "status", "is_sensitive", "confirmed_by", "version",
 				"creat_time", "update_time", "retract_time"}},
 		{"fact source", &MemoryFactSource{}, "memory_fact_sources", []string{"fact_id", "trace_id"},
 			[]string{"fact_id", "trace_id", "creat_time"}},
