@@ -17,6 +17,10 @@ const (
 // is written when one is saved again, and what a filter may ask for.
 type Service struct {
 	repository Repository
+	// due is the review domain, attached by the assembly (due.go). It is nil in
+	// a build with no reviewing in it, and every question then carries no due
+	// time rather than a wrong one.
+	due DueReader
 }
 
 // NewService returns the service over a storage adapter.
@@ -66,7 +70,11 @@ func (s *Service) Save(ctx context.Context, question Question) (Upserted, error)
 
 // Get returns one question by its content address.
 func (s *Service) Get(ctx context.Context, questionID string) (Entry, error) {
-	return s.repository.Entry(ctx, questionID)
+	entry, err := s.repository.Entry(ctx, questionID)
+	if err != nil {
+		return Entry{}, err
+	}
+	return s.withOneDue(ctx, entry)
 }
 
 // List returns one page of the bank.
@@ -74,7 +82,11 @@ func (s *Service) List(ctx context.Context, filter Filter) ([]Entry, error) {
 	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
-	return s.repository.List(ctx, filter)
+	entries, err := s.repository.List(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	return s.withDue(ctx, entries)
 }
 
 // Mark applies the marks that are set on a question directly. It is idempotent,

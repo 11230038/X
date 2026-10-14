@@ -43,6 +43,14 @@ type Repository interface {
 	// Stats reads the practice history of one window, bucket by bucket, with the
 	// distribution of that window's questions.
 	Stats(ctx context.Context, query StatsQuery) (Stats, error)
+	// DueTimes reads the stored due time of the named questions, keyed by the
+	// bank's row id. A question with no state row is absent: it has never been
+	// reviewed, and that is not a due time.
+	//
+	// It is separate from Queue and not a narrower Queue, because the two answer
+	// different questions: Queue asks which questions a sitting should ask, and
+	// this asks when the questions somebody is already looking at come back.
+	DueTimes(ctx context.Context, entryIDs []string) (map[string]time.Time, error)
 	// RecordedReview reads an event row by its request id, ErrNotFound when
 	// there is none.
 	RecordedReview(ctx context.Context, requestID string) (StoredReview, error)
@@ -173,6 +181,47 @@ func (r *GORMRepository) Entry(ctx context.Context, questionID string) (StoredEn
 		}
 	}
 	return entry, nil
+}
+
+// DueTimes reads the stored due time of the named questions.
+//
+// It is one statement for the whole page and not one per question, because the
+// caller is a listing: a bank page of twenty rows would otherwise be twenty
+// reads of a table this one query already answers.
+//
+// Only the due time is selected. The rest of the state row — the streak, the
+// ease, the review count — belongs to the curve and to the queue, and a listing
+// that carried it would be handing a client numbers it has no use for.
+func (r *GORMRepository) DueTimes(ctx context.Context, entryIDs []string) (map[string]time.Time, error) {
+	due := make(map[string]time.Time, len(entryIDs))
+	if err := r.ready(); err != nil {
+		return nil, err
+	}
+	if len(entryIDs) == 0 {
+		return due, nil
+	}
+	var rows []struct {
+		EntryID string     `gorm:"column:notebook_entries_id"`
+		DueTime *time.Time `gorm:"column:due_time"`
+	}
+	err := r.db.WithContext(ctx).Table(tableState).
+		Select("notebook_entries_id, due_time").
+		Where("notebook_entries_id IN ?", entryIDs).
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("read the due times of %d questions: %w", len(entryIDs), err)
+	}
+	for _, row := range rows {
+		// A state row whose due time is NULL is a question that has been reviewed
+		// without the curve ever setting a date for it. It stays out of the map
+		// for the same reason a question with no row does: what the map holds is
+		// dates, and a zero time would be the epoch.
+		if row.DueTime == nil {
+			continue
+		}
+		due[row.EntryID] = *row.DueTime
+	}
+	return due, nil
 }
 
 // RecordedReview reads one event row by its request id.

@@ -85,6 +85,12 @@ type answerView struct {
 	AttemptCount int       `json:"attempt_count"`
 	Bookmarked   bool      `json:"bookmarked"`
 	UpdatedAt    time.Time `json:"updated_at"`
+	// DueAt is when the review curve says to come back to this question (V4
+	// §1.2). It is absent for a question that has never been reviewed, which is
+	// not the same as one that is due: the first has no schedule at all, and a
+	// client that read them the same way would put every new question at the top
+	// of the "overdue" list.
+	DueAt *time.Time `json:"due_at"`
 }
 
 // entryView is one row of the bank as a client reads it: a question with the
@@ -352,5 +358,6 @@ func toAnswerView(answer notebook.Answer) answerView {
 		AttemptCount: answer.AttemptCount,
 		Bookmarked:   answer.Bookmarked,
 		UpdatedAt:    answer.UpdatedAt,
+		DueAt:        answer.DueAt,
 	}
 }

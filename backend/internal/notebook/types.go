@@ -155,6 +155,12 @@ type Answer struct {
 	// UpdatedAt is when the answer face last changed. It does not move when the
 	// question face is rewritten: it records answering, not editing.
 	UpdatedAt time.Time
+	// DueAt is when the review curve says to come back to this question, and it
+	// is nil for one that has never been reviewed (V4 §1.2). It is filled by the
+	// review domain through DueReader, not by this package: the bank stores no
+	// schedule, and nil here means nobody has one for this question — which is a
+	// different answer from a time that has already passed.
+	DueAt *time.Time
 }
 
 // Entry is one row of the bank: a question with the answer record kept beside it.

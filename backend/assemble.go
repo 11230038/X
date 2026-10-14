@@ -171,6 +171,12 @@ func assemble(
 	if err != nil {
 		return nil, fmt.Errorf("initialize the review service: %w", err)
 	}
+	// The two are joined here rather than imported into each other, and the
+	// direction is why: the review path reads the bank to judge an answer, so the
+	// bank reading the review tables back would be a cycle. What the bank says it
+	// needs is one method (notebook.DueReader), and this is the line that says
+	// these two are the same question.
+	questions.WithDueReader(reviews)
 
 	titler, err := turn.NewTitler(provider, cfg.LLM.TaskModel, cfg.LLM.TaskMaxTokens)
 	if err != nil {
