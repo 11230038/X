@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"backend/internal/capability"
-	"backend/internal/event"
 	"backend/internal/kb"
 	"backend/internal/llm"
 	"backend/internal/tool"
@@ -33,11 +32,12 @@ func (r *turnRun) ground(ctx context.Context, query string) (capability.Groundin
 	// The reader's selection comes first, and it is the one item of the survey
 	// that is not a search: it is the passage they were looking at when they
 	// asked, so it is what the answer is about rather than something the answer
-	// might be found in (§2.8). It is numbered with everything else — it is
-	// [1] because it was handed over first, and the model cites it the same way
-	// it cites a chunk.
+	// might be found in (§2.8). It is numbered with everything else, at the end —
+	// it is [1] because it was handed over first, and the model cites it the same
+	// way it cites a chunk. Numbering it here as well would spend the turn's count
+	// twice on one passage and leave it numbered 2.
 	if r.material.Selection != nil {
-		grounding.Sources = append(grounding.Sources, r.number([]event.Source{*r.material.Selection})...)
+		grounding.Sources = append(grounding.Sources, *r.material.Selection)
 		surveyed = true
 	}
 	if r.material.SelectionNote != "" {
@@ -53,6 +53,10 @@ func (r *turnRun) ground(ctx context.Context, query string) (capability.Groundin
 		if !surveyed && len(grounding.Unavailable) == 0 {
 			return capability.Grounding{}, nil
 		}
+		// A selection is the whole of this survey, and it still takes its number
+		// from the turn: the read a tool makes afterwards is the next passage, not
+		// a second [1].
+		grounding.Sources = r.number(grounding.Sources)
 		grounding.Message = llm.Message{
 			Role:    llm.RoleSystem,
 			Content: surveyText(r.material, grounding, surveyed),
