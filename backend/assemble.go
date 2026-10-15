@@ -17,6 +17,7 @@ import (
 	"backend/internal/mastery"
 	"backend/internal/memory"
 	"backend/internal/notebook"
+	"backend/internal/outbound"
 	"backend/internal/parse"
 	"backend/internal/practice"
 	"backend/internal/routing"
@@ -189,10 +190,19 @@ func assemble(
 	// domain that records something is built from the recorder, and an audit and
 	// an authorization that disagreed about who an account is would be an audit of
 	// a different instance.
+
+	// The document engine is a service beside this deployment and is normally
+	// reached at the loopback address the default names, so its policy is the
+	// LAN one — the widening §2.6 makes for exactly this client.
+	engineDial, err := outbound.DialContext(outbound.LANServicePolicy{})
+	if err != nil {
+		return nil, fmt.Errorf("initialize the document engine's boundary: %w", err)
+	}
 	parsers, err := parse.NewRegistry(parse.Options{
 		DefaultEngine:  cfg.Parser.DefaultEngine,
 		DoclingBaseURL: cfg.Parser.DoclingBaseURL,
 		Timeout:        cfg.Parser.Timeout,
+		Dial:           engineDial,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialize the parser registry: %w", err)
@@ -230,7 +240,15 @@ func assemble(
 	if err != nil {
 		return nil, fmt.Errorf("initialize the key pool: %w", err)
 	}
-	client, err := llm.NewClient(cfg.LLM.BaseURL, keys, cfg.LLM.Timeout)
+	// The model provider is somewhere on the internet, so the policy is the one
+	// for an address that came from outside (§2.6). The address itself came from
+	// configuration rather than from a request — what this closes is the door a
+	// mistyped LLM_BASE_URL walks through, not a door a user can open.
+	modelDial, err := outbound.DialContext(outbound.ExternalMediaPolicy{})
+	if err != nil {
+		return nil, fmt.Errorf("initialize the model client's boundary: %w", err)
+	}
+	client, err := llm.NewClient(cfg.LLM.BaseURL, keys, cfg.LLM.Timeout, modelDial)
 	if err != nil {
 		return nil, fmt.Errorf("initialize the model client: %w", err)
 	}

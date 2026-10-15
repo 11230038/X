@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"backend/internal/outbound"
 	"backend/internal/parse"
 )
 
@@ -20,11 +21,18 @@ import (
 // being guarded against.
 func TestFileCategoriesMatchTheParserRegistry(t *testing.T) {
 	// Docling is given an address so that the registry is built with every
-	// engine this build has; Select is asked, and it never calls the engine.
+	// engine this build has; Select is asked, and it never calls the engine. The
+	// dialer comes with the address because a docling engine with nowhere to dial
+	// is refused (§2.5) — the name above never resolves, and nothing here dials.
+	dial, err := outbound.DialContext(outbound.LANServicePolicy{})
+	if err != nil {
+		t.Fatalf("build the dialer: %v", err)
+	}
 	registry, err := parse.NewRegistry(parse.Options{
 		DefaultEngine:  parse.EngineText,
 		DoclingBaseURL: "http://docling.invalid:5001",
 		Timeout:        time.Minute,
+		Dial:           dial,
 	})
 	if err != nil {
 		t.Fatalf("NewRegistry() error = %v", err)

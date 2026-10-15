@@ -8,11 +8,15 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"backend/internal/outbound"
 )
 
 const testPDF = "%PDF-1.4\n%%EOF\n"
@@ -30,9 +34,22 @@ func answer(t *testing.T, status int, body string) *httptest.Server {
 	return server
 }
 
+// dialEngine is the boundary these cases run behind, and it is the deployment's
+// own: the document engine is a service beside the product, so the LAN policy is
+// what §2.6 gives it. Built as a value rather than written as a bare net.Dialer
+// so that a change to the policy changes what these cases prove.
+func dialEngine(t *testing.T) outbound.DialFunc {
+	t.Helper()
+	dial, err := outbound.DialContext(outbound.LANServicePolicy{})
+	if err != nil {
+		t.Fatalf("build the engine dialer: %v", err)
+	}
+	return dial
+}
+
 func askDocling(t *testing.T, baseURL string, timeout time.Duration) (Result, error) {
 	t.Helper()
-	return newDoclingParser(baseURL, timeout).Parse(context.Background(), Request{
+	return newDoclingParser(baseURL, timeout, dialEngine(t)).Parse(context.Background(), Request{
 		Filename: "paper.pdf", MIME: "application/pdf", Category: CategoryPDF,
 		Content: strings.NewReader(testPDF), MaxChars: 1000,
 	})
@@ -145,7 +162,7 @@ func TestDoclingParserAcceptsABaseURLWithATrailingSlash(t *testing.T) {
 func TestDoclingParserOmitsAnEmptyMIMEType(t *testing.T) {
 	server, seen := record(t)
 
-	_, err := newDoclingParser(server.URL, 5*time.Second).Parse(context.Background(), Request{
+	_, err := newDoclingParser(server.URL, 5*time.Second, dialEngine(t)).Parse(context.Background(), Request{
 		Filename: "paper.pdf", Category: CategoryPDF,
 		Content: strings.NewReader(testPDF), MaxChars: 1000,
 	})
@@ -205,6 +222,38 @@ func TestDoclingParserKeepsAPartialConversionAndSaysSo(t *testing.T) {
 		if !strings.Contains(result.Warnings[0], fragment) {
 			t.Errorf("warning %q, want it to mention %q", result.Warnings[0], fragment)
 		}
+	}
+}
+
+// The boundary is not an ornament here either. A parser built with a dialer and
+// installing nothing would send every document wherever PARSER_DOCLING_BASE_URL
+// pointed, which is the state §2.5 replaces — and every other case in this file
+// would still pass, because they all reach a server that is already allowed.
+func TestDoclingRequestsGoThroughTheDialerItWasBuiltWith(t *testing.T) {
+	var mu sync.Mutex
+	var reached []string
+	server := answer(t, http.StatusOK, `{"document":{"md_content":"read"},"status":"success","errors":[]}`)
+
+	through := dialEngine(t)
+	parser := newDoclingParser(server.URL, 5*time.Second,
+		func(ctx context.Context, network, address string) (net.Conn, error) {
+			mu.Lock()
+			reached = append(reached, address)
+			mu.Unlock()
+			return through(ctx, network, address)
+		})
+
+	if _, err := parser.Parse(context.Background(), Request{
+		Filename: "paper.pdf", Category: CategoryPDF,
+		Content: strings.NewReader(testPDF), MaxChars: 1000,
+	}); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reached) == 0 {
+		t.Fatal("the request never passed through the dialer the parser was built with")
 	}
 }
 
@@ -335,7 +384,7 @@ func TestDoclingParserReturnsCancellationAsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := newDoclingParser(server.URL, 5*time.Second).Parse(ctx, Request{
+	_, err := newDoclingParser(server.URL, 5*time.Second, dialEngine(t)).Parse(ctx, Request{
 		Filename: "paper.pdf", Category: CategoryPDF,
 		Content: strings.NewReader(testPDF), MaxChars: 1000,
 	})
@@ -353,7 +402,7 @@ func TestDoclingParserReturnsCancellationAsCancellation(t *testing.T) {
 func TestDoclingParserReportsAFileItCannotRead(t *testing.T) {
 	server, seen := record(t)
 
-	_, err := newDoclingParser(server.URL, 5*time.Second).Parse(context.Background(), Request{
+	_, err := newDoclingParser(server.URL, 5*time.Second, dialEngine(t)).Parse(context.Background(), Request{
 		Filename: "paper.pdf", Category: CategoryPDF, MaxChars: 1000,
 		Content: errorReader{errors.New("the disk went away")},
 	})

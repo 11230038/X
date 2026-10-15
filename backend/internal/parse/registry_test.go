@@ -34,6 +34,7 @@ func newTestRegistry(t *testing.T, doclingURL string) *Registry {
 		DefaultEngine:  EngineText,
 		DoclingBaseURL: doclingURL,
 		Timeout:        5 * time.Second,
+		Dial:           dialEngine(t),
 	})
 	if err != nil {
 		t.Fatalf("NewRegistry() error = %v", err)
@@ -158,6 +159,32 @@ func TestNewRegistryRefusesADefaultEngineItDoesNotHave(t *testing.T) {
 				t.Fatalf("error = %v, want it to name PARSER_DEFAULT_ENGINE", err)
 			}
 		})
+	}
+}
+
+// An engine is an outbound call, and one built without the boundary §2.6
+// describes is precisely the state this build replaces — so the wiring mistake
+// is refused where the registry is built, not at the first upload.
+func TestNewRegistryRefusesADoclingEngineWithNowhereToDial(t *testing.T) {
+	_, err := NewRegistry(Options{
+		DefaultEngine:  EngineText,
+		DoclingBaseURL: "http://docling:5001",
+		Timeout:        time.Second,
+	})
+	if err == nil {
+		t.Fatal("NewRegistry() error = nil, want an error")
+	}
+	if !strings.Contains(err.Error(), "dialer") {
+		t.Fatalf("error = %v, want it to say that no dialer was supplied", err)
+	}
+}
+
+// The refusal is about an engine that leaves this machine, not about the option
+// itself: a build with no docling engine makes no outbound call, so an empty
+// address and no dialer is a working registry rather than a mistake.
+func TestNewRegistryBuildsWithoutADialerWhenNothingLeavesTheMachine(t *testing.T) {
+	if _, err := NewRegistry(Options{DefaultEngine: EngineText, Timeout: time.Second}); err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
 	}
 }
 

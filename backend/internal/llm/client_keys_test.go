@@ -23,7 +23,7 @@ func newClientWithKeys(t *testing.T, handler http.HandlerFunc, keys KeySource) *
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	client, err := NewClient(server.URL, keys, 5*time.Second)
+	client, err := NewClient(server.URL, keys, 5*time.Second, testDial(t))
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
@@ -34,9 +34,22 @@ func newClientWithKeys(t *testing.T, handler http.HandlerFunc, keys KeySource) *
 // built. Left until the first call it would send an unauthenticated request and
 // surface as a provider error inside somebody's turn.
 func TestAClientWithoutAKeySourceIsRefused(t *testing.T) {
-	client, err := NewClient("http://127.0.0.1:1", nil, time.Second)
+	client, err := NewClient("http://127.0.0.1:1", nil, time.Second, testDial(t))
 	if !errors.Is(err, ErrNoKeySource) {
 		t.Fatalf("NewClient() error = %v, want ErrNoKeySource", err)
+	}
+	if client != nil {
+		t.Error("a client was returned alongside the failure")
+	}
+}
+
+// A client built without a boundary is refused for the same reason, and the
+// refusal is its own: a deployment whose keys are fine and whose dialer is
+// missing has to be told which of the two it is looking at.
+func TestAClientWithoutADialerIsRefused(t *testing.T) {
+	client, err := NewClient("http://127.0.0.1:1", oneKey(testAPIKey), time.Second, nil)
+	if !errors.Is(err, ErrNoDialer) {
+		t.Fatalf("NewClient() error = %v, want ErrNoDialer", err)
 	}
 	if client != nil {
 		t.Error("a client was returned alongside the failure")
@@ -110,7 +123,7 @@ func TestACallThatNeverArrivedSaysNothingAboutTheKey(t *testing.T) {
 	address := server.URL
 	server.Close()
 
-	client, err := NewClient(address, keys, time.Second)
+	client, err := NewClient(address, keys, time.Second, testDial(t))
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}

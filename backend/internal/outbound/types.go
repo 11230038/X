@@ -17,17 +17,24 @@
 // the two policies below are two types, and there is no combined function to
 // call by mistake.
 //
-// There is also no caller. The two scenarios above are a media URL for a
-// channel this product does not have and an MCP server it does not run (§0.2
-// 第 5 条), so nothing in this repository reaches this package yet. That does
-// not change what a correct policy is, but it changes how one can be shown to
-// be correct: by its tests, and by nothing else. A security check with no
-// caller guards nothing today, and this file says so rather than implying
-// otherwise.
+// The two scenarios above are still not the ones calling. The media URL is for
+// a channel this product does not have and the MCP server is one it does not
+// run (§0.2 第 5 条), so neither of those callers exists. What V6 adds is a
+// different caller: dialer.go turns a policy into the dial hook of the three
+// clients this process already has, and the address it checks is one the
+// deployment's own operator wrote into configuration. So the record of "no
+// caller" is closed, and what it was closed with is worth stating exactly — what
+// this now prevents is a mistyped or copied base URL sending a conversation to
+// the deployment's own network. It is not a defence against a request that
+// carries an address, because no request carries one (§2.6). A check written for
+// an attacker and currently pointed at a typo is a check that has to stay
+// correct anyway, which is why the policies above are stated in terms of the
+// address and not in terms of who is asking.
 //
 // The package is pure. It classifies addresses and answers questions about
 // them; it does not resolve names, parse URLs, or make requests. Resolution is
-// I/O and belongs to the caller, which then hands the whole answer to Check.
+// I/O and belongs to the caller, which then hands the whole answer to Check —
+// dialer.go is that caller, and it is why Check takes a list rather than a name.
 package outbound
 
 import (

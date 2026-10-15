@@ -69,6 +69,9 @@ func NewClient(opts Options) (*Client, error) {
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.ResponseHeaderTimeout = opts.Timeout
+	// The one hook every connection this client makes has to pass through; see
+	// Options.Dial and §2.5.
+	transport.DialContext = opts.Dial
 	return &Client{
 		baseURL:   strings.TrimSuffix(opts.BaseURL, "/"),
 		apiKey:    opts.APIKey,

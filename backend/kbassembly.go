@@ -17,6 +17,7 @@ import (
 	"backend/internal/config"
 	"backend/internal/embed"
 	"backend/internal/kb"
+	"backend/internal/outbound"
 )
 
 // newEmbedder builds the provider this process embeds with.
@@ -25,6 +26,14 @@ import (
 // and a question as it is searched for. Both have to be the same model — the
 // base they meet in is the one that recorded which model its vectors came from.
 func newEmbedder(cfg config.Config) (embed.Embedder, error) {
+	// The provider is a host on the internet — unlike the document engine, which
+	// is a service beside this deployment — so its policy is the external one
+	// (§2.6). The policy is chosen here because this is where the address comes
+	// from; internal/outbound is told which one applies and never reads config.
+	dial, err := outbound.DialContext(outbound.ExternalMediaPolicy{})
+	if err != nil {
+		return nil, fmt.Errorf("initialize the embedding client's boundary: %w", err)
+	}
 	embedder, err := embed.NewClient(embed.Options{
 		BaseURL:   cfg.Embedding.BaseURL,
 		APIKey:    cfg.Embedding.APIKey,
@@ -32,6 +41,7 @@ func newEmbedder(cfg config.Config) (embed.Embedder, error) {
 		Dimension: cfg.Embedding.Dimension,
 		Timeout:   cfg.Embedding.Timeout,
 		BatchSize: cfg.Embedding.BatchSize,
+		Dial:      dial,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialize the embedding provider: %w", err)

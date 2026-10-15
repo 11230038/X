@@ -25,6 +25,7 @@ import (
 
 	"backend/internal/llm"
 	"backend/internal/notebook"
+	"backend/internal/outbound"
 )
 
 // judgeKey is the credential these cases call with. It is a key *source* rather
@@ -37,9 +38,18 @@ func (k judgeKey) Succeeded(string)   {}
 func (k judgeKey) RateLimited(string) {}
 
 // newJudgeClient is the provider these cases hand to the judge.
+//
+// The provider is served by an httptest server on this machine, so the client is
+// built behind the policy that admits loopback: which policy the judge's model
+// gets in a deployment is the assembly point's decision (§2.6), and what is
+// under test here is what the judge makes of a wire reply.
 func newJudgeClient(t *testing.T, baseURL string) llm.Provider {
 	t.Helper()
-	client, err := llm.NewClient(baseURL, judgeKey("judge-test-key"), 5*time.Second)
+	dial, err := outbound.DialContext(outbound.LANServicePolicy{})
+	if err != nil {
+		t.Fatalf("build the test dialer: %v", err)
+	}
+	client, err := llm.NewClient(baseURL, judgeKey("judge-test-key"), 5*time.Second, dial)
 	if err != nil {
 		t.Fatalf("llm.NewClient() error = %v", err)
 	}

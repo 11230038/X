@@ -12,15 +12,34 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"backend/internal/outbound"
 )
 
 const testAPIKey = "unit-test-api-key"
+
+// testDial is the boundary these cases run behind.
+//
+// Every client now needs a dialer (§2.5), and the provider these cases talk to
+// is an httptest server on this machine — so the policy that admits loopback is
+// the one that lets them reach it. Which policy a client gets in a deployment
+// is the assembly point's decision (§2.6) and is asserted in internal/outbound;
+// what is under test here is the protocol, behind the same hook production uses.
+func testDial(t *testing.T) outbound.DialFunc {
+	t.Helper()
+	dial, err := outbound.DialContext(outbound.LANServicePolicy{})
+	if err != nil {
+		t.Fatalf("build the test dialer: %v", err)
+	}
+	return dial
+}
 
 // oneKey is the smallest key source there is: the same credential every time.
 // What a pool does with several is internal/keypool's business; what these cases
@@ -77,7 +96,7 @@ func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	client, err := NewClient(server.URL, oneKey(testAPIKey), 5*time.Second)
+	client, err := NewClient(server.URL, oneKey(testAPIKey), 5*time.Second, testDial(t))
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
@@ -91,6 +110,42 @@ func streamHandler(t *testing.T, body string) http.HandlerFunc {
 		if _, err := io.WriteString(w, body); err != nil {
 			t.Errorf("write stream: %v", err)
 		}
+	}
+}
+
+// The dialer is not an ornament. A client that took one and installed nothing
+// would pass every other case in this package — the call would still be made,
+// just without the boundary §2.5 put there — so this is the case that fails when
+// the transport hook is dropped.
+func TestARequestGoesThroughTheDialerTheClientWasBuiltWith(t *testing.T) {
+	var mu sync.Mutex
+	var reached []string
+	body := sseData(
+		`{"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}`,
+		`[DONE]`,
+	)
+	server := httptest.NewServer(streamHandler(t, body))
+	t.Cleanup(server.Close)
+
+	through := testDial(t)
+	client, err := NewClient(server.URL, oneKey(testAPIKey), 5*time.Second,
+		func(ctx context.Context, network, address string) (net.Conn, error) {
+			mu.Lock()
+			reached = append(reached, address)
+			mu.Unlock()
+			return through(ctx, network, address)
+		})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	if _, err := client.Stream(context.Background(), Request{Model: "deepseek-chat"}, func(Delta) error { return nil }); err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reached) == 0 {
+		t.Fatal("the call never passed through the dialer the client was built with")
 	}
 }
 

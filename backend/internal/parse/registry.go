@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"backend/internal/outbound"
 )
 
 // Options configure a Registry.
@@ -26,6 +28,12 @@ type Options struct {
 	DoclingBaseURL string
 	// Timeout bounds one call to an external engine.
 	Timeout time.Duration
+	// Dial is where an external engine may be reached, produced by
+	// internal/outbound from a policy. It is required whenever an engine that
+	// leaves this machine is configured, which is why it is checked here and not
+	// defaulted: §2.6's boundary is a property of the connection, and a
+	// connection whose address nothing checked is the state this replaces.
+	Dial outbound.DialFunc
 }
 
 // engineKind is one engine this build has, whether or not configuration turned
@@ -60,7 +68,7 @@ var catalogue = []engineKind{
 		categories: []string{CategoryPDF, CategoryDocument},
 		hint:       "PARSER_DOCLING_BASE_URL",
 		enabled:    func(opts Options) bool { return strings.TrimSpace(opts.DoclingBaseURL) != "" },
-		build:      func(opts Options) Parser { return newDoclingParser(opts.DoclingBaseURL, opts.Timeout) },
+		build:      func(opts Options) Parser { return newDoclingParser(opts.DoclingBaseURL, opts.Timeout, opts.Dial) },
 	},
 }
 
@@ -80,6 +88,14 @@ type Registry struct {
 func NewRegistry(opts Options) (*Registry, error) {
 	if opts.Timeout <= 0 {
 		return nil, fmt.Errorf("parse: timeout must be a positive duration")
+	}
+	// Refused here rather than carried as a nil the adapter would have to work
+	// around, and only when an engine actually leaves this machine: a build with
+	// no docling engine makes no outbound call, and requiring a boundary for it
+	// would be requiring an answer to a question nothing asks. What is refused is
+	// a docling engine with a base URL and nowhere it is allowed to dial.
+	if strings.TrimSpace(opts.DoclingBaseURL) != "" && opts.Dial == nil {
+		return nil, fmt.Errorf("parse: PARSER_DOCLING_BASE_URL is set but no outbound dialer was supplied")
 	}
 	engines := make(map[string]Parser, len(catalogue))
 	for _, kind := range catalogue {

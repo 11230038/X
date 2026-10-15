@@ -81,7 +81,7 @@ func TestClientOmitsTheAuthorizationHeaderWithoutAKey(t *testing.T) {
 
 	client, err := NewClient(Options{
 		BaseURL: fake.URL, Model: testModel, Dimension: testDimension,
-		BatchSize: 16, Timeout: 5 * time.Second,
+		BatchSize: 16, Timeout: 5 * time.Second, Dial: testDial(t),
 	})
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
@@ -135,7 +135,7 @@ func TestClientEmbedReportsATimeout(t *testing.T) {
 
 	client, err := NewClient(Options{
 		BaseURL: fake.URL, Model: testModel, Dimension: testDimension,
-		BatchSize: 16, Timeout: 20 * time.Millisecond,
+		BatchSize: 16, Timeout: 20 * time.Millisecond, Dial: testDial(t),
 	})
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
@@ -155,13 +155,17 @@ func TestNewClientRejectsAnUnusableShape(t *testing.T) {
 		{name: "no dimension", mutad: func(o *Options) { o.Dimension = 0 }},
 		{name: "no batch size", mutad: func(o *Options) { o.BatchSize = 0 }},
 		{name: "no timeout", mutad: func(o *Options) { o.Timeout = 0 }},
+		{name: "no dialer", mutad: func(o *Options) { o.Dial = nil }},
 	}
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
+			// Every field is filled and one is taken away: a case that passed
+			// because something else was missing would prove nothing about the
+			// field it names.
 			opts := Options{
 				BaseURL: "http://127.0.0.1:1", Model: testModel, Dimension: testDimension,
-				BatchSize: 16, Timeout: time.Second,
+				BatchSize: 16, Timeout: time.Second, Dial: testDial(t),
 			}
 			testCase.mutad(&opts)
 

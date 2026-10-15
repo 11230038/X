@@ -14,11 +14,17 @@ import (
 //
 // A media URL inside a message is written by whoever sent the message, so a
 // private address there is somebody aiming the product at the deployment's own
-// network. An MCP server's address is written by the operator, and it is
-// normally on that same network. One address, two answers, and the difference
-// is the origin and not the address.
+// network. A service the operator configured — the document parser — is normally
+// on that same network, and the default this build ships with is loopback. One
+// address, two answers, and the difference is the origin and not the address.
 func TestTheSameAddressIsRefusedByOnePolicyAndAllowedByTheOther(t *testing.T) {
-	lan := []string{"192.168.1.10", "10.0.0.5", "172.20.0.1", "fd12:3456::1"}
+	// Loopback is in this list rather than in the refusals below because the
+	// parser's own default is `http://127.0.0.1:5001`: a LAN policy that refused
+	// it would refuse the configuration the deployment starts with.
+	lan := []string{
+		"192.168.1.10", "10.0.0.5", "172.20.0.1", "fd12:3456::1",
+		"127.0.0.1", "::1", "::ffff:127.0.0.1",
+	}
 	external := Policy(ExternalMediaPolicy{})
 	service := Policy(LANServicePolicy{})
 
@@ -41,16 +47,17 @@ func TestTheSameAddressIsRefusedByOnePolicyAndAllowedByTheOther(t *testing.T) {
 }
 
 // TestWhatBothPoliciesRefuse states the intersection, so that the difference
-// asserted above cannot be widened: "allows private space" is not "allows
-// whatever is nearby".
+// asserted above cannot be widened: "the operator's own network" is not
+// "whatever is nearby", and the widening stops at private space and this host.
+//
+// Loopback is deliberately absent — the LAN policy allows it for the reason the
+// case above gives — and what is left is the set neither policy will ever
+// reach, which is the set that would be a defect in both.
 func TestWhatBothPoliciesRefuse(t *testing.T) {
 	tests := []struct {
 		address string
 		why     string
 	}{
-		{"127.0.0.1", "loopback is this host"},
-		{"::1", "loopback is this host"},
-		{"::ffff:127.0.0.1", "loopback in its IPv6 spelling"},
 		{"169.254.169.254", "the metadata service hands out credentials"},
 		{"169.254.1.1", "link-local is not a destination"},
 		{"fe80::1%eth0", "link-local is not a destination"},
@@ -135,14 +142,24 @@ func TestANameWithSeveralAddressesIsAllowedOnlyIfAllOfThemAre(t *testing.T) {
 	}
 
 	// The same addresses through the other policy: the LAN one allows the
-	// private address it was written for and still refuses the loopback that
-	// came with it.
+	// private address it was written for and the loopback the parser defaults
+	// to, and still refuses what came with them.
 	private := netip.MustParseAddr("192.168.1.10")
 	if err := Check(LANServicePolicy{}, []netip.Addr{private, good}); err != nil {
 		t.Errorf("Check() error = %v, want a LAN service on a private address to be allowed", err)
 	}
-	if err := Check(LANServicePolicy{}, []netip.Addr{private, loopback}); !errors.Is(err, ErrBlocked) {
-		t.Errorf("Check() error = %v, want the loopback refused even beside an allowed address", err)
+	if err := Check(LANServicePolicy{}, []netip.Addr{private, loopback}); err != nil {
+		t.Errorf("Check() error = %v, want loopback allowed for a service beside the product", err)
+	}
+	// One address each of the two kinds the widening does not reach, so that
+	// "allows loopback" cannot quietly become "allows anything on this host's
+	// link", which is where the credentials are.
+	for _, refused := range []netip.Addr{
+		netip.MustParseAddr("169.254.169.254"), netip.MustParseAddr("fe80::1"),
+	} {
+		if err := Check(LANServicePolicy{}, []netip.Addr{good, refused}); !errors.Is(err, ErrBlocked) {
+			t.Errorf("Check(%s) error = %v, want it refused even beside a public address", refused, err)
+		}
 	}
 }
 

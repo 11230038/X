@@ -9,12 +9,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"backend/internal/outbound"
 )
 
 const (
@@ -104,6 +107,22 @@ func server(t *testing.T, recorder *recorder) *httptest.Server {
 	}))
 }
 
+// testDial is the boundary these cases run behind.
+//
+// Every client now needs a dialer (§2.5), and the provider they talk to is an
+// httptest server on this machine — so the policy that admits loopback is the
+// one that lets them reach it. Which policy the embedding client gets in a
+// deployment is the assembly point's decision (§2.6) and is asserted in
+// internal/outbound; what is under test here is what the client sends and reads.
+func testDial(t *testing.T) outbound.DialFunc {
+	t.Helper()
+	dial, err := outbound.DialContext(outbound.LANServicePolicy{})
+	if err != nil {
+		t.Fatalf("build the test dialer: %v", err)
+	}
+	return dial
+}
+
 func newTestClient(t *testing.T, baseURL string, batchSize int) *Client {
 	t.Helper()
 	client, err := NewClient(Options{
@@ -113,11 +132,47 @@ func newTestClient(t *testing.T, baseURL string, batchSize int) *Client {
 		Dimension: testDimension,
 		BatchSize: batchSize,
 		Timeout:   5 * time.Second,
+		Dial:      testDial(t),
 	})
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
 	return client
+}
+
+// The dialer is not an ornament: a client that took one and installed nothing
+// would pass every other case in this package, and would reach whatever address
+// a base URL happens to name (§2.5).
+func TestARequestGoesThroughTheDialerTheClientWasBuiltWith(t *testing.T) {
+	var mu sync.Mutex
+	var reached []string
+	recorder := &recorder{}
+	fake := server(t, recorder)
+	defer fake.Close()
+
+	through := testDial(t)
+	client, err := NewClient(Options{
+		BaseURL: fake.URL, Model: testModel, Dimension: testDimension,
+		BatchSize: 16, Timeout: 5 * time.Second,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			mu.Lock()
+			reached = append(reached, address)
+			mu.Unlock()
+			return through(ctx, network, address)
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	if _, err := client.Embed(context.Background(), []string{"a"}); err != nil {
+		t.Fatalf("Embed() error = %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reached) == 0 {
+		t.Fatal("the call never passed through the dialer the client was built with")
+	}
 }
 
 func TestClientEmbedSendsEveryInputInOrder(t *testing.T) {

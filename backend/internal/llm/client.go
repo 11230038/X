@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"backend/internal/outbound"
 )
 
 const chatCompletionsPath = "/chat/completions"
@@ -58,6 +60,13 @@ func (e *HTTPError) Retryable() bool {
 // provider error in the middle of somebody's turn.
 var ErrNoKeySource = errors.New("llm: a client needs a key source")
 
+// ErrNoDialer is what a client built without a boundary answers. It is refused
+// for the same reason as the line above and not a weaker one: a client whose
+// transport dials wherever a URL says is a client that will send a conversation
+// to the deployment's own network if a base URL is ever mistyped, and the
+// mistake would arrive as a provider error rather than as a refusal.
+var ErrNoDialer = errors.New("llm: a client needs a dialer")
+
 // Client is an OpenAI-compatible chat completions client.
 type Client struct {
 	baseURL string
@@ -75,12 +84,24 @@ var _ Provider = (*Client)(nil)
 // can hold several and rotate them (§17.3) without this package knowing that
 // anybody keeps a pool: what it knows is that somebody can give it the next key
 // and wants to hear how the provider treated it.
-func NewClient(baseURL string, keys KeySource, timeout time.Duration) (*Client, error) {
+//
+// dial is where the request is allowed to go, and it is required — see
+// ErrNoDialer. The provider is somewhere on the internet and this client sends
+// whole conversations to it, so "which addresses may this reach" is not a
+// question the client should be able to be built without an answer to.
+func NewClient(baseURL string, keys KeySource, timeout time.Duration, dial outbound.DialFunc) (*Client, error) {
 	if keys == nil {
 		return nil, ErrNoKeySource
 	}
+	if dial == nil {
+		return nil, ErrNoDialer
+	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.ResponseHeaderTimeout = timeout
+	// The one hook every connection this client makes has to pass through,
+	// including the ones a redirect or a retry causes. Nothing in this package
+	// checks an address anywhere else, and that is the design (§2.5).
+	transport.DialContext = dial
 	return &Client{
 		baseURL: baseURL,
 		keys:    keys,

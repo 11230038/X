@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"backend/internal/outbound"
 )
 
 // Vector is one embedding, as the provider returned it.
@@ -80,6 +82,12 @@ type Options struct {
 	// Timeout bounds how long a request may take to start responding. The
 	// caller's context bounds everything else.
 	Timeout time.Duration
+	// Dial is where this client's requests are allowed to go, produced by
+	// internal/outbound from a policy. It is required, and Validate says so: the
+	// embedding provider is somewhere on the internet and a client that could be
+	// built without an answer to "which addresses may this reach" is the mistake
+	// §2.5 is about.
+	Dial outbound.DialFunc
 }
 
 // Validate checks that a client could work with these options. It deliberately
@@ -103,6 +111,9 @@ func (o Options) Validate() error {
 	}
 	if o.Timeout <= 0 {
 		return fmt.Errorf("embed: timeout must be a positive duration")
+	}
+	if o.Dial == nil {
+		return fmt.Errorf("embed: a dialer is required, so that the client cannot reach an address no policy allowed")
 	}
 	return nil
 }

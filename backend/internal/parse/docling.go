@@ -13,6 +13,8 @@ import (
 	"net/textproto"
 	"strings"
 	"time"
+
+	"backend/internal/outbound"
 )
 
 // convertFilePath is Docling Serve's file conversion endpoint, appended to the
@@ -51,13 +53,27 @@ type doclingParser struct {
 
 var _ Parser = doclingParser{}
 
-func newDoclingParser(baseURL string, timeout time.Duration) doclingParser {
+// newDoclingParser builds the adapter. dial is where this engine's requests are
+// allowed to go, produced by internal/outbound from a policy — and the policy
+// is the LAN one, because this service sits beside the product rather than out
+// on the internet (§2.6).
+//
+// A nil dial is not a state this function handles: NewRegistry refuses it, the
+// way it already refuses a timeout that is not positive, and this constructor
+// is not reachable from anywhere else in the build. It is a parameter and not a
+// default because the default would be silence — the client this replaces had
+// no transport at all, which is precisely how the three clients in this
+// repository ended up with no boundary between them.
+func newDoclingParser(baseURL string, timeout time.Duration, dial outbound.DialFunc) doclingParser {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// The one hook every connection this engine makes has to pass through.
+	transport.DialContext = dial
+	// The whole call is bounded, not just the wait for headers: the answer is a
+	// single body, and a conversion that never finishes holding a worker is the
+	// failure this timeout exists to prevent.
 	return doclingParser{
 		baseURL: strings.TrimSuffix(strings.TrimSpace(baseURL), "/"),
-		// The whole call is bounded, not just the wait for headers: the answer
-		// is a single body, and a conversion that never finishes holding a
-		// worker is the failure this timeout exists to prevent.
-		http: &http.Client{Timeout: timeout},
+		http:    &http.Client{Timeout: timeout, Transport: transport},
 	}
 }
 
