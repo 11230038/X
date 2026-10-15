@@ -12,6 +12,11 @@
 // and migrated the first time a test asks for it. The application's database is
 // never opened, so no test can empty it by accident.
 //
+// One kind of test asks for the other entry point, OpenAt, which creates the
+// database and stops there. Those tests are the ones whose subject is the
+// migrations: they drive the schema with the migration package, so they need a
+// database that nothing has already brought to the current version.
+//
 // The cost of that guarantee is that a run needs a local seekdb. When there is
 // none, these tests fail rather than skip: a suite that quietly passes without
 // touching a database is the state this package exists to end.
@@ -62,6 +67,7 @@ var envFile = func() string {
 type database struct {
 	resource *data.Resource
 	err      error
+	migrated bool
 }
 
 var (
@@ -77,23 +83,111 @@ var (
 // by the suffix, tests inside one are not.
 func Open(t *testing.T, suffix string) *data.Resource {
 	t.Helper()
-	resource, err := acquire(suffix)
+	resource, err := acquire(suffix, true)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
 	return resource
 }
 
+// OpenAt returns the database this test package owns, holding no tables at all.
+//
+// A test that asks for it is testing the migrations themselves: it drives the
+// schema with the migration package and is responsible for where it ends up. The
+// entry point is here because every other one migrates before handing the
+// database over, and a migration is only ever tested by running it over a
+// database that is behind — with rows in the tables it alters and a version table
+// that already has something in it.
+//
+// Emptied, not just created. A test database outlives the run that made it, so
+// "created when missing" would mean the second run of these tests met the version
+// the first run left behind: the upgrade would have nothing to do, the rollback
+// would have nothing to roll back, and both would pass while testing neither. The
+// tables are dropped through the same connection so that the foreign-key checks
+// can be turned off around them; only the database named after the configured one
+// with "_test_" and this suffix appended is ever touched.
+//
+// The suffix names the caller exactly as Open's does, and the two are kept apart:
+// asking for a suffix the other one already opened fails rather than handing back
+// a database in the state the caller did not ask for. A suffix cannot be shared
+// with a test that has already built something on it either, because this empties
+// the database every time it is called.
+func OpenAt(t *testing.T, suffix string) *data.Resource {
+	t.Helper()
+	resource, err := acquire(suffix, false)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	emptyDatabase(t, resource)
+	return resource
+}
+
+// emptyDatabase drops every table the test database holds.
+func emptyDatabase(t *testing.T, resource *data.Resource) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := resource.SQLDB().Conn(ctx)
+	if err != nil {
+		t.Fatalf("take a connection to empty the test database: %v", err)
+	}
+	defer conn.Close()
+
+	rows, err := conn.QueryContext(ctx,
+		"SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()")
+	if err != nil {
+		t.Fatalf("list the tables of the test database: %v", err)
+	}
+	var tables []string
+	for rows.Next() {
+		var table string
+		if err := rows.Scan(&table); err != nil {
+			rows.Close()
+			t.Fatalf("read a table name back: %v", err)
+		}
+		tables = append(tables, table)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatalf("list the tables of the test database: %v", err)
+	}
+	rows.Close()
+
+	if len(tables) == 0 {
+		return
+	}
+	// Dropped over one connection, and with the checks off, because the order the
+	// tables come back in is not a dependency order and there is no reason to make
+	// it one.
+	if _, err := conn.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS = 0"); err != nil {
+		t.Fatalf("turn the foreign-key checks off: %v", err)
+	}
+	for _, table := range tables {
+		if !identifierPattern.MatchString(table) {
+			t.Fatalf("the test database holds a table named %q, which is not a lowercase identifier", table)
+		}
+		if _, err := conn.ExecContext(ctx, "DROP TABLE `"+table+"`"); err != nil {
+			t.Fatalf("drop the table %s: %v", table, err)
+		}
+	}
+	if _, err := conn.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS = 1"); err != nil {
+		t.Fatalf("turn the foreign-key checks back on: %v", err)
+	}
+}
+
 // OpenDatabase is Open for a caller that has a config of its own — a test of
 // this package, or one that wants to watch a connection fail. The suffix is
 // checked here too.
 func OpenDatabase(suffix string, cfg config.DatabaseConfig) (*data.Resource, error) {
+	return openDatabase(suffix, cfg, true)
+}
+
+func openDatabase(suffix string, cfg config.DatabaseConfig, migrate bool) (*data.Resource, error) {
 	name, err := testName(cfg.Name, suffix)
 	if err != nil {
 		return nil, err
 	}
 	cfg.Name = name
-	resource, err := prepare(cfg)
+	resource, err := prepare(cfg, migrate)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"the test database %s at %s:%d (user %s) is not usable: %w\n"+
@@ -104,24 +198,40 @@ func OpenDatabase(suffix string, cfg config.DatabaseConfig) (*data.Resource, err
 	return resource, nil
 }
 
-func acquire(suffix string) (*data.Resource, error) {
+func acquire(suffix string, migrate bool) (*data.Resource, error) {
 	mu.Lock()
 	defer mu.Unlock()
 	if entry, ok := opened[suffix]; ok {
+		if entry.migrated != migrate {
+			return nil, fmt.Errorf(
+				"the test database suffix %q is already open %s",
+				suffix, openedBy(entry.migrated))
+		}
 		return entry.resource, entry.err
 	}
 	var entry database
-	entry.resource, entry.err = open(suffix)
+	entry.migrated = migrate
+	entry.resource, entry.err = open(suffix, migrate)
 	opened[suffix] = entry
 	return entry.resource, entry.err
 }
 
-func open(suffix string) (*data.Resource, error) {
+// openedBy names the entry point that took a suffix, for the message above.
+func openedBy(migrated bool) string {
+	if migrated {
+		return "by Open, which migrates it to the schema this binary carries, so it cannot also be " +
+			"the database a test drives the migrations on: ask for a suffix of your own"
+	}
+	return "by OpenAt, which leaves the schema where the test puts it, so it cannot also be a " +
+		"database that has to be at the current schema: ask for a suffix of your own"
+}
+
+func open(suffix string, migrate bool) (*data.Resource, error) {
 	cfg, err := loadConfiguration()
 	if err != nil {
 		return nil, err
 	}
-	return OpenDatabase(suffix, cfg)
+	return openDatabase(suffix, cfg, migrate)
 }
 
 // loadConfiguration reads the settings the application runs on. A test changes
@@ -134,11 +244,12 @@ func loadConfiguration() (config.DatabaseConfig, error) {
 	return cfg.Database, nil
 }
 
-// prepare creates the database, opens it, and brings the schema to the version
-// this binary carries. Migration is not a step a caller can forget: a test that
-// ran against the previous schema would fail for reasons that have nothing to
-// do with what it is testing.
-func prepare(cfg config.DatabaseConfig) (*data.Resource, error) {
+// prepare creates the database, opens it, and — unless the caller is testing the
+// migrations themselves — brings the schema to the version this binary carries.
+// Migration is not a step a caller can forget: a test that ran against the
+// previous schema would fail for reasons that have nothing to do with what it is
+// testing.
+func prepare(cfg config.DatabaseConfig, migrate bool) (*data.Resource, error) {
 	ctx := context.Background()
 	if err := data.EnsureDatabase(ctx, cfg); err != nil {
 		return nil, err
@@ -157,6 +268,9 @@ func prepare(cfg config.DatabaseConfig) (*data.Resource, error) {
 	if err := resource.Ping(pingCtx); err != nil {
 		resource.Close()
 		return nil, err
+	}
+	if !migrate {
+		return resource, nil
 	}
 	if err := migration.Up(ctx, resource.SQLDB()); err != nil {
 		resource.Close()
