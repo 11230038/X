@@ -19,13 +19,15 @@ import (
 // three tools that touch this table are the three moments of one transaction —
 // put the question, record the verdict, or decline to.
 //
-// **At most one interaction is open on a path at a time.** That rule is here and
-// not in the schema: the reference implementation states it as a partial unique
-// index and seekdb has no partial indexes, so this package keeps it in the
-// service, in one transaction, and the design accepts the consequence — a race
-// between two calls that both read "nothing is open" would produce two open
-// interactions, and §7.1 has a case that goes looking for exactly that (§2.5,
-// §8 第 5 条).
+// **At most one interaction is open on a path at a time.** This table used to
+// keep that rule in the service alone, in one transaction, because the reference
+// implementation states it as a partial unique index and this engine has none —
+// and the service's read cannot hold it: the read matches no row, and under READ
+// COMMITTED a read that matches nothing locks nothing. Migration 00019 moved the
+// rule into the schema in 00009's shape, a generated column plus a unique key, so
+// two racing asks cannot both land. What is left here is the fast path: the read
+// below refuses the ordinary second call without an insert attempt, and the key
+// refuses the one that raced it (§2.7).
 
 // Interaction is one question put to a learner, while it is open.
 //
@@ -123,10 +125,11 @@ type AskRequest struct {
 // now waiting for an answer.
 //
 // The reading of "nothing is open" and the writing of "this one is" happen in
-// one transaction, which is the most the schema allows. A second call that read
-// the same empty answer is refused by nothing here — see the note at the top of
-// this file — and the design would rather have that hole and a case that finds
-// it than a schema this version cannot build.
+// one transaction. The read is what refuses the ordinary second call, and it is
+// not what makes the rule true: a second call that reads the same empty answer
+// is stopped by the unique key migration 00019 builds, and the insert below maps
+// that collision back to the same refusal this read gives — see the note at the
+// top of this file.
 func (s *Service) Ask(ctx context.Context, ask AskRequest, caller authz.Caller) (Interaction, error) {
 	if err := ask.Actor.Validate(); err != nil {
 		return Interaction{}, err

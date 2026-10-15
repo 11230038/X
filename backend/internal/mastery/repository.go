@@ -91,8 +91,9 @@ type Repository interface {
 	// ActiveInteraction reads the path's open interaction — the one question put
 	// and not yet answered. ErrNotFound when there is none.
 	ActiveInteraction(ctx context.Context, pathID string, caller authz.Caller) (Interaction, error)
-	// CreateInteraction records one question that has been put. ErrDuplicate when
-	// the id is taken.
+	// CreateInteraction records one question that has been put. *OpenInteractionError
+	// when the path already has one open — whether this call found it by reading or
+	// collided with it — and ErrDuplicate when the id is taken.
 	CreateInteraction(ctx context.Context, interaction Interaction, caller authz.Caller) error
 	// CloseInteraction closes an open interaction, storing the answer and how it
 	// ended, and reports whether this call is the one that closed it. A false is

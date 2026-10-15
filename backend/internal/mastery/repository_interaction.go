@@ -18,9 +18,11 @@ import (
 // The table has no column for the knowledge point and none for the question id,
 // so the coordinate travels in question_json exactly as an evidence's coordinate
 // travels in its extra column (§2.2). What it *does* have is a way of saying
-// "this is still open", and it is the only place the design needs one: the
-// result column is NULL until something closes the row, which is what "at most
-// one live interaction per path" is enforced against (§2.5).
+// "this is still open": the result column is NULL until something closes the
+// row, and migration 00019 turned that fact into the constraint "at most one
+// live interaction per path" by putting a unique key over a generated column
+// that carries the path while the row is open and NULL once it is closed
+// (§2.7).
 
 // interactionExtra is the coordinate an interaction stores: which question was
 // asked, and about what.
@@ -40,11 +42,11 @@ type interactionExtra struct {
 
 // ActiveInteraction reads the path's open interaction.
 //
-// A path can only have one at a time — the service refuses to open a second —
-// but the table has no constraint that says so, so this read names an order
-// rather than assuming there is one row: the oldest open interaction is the one
-// that is waiting, and a case that found two would get the same answer every
-// time rather than whichever row the engine happened to reach first.
+// There is at most one, and migration 00019's unique key is what says so now
+// rather than the service's read. The order is kept anyway: it costs a clause and
+// it is the difference between an answer this code chose and whichever row the
+// engine reached first, which is the difference that matters the day the
+// constraint stops being the only thing holding the rule.
 func (r *GORMRepository) ActiveInteraction(ctx context.Context, pathID string, caller authz.Caller) (Interaction, error) {
 	if err := r.ready(); err != nil {
 		return Interaction{}, err
@@ -84,6 +86,19 @@ func (r *GORMRepository) ActiveInteraction(ctx context.Context, pathID string, c
 }
 
 // CreateInteraction records one question that has been put.
+//
+// This insert is where "at most one open interaction per path" is held. Migration
+// 00019 puts a unique key over a generated column that carries the path while the
+// row is open and NULL once it is closed, so of two racing inserts the first
+// commits and the second is told the key already exists — 00009's design, on this
+// table, and it is here because the service's read cannot hold the rule: the read
+// matches no row, and under READ COMMITTED a read that matches nothing locks
+// nothing (§2.7).
+//
+// A collision is therefore not a defect to report as one. It is the refusal Ask
+// would have given if it had seen the row, so it is mapped back to the same
+// error — same type, same fields — which is what lets a model that lost the race
+// carry on with the question that is waiting instead of being handed a 500.
 func (r *GORMRepository) CreateInteraction(ctx context.Context, interaction Interaction, caller authz.Caller) error {
 	if err := r.ready(); err != nil {
 		return err
@@ -108,7 +123,31 @@ func (r *GORMRepository) CreateInteraction(ctx context.Context, interaction Inte
 		Question:      datatypes.JSON(extra),
 		CreatedAt:     interaction.CreatedAt,
 	}
-	return duplicateOr(r.db.WithContext(ctx).Create(&record).Error, "record interaction %s", interaction.ID)
+	err = r.db.WithContext(ctx).Create(&record).Error
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrDuplicatedKey) {
+		return fmt.Errorf("record interaction %s: %w", interaction.ID, err)
+	}
+
+	// Which key was hit is not in the error, so the answer is read back: the
+	// unique key is what a racing ask collides with, but a repeated interaction id
+	// collides with the primary key and is a caller's fault rather than a race.
+	// The read is this package's own, so the refusal it produces is the one Ask
+	// produces in the case it can see for itself.
+	//
+	// It sees the winner's row because this engine runs at READ COMMITTED: the row
+	// that caused the collision is committed by definition — an uncommitted one
+	// would have blocked the insert instead of failing it — and a statement under
+	// that isolation reads the latest committed data. Under REPEATABLE READ this
+	// would answer ErrDuplicate instead, which is the worse of the two errors but
+	// still not a wrong row, and the concurrency case is what would notice.
+	open, readErr := r.ActiveInteraction(ctx, interaction.PathID, caller)
+	if readErr != nil {
+		return fmt.Errorf("%w: record interaction %s", ErrDuplicate, interaction.ID)
+	}
+	return &OpenInteractionError{Interaction: open}
 }
 
 // CloseInteraction closes an open interaction.

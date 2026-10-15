@@ -4,18 +4,21 @@ package mastery
 // seekdb.
 //
 // Two rules live here and both are storage claims. "At most one question is open
-// on a path" is kept by the service in one transaction, because the reference
-// implementation states it as a partial unique index and this engine has none, so
-// what it is worth depends on whether the read and the write really happen
-// together. And "a skip is not a wrong answer" is a claim about a table that must
-// stay empty: the case counts the evidence rows rather than reading the verdict,
-// because the verdict is what would be right and the rows are what the gate
-// counts.
+// on a path" is held by migration 00019's unique key over a generated column, so
+// what the cases below watch is the loser of a race: it meets that key, and the
+// insert is what turns the collision back into the refusal the service's own read
+// gives. The read is the fast path for a second caller that is not racing, and it
+// is not what makes the rule true. And "a skip is not a wrong answer" is a claim
+// about a table that must stay empty: the case counts the evidence rows rather
+// than reading the verdict, because the verdict is what would be right and the
+// rows are what the gate counts.
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -324,6 +327,96 @@ func TestDBASkipEndsTheQuestionAndWritesNoObservation(t *testing.T) {
 	}
 	if got := h.countRows(t, "mastery_learning_evidences"); got != 0 {
 		t.Errorf("%d observations are stored, want still none", got)
+	}
+}
+
+// The rule above, under the one condition the service's read cannot survive:
+// several asks that all read "nothing is open" before any of them has written.
+//
+// What refuses the second writer is not that read — under READ COMMITTED a read
+// matching no row locks nothing, which is the hole 00009 measured on turns — but
+// migration 00019's unique key. So what this case watches is the loser: it must
+// be told the same thing the slow second caller is told, with the question that
+// is waiting inside the error, rather than a duplicate-key failure arriving at
+// the caller as a 500.
+func TestDBOnlyOneOpenInteractionPerPathSurvivesConcurrency(t *testing.T) {
+	h := newHarness(t)
+	actor := h.conversation(t, "s_1", "t_1")
+	h.create(t, "mp_1", "学会闭包", actor)
+	ctx := context.Background()
+
+	const askers = 8
+	type outcome struct {
+		asked Interaction
+		err   error
+	}
+	results := make([]outcome, askers)
+	// The asks are held at the gate until every goroutine is running, so that they
+	// overlap rather than queue behind each other's start-up.
+	gate := make(chan struct{})
+	var raised sync.WaitGroup
+	for i := range askers {
+		raised.Add(1)
+		go func() {
+			defer raised.Done()
+			<-gate
+			asked, err := h.service.Ask(ctx, AskRequest{
+				PathID: "mp_1", Actor: actor,
+				KnowledgePointID: "kp_capture", QuestionID: fmt.Sprintf("qn_%d", i),
+			}, h.caller)
+			results[i] = outcome{asked: asked, err: err}
+		}()
+	}
+	close(gate)
+	raised.Wait()
+
+	var opened Interaction
+	accepted := 0
+	refused := 0
+	for i, result := range results {
+		if result.err == nil {
+			accepted++
+			opened = result.asked
+			continue
+		}
+		if !errors.Is(result.err, ErrOpenInteraction) {
+			t.Errorf("ask %d: %v, want the refusal about the question that is already open", i, result.err)
+			continue
+		}
+		var waiting *OpenInteractionError
+		if !errors.As(result.err, &waiting) {
+			t.Errorf("ask %d: %v, want the open question carried with the refusal", i, result.err)
+			continue
+		}
+		// The refusal is only worth carrying if it names the question that is
+		// there: a model handed the id can pick that question back up.
+		if waiting.Interaction.ID == "" || waiting.Interaction.QuestionID == "" {
+			t.Errorf("ask %d: the refusal names %+v", i, waiting.Interaction)
+		}
+		refused++
+	}
+	if accepted != 1 {
+		t.Fatalf("%d asks were accepted, want exactly one", accepted)
+	}
+	if refused != askers-1 {
+		t.Fatalf("%d asks were refused as a race, want %d", refused, askers-1)
+	}
+	// Every refusal names the same interaction, and it is the one that opened:
+	// there is one open question, not one per loser.
+	for i, result := range results {
+		if result.err == nil {
+			continue
+		}
+		var waiting *OpenInteractionError
+		if errors.As(result.err, &waiting) && waiting.Interaction.ID != opened.ID {
+			t.Errorf("ask %d: the refusal names %s, want the question that opened: %s",
+				i, waiting.Interaction.ID, opened.ID)
+		}
+	}
+	// And the table holds one open row, which is the constraint seen from the
+	// storage end rather than from the callers'.
+	if got := h.countRows(t, "mastery_interactions"); got != 1 {
+		t.Errorf("%d interactions are stored, want one", got)
 	}
 }
 
