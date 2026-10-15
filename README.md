@@ -76,7 +76,7 @@ docker start seekdb
 - 文件上传：`UPLOAD_ROOT`、`UPLOAD_MAX_FILE_BYTES`、`UPLOAD_MAX_REQUEST_BYTES`
 - seekdb：`DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`、`DB_CHARSET`、`DB_COLLATION`、`DB_TLS`、`DB_TIMEZONE`、`DB_PING_TIMEOUT`
 - 连接池：`DB_MAX_OPEN_CONNS`、`DB_MAX_IDLE_CONNS`、`DB_CONN_MAX_LIFETIME`、`DB_CONN_MAX_IDLE_TIME`
-- 认证：`AUTH_JWT_SECRET`、`AUTH_JWT_ISSUER`、`AUTH_TOKEN_TTL`
+- 认证：`AUTH_JWT_SECRET`、`AUTH_JWT_ISSUER`、`AUTH_TOKEN_TTL`、`AUTH_LOCKOUT_THRESHOLD`（V6）、`AUTH_LOCKOUT_WINDOW`（V6）、`AUTH_LOCKOUT_DURATION`（V6）
 - 对话模型：`LLM_PROVIDER`、`LLM_BASE_URL`、`LLM_MODEL`、`LLM_API_KEYS`、`LLM_KEY_FAILURE_THRESHOLD`、`LLM_KEY_COOLDOWN`、`LLM_TIMEOUT`、`LLM_TASK_MODEL`、`LLM_TASK_MAX_TOKENS`、`LLM_CAPABILITY_CONFIG_JSON`
 - 一轮的边界：`TURN_INPUT_TIMEOUT`、`TURN_MAX_ROUNDS`、`TURN_MAX_ATTACHMENT_BYTES`
 - 嵌入模型（V2）：`EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_API_KEY`、`EMBEDDING_DIMENSION`、`EMBEDDING_TIMEOUT`、`EMBEDDING_BATCH_SIZE`
@@ -98,7 +98,9 @@ docker start seekdb
 
 V4 的两个新能力（`mastery_path` / `immersive_reading`）**都只走 `responding` 这一个阶段**，它们在 `LLM_CAPABILITY_CONFIG_JSON` 里各有一条自己的条目，而这两条只声明 `responding`——与 `chat` 同名，所以按阶段名取 `max_tokens` 的查找命中；`immersive_reading` 的 `context_budget_tokens` 比其他能力大一档（48000），因为一轮阅读动辄带进一整段材料。四个 `MASTERY_*` 与一个 `DASHBOARD_RECENT_LIMIT` 是产品参数（同时推进几条路径、连对几次升档、一次取多少条），另外九个是阅读与 Memory 的规模与阈值。`MEMORY_SENSITIVE_KINDS` 是**唯一一个逗号分隔的集合**：它点的是部署**不信任**的 kind（默认 `preference,health,relationship,credential`），列进去的观察永不自动成为事实，但用户自己写下的事实不受它影响。`MEMORY_MAX_FACTS_PER_SURFACE` 截的是整份综合而不是四个列表各自（见 `V4设计方案.md` §0.3 第 4 条）。
 
-V5 的十七个新键同样没有代码默认值——**缺键是启动失败，不是程序替部署编一个数**（`LLM_API_KEYS` 是第二版改名的那个旧键，不重复计）。它们分成六组：两个 `LLM_KEY_*` 是 key 池的两个阈值——连续失败几次把一把 key 打进冷却、冷却多久（冷却以 429 为准：500 是上游不舒服、401 是键配错了，都不该用一次 60 秒的冷却把配置错误伪装成暂时故障）；三个 `AUTHZ_*` 说的不是规则而是**基线**（规则在 `internal/authz` 里：`AUTHZ_DEFAULT_PRESET` 只决定新账号落在哪个 preset 上，两个 `AUTHZ_LEARNER_*` 只能在 Learner 的地板之上**往上加**，写错只会让它够得着更多、不会让它够不着）；两个 `AUDIT_*` 与三个 `USAGE_*` 各含一个保留期，而**保留期只被一条按窗口删的语句读到，不起定时作业**（清理由调用方触发，与"租约过期是一次比较"同一条）；四个 `RATE_LIMIT_*` 里三个是每账号每类动作的令牌桶速率、`BURST` 是三个桶共用的容量（速率写 `0` 表示这一类不限，而 `BURST` 不能是 `0`——那是三个桶一个令牌都装不下）；三个 `WORKSPACE_*` 里的 `WORKSPACE_ARCHIVE_ROOT` 与 `UPLOAD_ROOT` 是**两个目录而不是一个的两种叫法**，`MAX_ARCHIVE_BYTES` 同时管读和写，`JOB_TIMEOUT` 是作业的墙钟上限。每一个键的取值理由都写在 [backend/.env.example](backend/.env.example) 那一行上面。
+V5 的十七个新键同样没有代码默认值——**缺键是启动失败，不是程序替部署编一个数**（`LLM_API_KEYS` 是第二版改名的那个旧键，不重复计）。它们分成六组：两个 `LLM_KEY_*` 是 key 池的两个阈值——连续失败几次把一把 key 打进冷却、冷却多久（冷却以 429 为准：500 是上游不舒服、401 是键配错了，都不该用一次 60 秒的冷却把配置错误伪装成暂时故障）；三个 `AUTHZ_*` 说的不是规则而是**基线**（规则在 `internal/authz` 里：`AUTHZ_DEFAULT_PRESET` 只决定新账号落在哪个 preset 上，两个 `AUTHZ_LEARNER_*` 只能在 Learner 的地板之上**往上加**，写错只会让它够得着更多、不会让它够不着）；两个 `AUDIT_*` 与三个 `USAGE_*` 各含一个保留期，而**保留期只被一条按窗口删的语句读到，不起定时作业**（清理由调用方触发，与"租约过期是一次比较"同一条；**V6 给了那个调用方**——`go run ./cmd/cleanup`，见下）；四个 `RATE_LIMIT_*` 里三个是每账号每类动作的令牌桶速率、`BURST` 是三个桶共用的容量（速率写 `0` 表示这一类不限，而 `BURST` 不能是 `0`——那是三个桶一个令牌都装不下）；三个 `WORKSPACE_*` 里的 `WORKSPACE_ARCHIVE_ROOT` 与 `UPLOAD_ROOT` 是**两个目录而不是一个的两种叫法**，`MAX_ARCHIVE_BYTES` 同时管读和写，`JOB_TIMEOUT` 是作业的墙钟上限。每一个键的取值理由都写在 [backend/.env.example](backend/.env.example) 那一行上面。
+
+V6 只加了三个键，都在认证那一组：`AUTH_LOCKOUT_THRESHOLD` / `AUTH_LOCKOUT_WINDOW` / `AUTH_LOCKOUT_DURATION`——**窗口内错够几次就锁、窗口多长、锁多久**，是三个可以被分别质疑的量，所以是三个键而不是一个。它们与其余键同级：没有代码默认值，缺一个就是启动失败。**阈值必须是正整数**：写成 `0` 会让第一次密码错误就锁定，没有哪种读法是一个部署想要的，所以 `Validate` 直接拒它（`internal/config/auth.go:48`）。三个键与 `.env.example` 里的注释都写明了一件事：**锁定只挡登录，不挡已经拿到的 token**——要踢掉已登录的会话得走 `POST /auth/logout` 或管理员那条吊销。
 
 `LLM_API_KEYS`、`EMBEDDING_API_KEY` 与 `AUTH_JWT_SECRET` 同级：不写日志、不进错误信息、不进响应体，占位值不替换会让服务停在启动阶段。
 
@@ -140,6 +142,8 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `POST` | `/api/v1/auth/register` | 注册并直接返回登录态，成功返回 201 |
 | `POST` | `/api/v1/auth/login` | 用户名密码登录，成功返回 200 |
 | `GET` | `/api/v1/auth/me` | 返回当前登录用户 |
+| `POST` | `/api/v1/auth/logout` | 登出：撤回该账号的全部 token（**全端下线**），204 |
+| `PUT` | `/api/v1/me/password` | 改密，body `{"old_password","new_password"}`；成功后**全部 token 作废，包括发起这次请求的那个**，204 |
 | `POST` | `/api/v1/sessions` | 建会话，成功返回 201 |
 | `GET` | `/api/v1/sessions` | 会话列表；`?deleted=true` 看回收站，`?limit=&offset=` 分页 |
 | `GET` | `/api/v1/sessions/{id}` | 单个会话 |
@@ -214,6 +218,8 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `GET` | `/api/v1/audit` | 审计流水，管理员专属；`?actor_id=&subject_id=&action=&target_kind=&target_id=&since=&until=&limit=` 逐条收窄，认不出的取值报 400 而不是忽略 |
 | `GET` | `/api/v1/admin/users` | 账号列表（`role` / `preset` / 是否禁用） |
 | `PATCH` | `/api/v1/admin/users/{userID}` | 改 `preset`；**会把权限清空的改动被拒**（400 `policy_would_be_empty`） |
+| `DELETE` | `/api/v1/admin/users/{userID}/sessions` | **吊销**：把该账号的全部 token 作废（写 `token_valid_after`），204，写审计 |
+| `DELETE` | `/api/v1/admin/users/{userID}/lock` | **解锁**：清掉失败计数与锁定，204，写审计 |
 | `GET` / `POST` / `DELETE` | `/api/v1/admin/users/{userID}/grants` | 逐项授权的读 / 开 / 关；写成 body `{"kind","id","allowed"}`，关掉一项时 `DELETE` 也带 body |
 | `GET` / `POST` / `DELETE` | `/api/v1/admin/guardians` | Guardian 关系的列表 / 建立 / 撤销；建立带 `{"guardian_id","learner_id","permissions"?}`，撤销带 `{"link_id"}` |
 | `GET` / `POST` / `DELETE` | `/api/v1/admin/guardians/{linkID}/permissions` | 逐项 permission 的读 / 授 / 撤；带 `{"permission"}` |
@@ -221,6 +227,7 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `GET` | `/api/v1/guardian/learners/{userID}/reports` | 学习报告；**需要 `view_reports`，而且每一次读都写一行审计**（AC-11） |
 | `POST` | `/api/v1/workspace/exports` | 导出一个包，body `{"refs":[{"kind","id"}]}`；`kind` 是 `session` / `material` / `question` / `knowledge_base` |
 | `GET` | `/api/v1/workspace/exports` | 导出作业列表 |
+| `GET` | `/api/v1/workspace/exports/{jobID}/content` | **下载包**；`application/zip` 流式返回，带 `Content-Disposition` 与 `nosniff`。**第二处不走 JSON 信封**，与文件库那条下载同一个套路 |
 | `POST` | `/api/v1/workspace/imports/preview` | 预览一个包，`multipart/form-data` 字段固定为 `file`；**零写入** |
 | `POST` | `/api/v1/workspace/imports` | 提交一次导入，body `{"job_id"}`（预览给的那个） |
 | `GET` | `/api/v1/workspace/jobs/{jobID}` | 作业状态：state / 清单 / 计数 / 已经落了哪些 |
@@ -272,7 +279,22 @@ handler 只提供自己的 payload，`request_id` 由 `httpx` 统一附加，成
 
 `GET /api/v1/auth/me` 返回同样的 envelope，`data` 为 `{ "user": { ... } }`，不包含 token。
 
-token 是 HS256 JWT，`iss` 为 `AUTH_JWT_ISSUER`，`sub` 是 `user_id`，有效期由 `AUTH_TOKEN_TTL` 决定。受保护接口通过 `Authorization: Bearer <token>` 携带；除了校验签名、签发者与过期时间（含 30 秒宽限），服务端每次请求都会按 `sub` 重新读取用户，因此删除或禁用账号会立即生效，无需等待 token 过期。当前没有刷新 token、吊销列表或登出接口：登出只是客户端丢弃 token，该 token 在过期前仍然有效。
+token 是 HS256 JWT，`iss` 为 `AUTH_JWT_ISSUER`，`sub` 是 `user_id`，有效期由 `AUTH_TOKEN_TTL` 决定。受保护接口通过 `Authorization: Bearer <token>` 携带；除了校验签名、签发者与过期时间（含 30 秒宽限），服务端每次请求都会按 `sub` 重新读取用户，因此删除或禁用账号会立即生效，无需等待 token 过期。**从 V6 起 token 可以被撤回**：`users.token_valid_after` 存一个时刻，签发时间早于它（`iat <= token_valid_after`，含同一秒）的 token 一律作废——`POST /auth/logout` 会把它写成一刻，`PUT /me/password` 改密成功后也一样，管理员的 `DELETE /admin/users/{userID}/sessions` 也一样。**登出是全端下线**：本仓库没有"设备"这个概念，所以拿不出只踢一台机器的答案（见下）。
+
+V6 的四个路由：
+
+| method | path | 面 | 说明 |
+| --- | --- | --- | --- |
+| `POST` | `/api/v1/auth/logout` | `authenticated`，**无面** | 撤回该账号的全部 token，204。**不补发新 token**——客户端重新登录 |
+| `PUT` | `/api/v1/me/password` | `authenticated`，**无面** | body `{"old_password","new_password"}`；要旧密码，成功后撤回全部 token（含自己），204 |
+| `DELETE` | `/api/v1/admin/users/{userID}/sessions` | `administrative` | 撤回目标账号的全部 token，204，写审计 `account.sessions_revoked` |
+| `DELETE` | `/api/v1/admin/users/{userID}/lock` | `administrative` | 清掉目标账号的失败计数与锁定，204，写审计 `account.unlocked` |
+
+两条管理员路由**按账号的属性命名而不是按动作命名**——锁是账号有的一样东西，会话是它持有的一样东西，所以两条都是账号下的 `DELETE`；两条都写一行审计，`subject` 是那个账号，因为**动手的管理员与被动到的账号是两个人**。
+
+`PUT /me/password` 是这套 API 的第一个 `PUT`。**改密之后不补发 token**是有意的：补发要求新 token 的 `iat` 晚于刚写入的 `token_valid_after`，而在秒级精度下那意味着"写入与签发落在同一秒"，把一条安全规则压在一个时间巧合上不值得；改密要求重新登录本身也是常见且诚实的产品行为。这条裁定有一条用例钉着（改密后两个 token 都得是 401）。
+
+登录失败会被锁定：窗口内错满 `AUTH_LOCKOUT_THRESHOLD` 次之后，**即使密码正确也是 403 `account_locked`**，直到 `AUTH_LOCKOUT_DURATION` 过去。锁定**只挡登录，不挡已经拿到的 token**——要踢掉已登录的会话，走上面那四条。代价要说清楚：**失败计数按用户名计，所以任何人都可以拿一个已知的用户名把那个人锁在门外**；这是这个机制的固有属性而不是实现缺陷，缓解手段是阈值 + 窗口 + 管理员解锁（上表最后一条）。
 
 为防用户名枚举，未知用户名与错误密码返回完全相同的 401 `invalid_credentials`，且未知用户名也会执行一次等成本的 bcrypt 比较；账号禁用状态只在密码验证通过后才返回。
 
@@ -287,11 +309,13 @@ token 是 HS256 JWT，`iss` 为 `AUTH_JWT_ISSUER`，`sub` 是 `user_id`，有效
 | 用户名已存在（注册） | 409 | `username_taken` |
 | 用户名或密码错误（登录） | 401 | `invalid_credentials` |
 | 账号已禁用（登录 / 受保护接口） | 403 | `account_disabled` |
+| 账号被失败锁定（登录） | 403 | `account_locked` |
+| 改密的旧密码不对 | 403 | `invalid_credentials` |
 | 缺少 Bearer token | 401 | `authorization_required` |
 | token 签名错误 / 过期 / 格式错误 / 用户已删除 | 401 | `invalid_token` |
 | 其他注册、登录、鉴权失败 | 500 | `registration_failed` / `login_failed` / `authentication_failed` |
 
-已知缺口：没有刷新 token、token 吊销、登出接口、改密与找回密码、邮箱验证、账号锁定、2FA/CAPTCHA。**"有没有登录"之外的判定从 V5 起有了**：`role` / `preset` / grants / Guardian 四层由 `internal/authz` 合成，中间件与 handler 只问它，见下节。限流按账号、按动作，不按设备（本仓库没有设备这个概念）。
+已知缺口：没有刷新 token、找回密码、邮箱验证、单端登出、2FA/CAPTCHA。V6 补齐的是**token 生命周期与账号锁定**这一半：登出、改密、管理员吊销、失败锁定都有了，但它们背后是一个 `token_valid_after` 时刻而不是一张吊销表——**登出是全端下线**，因为本仓库没有"设备"这个概念（没有设备注册、没有设备凭据），要做单端登出得先有 `jti` 与一张按 token 的吊销表。**"有没有登录"之外的判定从 V5 起有了**：`role` / `preset` / grants / Guardian 四层由 `internal/authz` 合成，中间件与 handler 只问它，见下节。限流按账号、按动作，不按设备（本仓库没有设备这个概念）。
 
 当前后端已接入 seekdb 数据基础设施。版本化 SQL 除 `users` 外，conversation migration v2 还创建 `turn_event_types`、`sessions`、`messages`、`summaries`、`turns`、`turn_events`，对应 GORM 映射位于 `internal/data/models`。`turn_event_types` 是 ID 1–15 的稳定整数查找表；summary 按 revision 保留历史，`summary_up_to_msg_id` 是由字符串 message ID 组成的 JSON 数组，不是外键；`turns.assistant_message_id` 是指向 `messages.message_id` 的字符串外键。删除 session 会级联删除其 messages、summaries、turns，删除 turn 会级联删除其 events。
 
@@ -319,7 +343,11 @@ migration v16（V5）建治理的五张表 `user_grants` / `guardian_links` / `g
 
 migration v17（V5）把 `llm_calls.session_id` / `turn_id` 放开成可空。00005 假设每一次调用都属于某一轮，而 v9 的装饰器记的是进程发出的**每一次**调用——判卷与阅读扩展都是从 HTTP 路由发起的，身后没有会话。**NULL 而不是空串或 `-`**：编出来的值与 NULL 读起来一样、数起来不一样。仍需非空的是"谁付钱、从哪来"（`owner_id` 与 `source`），一次没有账号的调用是"调用点忘了说"，recorder 拒绝制造它。
 
-当前后端已交付的垂直切片：用户认证、文件上传与读取、会话与消息，经 WebSocket 驱动的对话回合（含工具调用、能力切换与多步进度），知识库的解析与检索，题库与练习，掌握路径，沉浸阅读，账号级的 Memory，以及 V5 的归属、四层授权、Guardian、审计、用量与配额、限速、key 池、文件库回收站、导入导出与两条只读的运行状态。现阶段没有 CORS、指标、Tracing、Swagger 或消息队列。`users.password` 只允许保存密码哈希，GORM 模型不得直接作为 API 响应。
+migration v18（V6）第一次改 `users` 的列（00001 建好之后只被 00014 加过一条 CHECK），加四列回答"这个账号现在还能不能用"：`token_valid_after`（撤销，NULL = 从未撤销）、`failed_attempts`（当前这一轮的连续失败数，写锁时清零）、`failed_window_start`（这一轮什么时候开始的）、`locked_until`（NULL = 没锁）。**四列都不建索引**，因为读它们的就是每请求已经在读的那一行（按主键或按用户名的唯一键），而且**今天没有任何查询问"哪些账号被锁着"**——等那个问题出现时，跟它一起到的才是它的索引。`token_valid_after` 的值**由 Go 写而不是 SQL 的 `UTC_TIMESTAMP()`**：跟它比的是 token 自己的 `iat`，两个时刻必须来自同一个时钟。Down 有一个不对称的后果：**删掉这一列会让所有撤销过的 token 复活**——凭据复活与一列消失不是同一种损失。
+
+migration v19（V6）把"一个掌握路径最多一个活跃交互"交给 schema，形状与 00009 同源：生成列 `open_scope = IF(result_json IS NULL, path_id, NULL)` + 唯一键 `mastery_interactions_one_open`。前面有一段 repair-first 的删除（**预料删 0 行**：正确的写入路径产不出重复，这些行只可能是两个调用者在旧代码下赛出来的），子查询要包一层派生表——从子查询读的那张表里删会被引擎拒（ERROR 1093），而多表 DELETE 那种写法这个引擎不认。Down 是两条语句而不是一条，因为它拒绝在同一条语句里改表又删索引。
+
+当前后端已交付的垂直切片：用户认证、文件上传与读取、会话与消息，经 WebSocket 驱动的对话回合（含工具调用、能力切换与多步进度），知识库的解析与检索，题库与练习，掌握路径，沉浸阅读，账号级的 Memory，V5 的归属、四层授权、Guardian、审计、用量与配额、限速、key 池、文件库回收站、导入导出与两条只读的运行状态，以及 V6 的 token 生命周期（登出 / 改密 / 吊销）、账号锁定与出站边界的接线。现阶段没有 CORS、指标、Tracing、Swagger 或消息队列。`users.password` 只允许保存密码哈希，GORM 模型不得直接作为 API 响应。
 
 ### 对话回合与 WebSocket
 
@@ -407,7 +435,7 @@ migration v17（V5）把 `llm_calls.session_id` / `turn_id` 放开成可空。00
 - **队列是一次查询**，不是后台作业：没有队列表、没有定时器，三种来源（错题插队 / 到期 / 没见过的题）在一条 JOIN 里排序。跳过只推进时钟，不发号、不计次数。
 - **统计**从历次复习记录算出来，窗口按 `day` / `week` 对齐，没数据的桶也占一个点——否则图表会把隔着的两天画成相邻的两天。跳过既不算对也不算错（一天的"全跳过"与"全答错"靠旁边的计数分开）。
 
-**已知缺口（V3）**：知识点只以标签形式落在 `extra.knowledge_points` 上，没有可跳转的对象；正确率走 `practice_review_events.outcome_json` 提取，没有索引；题目的来源会话或材料被删之后会变成"没有归属"，界面要能表达来源已删除；预路由只认中英文那几种写法，写别的说法就留在通用助手里。
+**已知缺口（V3）**：知识点只以标签形式落在 `extra.knowledge_points` 上，没有可跳转的对象；~~正确率走 `practice_review_events.outcome_json` 提取，没有索引~~（**V6 已改**：正确率改读 00011 的 `is_correct` 列，不再逐行解文档；注意服务这个窗口的是 `idx_practice_review_events_entry_time` 而不是 00011 那个 `..._entry_outcome`，因为窗口的谓词是 `review_time`）；题目的来源会话或材料被删之后会变成"没有归属"，界面要能表达来源已删除；预路由只认中英文那几种写法，写别的说法就留在通用助手里。
 
 ### 掌握路径、沉浸阅读与 Memory（V4）
 
@@ -444,7 +472,7 @@ V4 加两个能力（`mastery_path`、`immersive_reading`）、一个只读的"�
 
 **QN-05 批量导入**：`POST /questions/import` 的 body 是一个 JSON 行文件（每行一道题，与 `save_question` 参数同形），`?dry_run=true` 只报告不写。两次请求共用同一份解析与判定，所以 preview 不会说谎；冲突分"同一道题"（同 `question_id`）与"同一题干不同 id"（重复）两种，都进报告。两次都是 **200**——一份"写了 3 条、拒了 2 条"的报告不是失败的请求。
 
-**已知缺口（V4）**：掌握路径同时推进的条数没有上限，因为那个上限从没被回答过（`MASTERY_MAX_ACTIVE_PATHS` 与它背后的 `ErrTooManyPaths` 已随定义一起删除，见上）；~~掌握路径与阅读材料都还没有 owner 列，权限仍只到"有没有登录"~~（V5 补上了）；阅读的推荐要读目录里每份材料的开头一窗（材料没有语言列，语言是从正文推断的）；`mastery_interactions` 的"同一路径最多一个活跃交互"是服务层的事务内读，不是数据库唯一键；租约接管会让一个过期的长 turn 退化成只追加证据；`LLM_CAPABILITY_CONFIG_JSON` 里两个新能力各有一条条目，`immersive_reading` 的上下文预算单独大一档。
+**已知缺口（V4）**：掌握路径同时推进的条数没有上限，因为那个上限从没被回答过（`MASTERY_MAX_ACTIVE_PATHS` 与它背后的 `ErrTooManyPaths` 已随定义一起删除，见上）；~~掌握路径与阅读材料都还没有 owner 列，权限仍只到"有没有登录"~~（V5 补上了）；阅读的推荐要读目录里每份材料的开头一窗（材料没有语言列，语言是从正文推断的）；~~`mastery_interactions` 的"同一路径最多一个活跃交互"是服务层的事务内读，不是数据库唯一键~~（**V6 已改**：00019 把它变成生成列 + 唯一键，代码跟着把撞键映射回"已经有一个开着的"，见「收口（V6）」）；租约接管会让一个过期的长 turn 退化成只追加证据；`LLM_CAPABILITY_CONFIG_JSON` 里两个新能力各有一条条目，`immersive_reading` 的上下文预算单独大一档。
 
 ### 治理与运维（V5）
 
@@ -503,7 +531,13 @@ V5 加的不是"能做什么"，是**"不能做什么"**和**"做过的每一件
 
 **key 池**：`LLM_API_KEYS` 是逗号分隔的列表（一把也行，行为与从前一样），轮换 + 每把的连续失败计数 + 冷却。**只有 429 算在一把 key 头上**（500 是上游不舒服、401 是键配错了，都不该用一次 60 秒的冷却把配置错误伪装成暂时故障）；一次成功清零计数；全部在冷却时仍然发**冷得最久**的那把（"没有 key"会把上游的背压变成我们这边的一次故障）。冷却是每把 key 一个"到什么时候为止"，判断它就是一次时间比较——**没有后台协程去解除冷却**。错误信息里只有序号，没有 key 的值。`LLM_API_KEY` → `LLM_API_KEYS` 是唯一一次改已有的键名，**不做兼容**：升级前先改 `.env`。
 
-**出站边界**（`internal/outbound`）判的是"**谁给的地址**"，不是"地址私不私"：同一个 `192.168.1.10`，在 `ExternalMediaPolicy`（外部内容里的媒体 URL）下必须拒，在 `LANServicePolicy`（局域网里由使用者配置的服务）下必须放——两套策略是两个类型，不是同一个函数的两个参数。用 `net/netip` 而不是 `net`，因为 `net.IPNet.Contains` 会把 `::ffff:127.0.0.1` 当成普通 IPv6 地址放过去，那正好是 SSRF 最常用的一种绕法。**它当前零调用方**（Partners 与 MCP 都在 backlog）：交付的是两层策略本身，证据只有用例，没有运行。
+**出站边界**（`internal/outbound`）判的是"**谁给的地址**"，不是"地址私不私"：同一个 `192.168.1.10`，在 `ExternalMediaPolicy`（外部内容里的媒体 URL）下必须拒，在 `LANServicePolicy`（局域网里由使用者配置的服务）下必须放——两套策略是两个类型，不是同一个函数的两个参数。用 `net/netip` 而不是 `net`，因为 `net.IPNet.Contains` 会把 `::ffff:127.0.0.1` 当成普通 IPv6 地址放过去，那正好是 SSRF 最常用的一种绕法。
+
+**V6 把它接上了三处**，接线点选在 `DialContext` 而不是调用点上——"记得调用"不是一种机制，而拨号是每一次出站连接都必须经过的那一个地方。三个客户端各取一条策略：docling 走 `LANServicePolicy`（它的默认地址 `http://127.0.0.1:5001` 本来就是一台局域网服务），LLM 与 embedding 走 `ExternalMediaPolicy`（公网主机）。接线在 `assemble.go` 与 `kbassembly.go` 两处，`internal/llm`、`internal/embed`、`internal/parse` 只收一个 `outbound.DialFunc` 并把 `transport.DialContext` 交给它，它们**不 import `outbound` 以外的策略**，也不自己判断地址。
+
+**接上它防的是配置写错的那扇门，不是用户输入的那扇。** 三个客户端的 base URL 全部来自 `.env`，没有一个来自请求数据，所以这一版没有关掉任何一条"用户能让服务器去连哪里"的路——那条路在 V5 就不存在。它挡的是把 `PARSER_DOCLING_BASE_URL` 填成一台公网机器、把 `LLM_API_BASE` 填回环地址这类事。这条记录（V5 的"零调用方"）到此结清，但结清的是"有人调用"，不是"防住了用户输入"。
+
+判据取在**解析之后**：名字先被解析成一组地址，**组里每一个**都要过策略，然后拨的是**这组地址**而不是那个名字——把名字交回给拨号器等于让它再解析一次，而第二次解析是第二个答案，策略放过的那个名字可能回来指着 `127.0.0.1`，那样这一整层就只是对一个字符串的检查。它拦不住的只有两件事，都写在 `dialer.go` 的文件头：**名字仍然会被解析**（拦的是连接，不是查询，别的机器上的解析器还是知道这个名字），以及**自己装了 `Transport` 的调用方**（那是一次代码评审的问题，运行期没有任何机制能回答它）。
 
 #### 文件库的删除有两级，导入导出是两次请求
 
@@ -512,14 +546,45 @@ V5 加的不是"能做什么"，是**"不能做什么"**和**"做过的每一件
 - **回收站是 `?deleted=true`，不是单独一条路由**——少一个要记得加归属过滤的地方。下载是唯一不走信封的一条（`Content-Disposition` 走 `mime.FormatMediaType`，加 `X-Content-Type-Options: nosniff`），`library_path` 与绝对路径不出现在任何响应里。
 - **导入导出继承的是 §12.4 的三条纪律，不是它的三条接口**：本仓库一个 seekdb、一个上传根，"把数据从一个 Workspace 搬到另一个"没有对象。做的是把**选定的会话、材料、题库与知识库**打成一个 ZIP 再读回来。包里**没有账号设置、Memory、凭据、`llm_calls`**——不是过滤器，是封闭集：`Kind` 里没有这些名字，写入器会拒绝**整个包**而不是跳过一条。**素材不带正文、知识库不带分块与向量**（正文在文件库里，向量是文件加某个 embedding 模型的函数），所以跨实例导入一个包时它们是目录，正文要另外想办法。
 - **预览零写入**，冲突不是错误而是预览里的一个条目；`sha256` 对不上就整体不落；**有活跃 turn 就拒绝**（粒度是整个实例，不是这次迁移涉及的那几个会话）。**恢复靠"记下来写过什么"**（`written_json` 在**每一批之后**写），不靠回滚——一个 ZIP 不可能是一个事务。**没有"续着上次接着导"**。
-- 六条路由**挂 token 不挂 surface**：一个包是账号自己的东西离开又回来，加一层 surface 就是让某个 preset 能拒绝一个账号取自己那份副本。
-- **导出给出的是一个在服务器上的包名（`archive_path`），不是一个可以下载的字节流**：本版没有下载包的路由，界面上的"导出"落点因此要说清楚。
+- 七条路由**挂 token 不挂 surface**：一个包是账号自己的东西离开又回来，加一层 surface 就是让某个 preset 能拒绝一个账号取自己那份副本。V6 补上的第七条是**下载**（`GET /api/v1/workspace/exports/{jobID}/content`），它照库那条下载路由写：`application/zip` 流式返回，`Content-Disposition` 走 `mime.FormatMediaType`，加 `X-Content-Type-Options: nosniff`——**第二处不走 JSON 信封**。归属在打开任何东西之前就应用，所以**别人的 jobID 与不存在的 jobID 拿到同一个 404**，谁也不证实谁。这里有一个**用例钉不住的地方**，是这一版唯一一处：包是流式发出去的，而 `workspace.Open`（会把整个包解析进内存的那个读取器）刻意**不在这条路上**——一个被解析的 512 MiB 包发出去的字节仍然与磁盘一致，只有进程的内存会说出区别。
 
 #### 两条只读的运行状态
 
 `GET /api/v1/system/version` 报版本、构建时间、Go 版本、migration 版本（`go run` 下如实说 `(devel)`，不报空串）。`GET /api/v1/system/status` 报运行模式（`APP_ENV`）、依赖的逐项 readiness、活跃回合数、索引 worker 是否在跑、以及 `llm_calls` 里**未收尾**的行数。**物理路径不报**（`UPLOAD_ROOT` / `WORKSPACE_ARCHIVE_ROOT` 只存在 runtime），**内存不报**，**可写设置与更新检查不做**。
 
-**已知缺口（V5）**：`internal/outbound` 零调用方；`cmd/seed` 不指派 `owner_id`（种子数据是无主的）；导出的包没有下载路由；限流按账号不按设备，且多实例下会静默放大；~~`MASTERY_MAX_ACTIVE_PATHS` 那一条仍在等产品裁决~~（已按代码处置：整条链删掉，见上）；审计与用量的保留期只被一条按窗口删的语句读到，没有到点就删的作业；导入的恢复是"回到这次导入之前"，不是"接着导"；V5 这一版的四条迁移只在空库上向前跑过，把既有部署的库升上来的那条路没有用例（见「验证命令」）；包的六条路由一个面都不挂（`/workspace/*`、`/workspace/jobs/*` 那一组），这是有意的——一个包是"账号自己的东西出去再回来"，没有哪个面能表达这条规矩，但也没有用例钉着它。
+**已知缺口（V5）**：~~`internal/outbound` 零调用方~~（**V6 已接上三处**，见上）；`cmd/seed` 不指派 `owner_id`（种子数据是无主的）；~~导出的包没有下载路由~~（**V6 已补**，见上）；限流按账号不按设备，且多实例下会静默放大；~~`MASTERY_MAX_ACTIVE_PATHS` 那一条仍在等产品裁决~~（已按代码处置：整条链删掉，见上）；审计与用量的保留期只被一条按窗口删的语句读到，没有到点就删的作业（**V6 给了执行的地方**：`go run ./cmd/cleanup`，但它仍然要有人去挂 cron，见下节）；导入的恢复是"回到这次导入之前"，不是"接着导"；~~V5 这一版的四条迁移只在空库上向前跑过，把既有部署的库升上来的那条路没有用例~~（**V6 已补**：`upgrade_db_test.go` 先 `UpTo(17)` 再灌行再升上来，另加一条 down 再 up，见「验证命令」）；包的七条路由一个面都不挂（`/workspace/*`、`/workspace/jobs/*` 那一组），这是有意的——一个包是"账号自己的东西出去再回来"，没有哪个面能表达这条规矩；**而没有用例钉着"这七条无面"这件事**——`router_surfaces_test.go` 钉三组（治理挂 `administrative`、系统读挂 `system`、**V6 的登出与改密不上任何策略**），包这一组不在其中，所以将来有人给这七条里的一条补上一个面不会红。
+
+### 收口（V6）
+
+V6 加的不是功能，是**让已经有的东西有客人**：两条 migration、四条路由（见「认证」里的表）、一个子命令、三个配置键，**零新 capability、零新事件类型、零新依赖**。认证那半边是真正的新东西——它是本仓库第一次把"当下的授权状态"写进库。
+
+#### 撤回是一个时刻，不是一个列表
+
+`users.token_valid_after` 存一个时刻，**签发时间早于或等于它（`iat <= tva`，含同一秒）的 token 一律作废**。不是一张吊销表：一条 token 记录一张表要在每次请求上多读一次、要给清理作业多一个对象，而这套东西要回答的问题只有"这个账号现在还能不能用自己的旧凭据"——一个时刻就够了。**NULL 表示从未撤销过**，与"一个很早的时刻"不是一回事，所以这一列没有默认值。
+
+**两个时刻用同一个时钟**：`tva` 由 Go 写入而不是 SQL 的 `UTC_TIMESTAMP()`，因为它要跟 token 自己的 `iat` 比，而 `iat` 来自应用的时钟——差一秒的库钟能让刚签的 token 看起来比撤销还新，规则就会安静地不生效。
+
+**秒级精度有一个角，取的是 fail-closed**：`iat <= tva` 判死，代价是"在同一秒里撤销又登录"会被拒。反方向（`iat < tva`）会把"同一秒内完成撤销"这件真事读成没发生——**一个撤销请求返回 204 而 token 还活着**，那是比多登一次严重得多的错误。而这条角要一个人在同一秒里走完一次往返才碰得到。
+
+#### 锁定数的是"一轮"，不是历史
+
+窗口内连续失败满 `AUTH_LOCKOUT_THRESHOLD` 次就写 `locked_until` 并**清掉计数**，所以 `failed_attempts` 数的是当前这一轮；`failed_window_start` 是这一轮什么时候开始的（超过窗口进来的失败从 1 重新起算）。**故意没有"最后一次失败是什么时候"这一列**——这一版要问的只有"当前这轮什么时候开始的"。`locked_until` 为 NULL 就是没锁，**而一个已经过去的时刻意思一样**（判据是"`locked_until` 晚于现在"），所以过期的锁不需要谁去清，停机穿越了窗口期也一样直接放行。
+
+#### 一条规则交给 schema，第二次
+
+"一个掌握路径最多一个活跃交互"以前只活在 `Ask` 的事务内读里。**那一次读在这个引擎上拦不住第二个写者**：READ COMMITTED 只取记录锁不取间隙锁，"这条路径没有开着的交互"正好是一个空区间，读空区间什么都不锁。00019 用的是 00009 留下的那个形状——生成列 `open_scope = IF(result_json IS NULL, path_id, NULL)`（**开着的行占住路径，答过的行占 NULL**，而唯一索引容许任意多个 NULL）+ 一个唯一键；前面是一段 repair-first 的删除（地址在引擎上要先包一层派生表，直接从子查询读的那张表里删会被拒）。
+
+**代码跟着改了，这不是可选项**：插入撞上这个唯一键时要映射回 `*OpenInteractionError`——原来这个错误只在事务读里产生，不改的话并发下的第二个调用者拿到的是一次 500，而它应该拿到的是"这条路径上已经有一个开着的"。
+
+#### 正确率改读列
+
+`practice_review_events.is_correct`（00011 建的）以前没人读，统计查询还在逐行解 `outcome_json`。V6 换了那一半查询。**行为等价**：没人判过的行（跳过）在两边都是 NULL，`NULL = TRUE` 与 `is_correct = TRUE` 都是 NULL，所以跳过两边都不计入。**不需要 migration**——那一列和它的索引早就在。服务这个窗口的索引是 `idx_practice_review_events_entry_time`（窗口的谓词是 `review_time`，它领这个键），00011 那条 `..._entry_outcome` 把 `is_correct` 放在第二位，服务的是"这道题的历次复习怎么样"，不是这个问法。
+
+#### 保留期有了执行的地方
+
+`audit.Service.Prune` 与 `usage.Service.Prune` 实现完整但零生产调用方，V6 把它们接给 `go run ./cmd/cleanup`。**做成子命令而不是进程内的定时器**，因为它要回答两个运维必须能问的问题："我是不是跑了两次"与"它失败了吗"——cron 能被告知只留一份，非零退出码是调度器能报出来的东西，而进程内的 ticker 把这两个答案都丢掉。它**只删行**，删的都是已经过了窗口的记录（审计不再回答的那些、已经报过数的用量），并把计数打出来——**"0"是信息**，它区分了一个在工作的窗口与一个没人跑过的窗口。
+
+**已知缺口（V6）**：**没有刷新 token、找回密码、邮箱验证、单端登出、2FA / CAPTCHA**——后三者都要一条邮件通道，那是本仓库第一个真正的外部服务依赖。**登出是全端下线**（本仓库没有"设备"这个概念），要做单端登出得先有 `jti` 与一张按 token 的吊销表。**锁定可以被人用来锁别人**：失败计数按用户名计，所以任何一个知道用户名的人都能把那个人挡在门外，直到窗口过去或管理员解锁——这是机制的固有属性，缓解只有阈值 + 窗口 + 管理员那条解锁路由。**撤销的精度是一秒**，所以"在同一秒里撤销又登录"会被拒（取 fail-closed，见上）。**`cmd/cleanup` 的真跑没有做过**：它删真行且不可回滚。`cmd/` 下的子命令按本仓库的惯例没有用例——它们做的事全在 `Prune` 那两个方法里，而那两条的用例在 `internal/audit` 与 `internal/usage`（对真库）；子命令自己剩下的只有读配置、开库、决定退出码。这次只核到 `-h`（用法，退出 0），**真正删一次要有人先点头**。**这一版仍然没有把一条请求真的发给过上游**（见「验证命令」）。
 
 ## 前端
 
@@ -562,7 +627,18 @@ gofmt -l .
 **这套测试不证明什么**（写在这里，免得把"全绿"读成语义上的全绿）：
 
 - **没有一条请求真的发给过上游模型。** 用量、配额、key 冷却、限流都是用注入的假 provider / 假 429 / 假时钟验的——结构对、时序对，但"DeepSeek 那边真的这么答"没验过。
-- **迁移只在空库上向前跑过。** 每个测试库都是从零迁上去的，所以"在一个已经有数据的旧库上把 00014 跑一遍""`migrate down` 回滚"这两种情况**一个用例都没有**。
+- ~~**迁移只在空库上向前跑过。**~~（**V6 已补**：`internal/data/migration/upgrade_db_test.go` 走的是部署真正处在的两种状态——**先 `UpTo(17)` 再灌行、然后升上去**（灌进去的行一条不少、判决没有被改写、新的四列读回"从未撤销、从未失败、从未锁定"，再跑一次 `Up` 应当无事可做），以及**在有行的库上 down 再 up**；`testdb.OpenAt` 是为此新增的入口——建库、清空、就停在那里。**仍然没验的是**：把某个具体旧版本的真实生产库搬上来的那种形状，以及一次跑到一半失败的迁移。）
+- **`go run ./cmd/cleanup` 只核到了 `-h`。** 它真删行、不可回滚，所以真正跑一次要有人先点头。
+
+`cmd/` 下的子命令（`migrate` / `seed` / `cleanup` / `turnprobe`）按本仓库的惯例**没有用例**：它们做的事都在被它们调用的那些包里，而那些包对真库有用例。
+
+清除到期的审计与用量（会真的删行，先在库上确认再跑）：
+
+```bash
+cd backend
+go run ./cmd/cleanup            # 删掉过了 AUDIT_RETENTION_DAYS / USAGE_RETENTION_DAYS 的行，打印条数
+go run ./cmd/cleanup -h         # 用法
+```
 
 前端：
 
