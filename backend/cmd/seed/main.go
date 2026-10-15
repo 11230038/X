@@ -70,7 +70,12 @@ func main() {
 		}
 		return seedMasteryReading(tx)
 	}); err != nil {
-		log.Fatal("seed development data")
+		// The step labels are the point of this message: every step above wraps
+		// its error with what it was writing, so the sentence says which record
+		// was refused. Without it a failure here is a command that exits 1 and
+		// says nothing, and the only way back to the cause is to go and look at
+		// the tables one by one. Printed the way cmd/cleanup prints its prunes.
+		log.Fatalf("seed development data: %v", err)
 	}
 
 	fmt.Println("seeded users: test_admin, test_user")
@@ -215,6 +220,12 @@ func seedNotebookPractice(tx *gorm.DB) error {
 	lapses := int32(0)
 	caseValue := 2.5
 	rating := 5.0
+	// The review state below says it has been reviewed once, and version counts
+	// the advances a row has been through, so it is 1 and not the 0 the
+	// repository writes when it starts a row. It cannot be left out: the column
+	// is NOT NULL, the model carries it as a pointer, and a nil pointer is sent
+	// as an explicit NULL — which the engine refuses, default or no default.
+	stateVersion := int64(1)
 	now := time.Now().UTC()
 
 	entry := models.NotebookEntry{
@@ -265,6 +276,7 @@ func seedNotebookPractice(tx *gorm.DB) error {
 			Streak:            &streak,
 			ReviewCount:       &reviewCount,
 			Lapses:            &lapses,
+			Version:           &stateVersion,
 			Extra:             datatypes.JSON(`{"source":"seed"}`),
 		},
 		&models.PracticeReviewEvent{
