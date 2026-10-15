@@ -6,7 +6,6 @@ bin/
 /data/upload/
 
 # Agent skills and installer metadata
-.claude/skills/
 .agents/skills/
 agent/skills/
 skills-lock.json
@@ -22,3 +21,4 @@ frontend/*.log
 .product
 Agent.md
 .agents/
+.claude/
