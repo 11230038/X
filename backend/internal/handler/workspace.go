@@ -1,21 +1,27 @@
 package handler
 
-// The package endpoints (§2.13, §2.16): pack a selection out, look at a package
-// before writing it, commit it, read back what a job did, and take one back.
+// The package endpoints (§2.13, §2.16): pack a selection out, take the package
+// away, look at one before writing it, commit it, read back what a job did, and
+// take one back.
 //
-// Six routes and one idea, which is the reason they are one file: a job is the
-// subject of five of them. An export makes one, a preview makes one, a commit
-// advances one, the status route reads one, and the recovery route moves one
-// that failed. What a client holds between two requests is therefore a job id
-// rather than a package or a plan, and every answer here is a job.
+// Seven routes and one idea, which is the reason they are one file: a job is the
+// subject of six of them. An export makes one, the download hands over what it
+// made, a preview makes one, a commit advances one, the status route reads one,
+// and the recovery route moves one that failed. What a client holds between two
+// requests is therefore a job id rather than a package or a plan, and every
+// answer here is a job — except the download, which is the bytes themselves,
+// because a package's whole point is that it is the file a person can save.
 //
 // A request that acts on a job already made — the commit, the recovery — takes
 // its account from the token and passes it on, and the service refuses a job
-// that is not that account's preview. The status route is the one exception and
-// it is scoped here: `workspace.Repository.Find` reads a job by id and nothing
-// else, deliberately — the store's comment says which account a job belongs to
-// is the route's business (§2.16) — so the account is applied below, as the same
-// answer an id that was never issued gets (AUTH-06).
+// that is not that account's preview. The two routes that read a job by the id
+// in the URL are where that does not hold, and they are scoped here instead:
+// `workspace.Repository.Find` reads a job by id and nothing else, deliberately
+// — the store's comment says which account a job belongs to is the route's
+// business (§2.16) — so the account is applied below, as the same answer an id
+// that was never issued gets (AUTH-06). They are the status route and the
+// download, and the download is the one where getting that wrong would hand
+// somebody another account's work rather than merely tell them about it.
 
 import (
 	"context"
@@ -41,6 +47,14 @@ type Workspace interface {
 	// where the account is applied rather than the service, because a job is
 	// looked up by the id in the URL and the store's read is by that id.
 	Job(context.Context, string) (workspace.Job, error)
+	// Download opens a job's package as a stream. It takes the job rather than
+	// the id because the route has already read the row it is about — the account
+	// has to be applied to that row before anything is opened, and handing this
+	// an id would be handing it an unscoped read.
+	//
+	// It is not Open: that one parses a package into memory, which is what the
+	// import preview needs and what a download must not do (§2.5).
+	Download(context.Context, workspace.Job) (*workspace.StoredArchive, error)
 	Recover(context.Context, workspace.RecoverRequest) (workspace.Job, error)
 	// MaxArchiveBytes is the deployment's bound on one package
 	// (WORKSPACE_MAX_ARCHIVE_BYTES). The upload is bounded by it here so that a
@@ -281,6 +295,78 @@ func (h *WorkspaceHandler) Job(c *gin.Context) {
 		return
 	}
 	httpx.WriteSuccess(c, http.StatusOK, gin.H{"job": toJobView(job)})
+}
+
+// DownloadExports streams one job's package back to its owner (§2.5, §2.9).
+//
+// It is the route the export existed without: a package could be made, listed
+// and read back as a job, and the bytes it was made of were reachable only from
+// inside the process. An export nobody can take away is not an export, which is
+// why this is here and why it is this route's whole existence.
+//
+// Two things about how it is written are the design, and neither shows in a
+// response:
+//
+//   - The account is applied here, before anything is opened, exactly as the
+//     status route applies it. `Repository.Find` reads a job by id and nothing
+//     else — that is the store's deliberate shape — so an id belonging to
+//     another account and an id that was never issued get one answer here and
+//     neither confirms the other (AUTH-06).
+//   - The package is streamed, not parsed. The primitive behind this hands over
+//     a file and its length; `workspace.Open` — which parses every member of a
+//     package into memory, up to WORKSPACE_MAX_ARCHIVE_BYTES — is deliberately
+//     not on this path. This is the one place in the version where getting it
+//     wrong cannot be caught by a case: a parsed 512 MiB package still streams
+//     bytes that match the disk, and only the process's memory would say
+//     otherwise.
+//
+// The type is a constant rather than a stored one. A package has no type to read
+// — its row is a ZIP — and the only thing a stored type could add is a value
+// that came from what somebody uploaded, which is not a thing to hand a browser
+// as the type of a download.
+func (h *WorkspaceHandler) DownloadExports(c *gin.Context) {
+	if !h.ready(c) {
+		return
+	}
+	account, ok := callerAccount(c)
+	if !ok {
+		return
+	}
+	job, err := h.packages.Job(c.Request.Context(), c.Param("jobID"))
+	if err != nil || job.OwnerID != account.UserID {
+		h.fail(c, "workspace_failed", errNoSuchJob(job, err))
+		return
+	}
+	stored, err := h.packages.Download(c.Request.Context(), job)
+	if err != nil {
+		h.failDownload(c, err)
+		return
+	}
+	defer stored.Content.Close()
+
+	// The same two headers the library's download sets, and for the same reason:
+	// what arrives is a file to save, named, and not something for the browser to
+	// decide about.
+	c.Header("Content-Disposition", contentDisposition(job.ID+".zip", job.ID))
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.DataFromReader(http.StatusOK, stored.SizeBytes, "application/zip", stored.Content, nil)
+}
+
+// failDownload answers a download that could not be opened.
+//
+// The one thing it says that the shared mapping does not: a job that has no
+// package is 404 here rather than the 400 an upload of a bad package gets.
+// `ErrBadPackage` means two different things by direction — on the way in it is
+// the caller's package that is wrong, and on the way out it is this job that has
+// nothing to hand over — and the answer to the second is the answer to a job
+// that is not there, which is what a client can act on: there is nothing to
+// fetch. A 200 with an empty body would be the one answer that is a lie.
+func (h *WorkspaceHandler) failDownload(c *gin.Context, err error) {
+	if errors.Is(err, workspace.ErrBadPackage) {
+		httpx.WriteError(c, http.StatusNotFound, "not_found", "no such package")
+		return
+	}
+	h.fail(c, "download_export_failed", err)
 }
 
 // Recover takes back an import that did not commit (§2.13).

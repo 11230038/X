@@ -41,6 +41,10 @@ type workspaceStub struct {
 	jobErr    error
 	jobInput  string
 
+	downloadResult workspace.StoredArchive
+	downloadErr    error
+	downloadInput  workspace.Job
+
 	recoverResult workspace.Job
 	recoverErr    error
 	recoverInput  workspace.RecoverRequest
@@ -82,6 +86,14 @@ func (s *workspaceStub) Job(_ context.Context, jobID string) (workspace.Job, err
 	return s.jobResult, s.jobErr
 }
 
+func (s *workspaceStub) Download(_ context.Context, job workspace.Job) (*workspace.StoredArchive, error) {
+	s.downloadInput = job
+	if s.downloadErr != nil {
+		return nil, s.downloadErr
+	}
+	return &s.downloadResult, nil
+}
+
 func (s *workspaceStub) Recover(_ context.Context, request workspace.RecoverRequest) (workspace.Job, error) {
 	s.recoverInput = request
 	return s.recoverResult, s.recoverErr
@@ -89,7 +101,7 @@ func (s *workspaceStub) Recover(_ context.Context, request workspace.RecoverRequ
 
 func (s *workspaceStub) MaxArchiveBytes() int64 { return s.maxArchiveBytes }
 
-// newWorkspaceRouter mounts the six routes the way the server does — including
+// newWorkspaceRouter mounts the seven routes the way the server does — including
 // the absence of a surface, which is the deliberate divergence the router
 // records: these routes are behind the token and nothing else.
 func newWorkspaceRouter(service Workspace) *gin.Engine {
@@ -101,6 +113,7 @@ func newWorkspaceRouter(service Workspace) *gin.Engine {
 	authenticated.Use(guard())
 	authenticated.POST("/workspace/exports", handler.Export)
 	authenticated.GET("/workspace/exports", handler.ListExports)
+	authenticated.GET("/workspace/exports/:jobID/content", handler.DownloadExports)
 	authenticated.POST("/workspace/imports/preview", handler.Preview)
 	authenticated.POST("/workspace/imports", handler.Import)
 	authenticated.GET("/workspace/jobs/:jobID", handler.Job)

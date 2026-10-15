@@ -117,7 +117,7 @@ func (h *LibraryLifecycleHandler) Download(c *gin.Context) {
 	}
 	defer stored.Content.Close()
 
-	c.Header("Content-Disposition", contentDisposition(stored))
+	c.Header("Content-Disposition", contentDisposition(stored.Filename, stored.ID))
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.DataFromReader(http.StatusOK, stored.SizeBytes, stored.MIMEType, stored.Content, nil)
 }
@@ -296,20 +296,27 @@ func (h *LibraryLifecycleHandler) fail(c *gin.Context, code string, err error) {
 
 // contentDisposition is the header that names a downloaded file.
 //
-// mime.FormatMediaType and not a quoted string built by hand: a filename is
-// whatever the user called their file, and it is the one value on this response
-// that comes from them. FormatMediaType encodes anything that is not plain ASCII
-// as an RFC 2231 `filename*`, so a file called 报告.pdf arrives under that name
-// rather than under a row of percent signs — and it refuses to put a value into
-// a header that a header cannot hold.
-func contentDisposition(stored library.StoredFile) string {
-	name := stored.Filename
-	// The stored name has already been through cleanFilename, which refuses
-	// control characters, so this is a second gate rather than the only one. It
-	// is here because this is where a filename becomes part of a header, and the
-	// id is always a safe name to fall back to.
+// mime.FormatMediaType and not a quoted string built by hand: for the library a
+// filename is whatever the user called their file, and it is the one value on
+// that response that comes from them. FormatMediaType encodes anything that is
+// not plain ASCII as an RFC 2231 `filename*`, so a file called 报告.pdf arrives
+// under that name rather than under a row of percent signs — and it refuses to
+// put a value into a header that a header cannot hold.
+//
+// It takes the name and the fallback rather than a stored file, because there is
+// a second download in this package (§2.5's package route) whose name is not a
+// stored one: a name goes into a header exactly once per response and there is no
+// reason for two functions to quote it differently. The fallback is what a
+// missing or unquotable name is replaced by, and both callers have an id that is
+// always safe to use.
+func contentDisposition(name, fallback string) string {
+	// The library's stored name has already been through cleanFilename, which
+	// refuses control characters, so for that caller this is a second gate rather
+	// than the only one. It is here because this is where a name becomes part of a
+	// header, and a caller whose name was not cleaned must not be able to send one
+	// either.
 	if name == "" || strings.ContainsAny(name, "\r\n\x00") {
-		name = stored.ID
+		name = fallback
 	}
 	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": name})
 	if disposition == "" {

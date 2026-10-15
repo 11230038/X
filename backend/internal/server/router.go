@@ -322,20 +322,27 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	memory.GET("/memory/synthesis", handlers.Memory.Synthesis)
 	memory.GET("/memory/audit", handlers.Memory.Audit)
 	memory.GET("/memory/export", handlers.Memory.Export)
-	// The package routes are the one group here mounted with no surface at all,
-	// and that is deliberate rather than an oversight (recorded as a divergence
-	// from §1.2's arrow for `workspace`). A package is not a body of work like
-	// the library or the reading layer: it is an account's own copy of its own
-	// work leaving and coming back, and every read and write behind these routes
-	// is already narrowed to the account on the token. The two permissions that
-	// could be said to apply — "may I export" and "may I import" — are the
+	// The seven package routes are the one group here mounted with no surface at
+	// all, and that is deliberate rather than an oversight (recorded as a
+	// divergence from §1.2's arrow for `workspace`). A package is not a body of
+	// work like the library or the reading layer: it is an account's own copy of
+	// its own work leaving and coming back, and every read and write behind these
+	// routes is already narrowed to the account on the token. The two permissions
+	// that could be said to apply — "may I export" and "may I import" — are the
 	// question of whether this account may use the product at all, which is the
 	// preset, and a surface would let a preset deny an account the ability to
 	// take its own work out. What is NOT reachable from here is somebody else's
 	// work: the ids in a selection are read through each domain's own scoped
-	// read, and the job status route applies the account itself.
+	// read, and the two routes that read a job by the id in the URL — the status
+	// and the download — apply the account themselves.
 	authenticated.POST("/workspace/exports", handlers.Workspace.Export)
 	authenticated.GET("/workspace/exports", handlers.Workspace.ListExports)
+	// The download is what makes the export an export: the route above makes a
+	// package and without this one the bytes it made are reachable only from
+	// inside the process. It streams the package rather than answering a job,
+	// which is why it is the one route here that does not answer with the
+	// envelope (§2.5).
+	authenticated.GET("/workspace/exports/:jobID/content", handlers.Workspace.DownloadExports)
 	// The preview takes the package itself, and the commit names the preview by
 	// its job id — which is why there is no route that carries a package twice.
 	authenticated.POST("/workspace/imports/preview", handlers.Workspace.Preview)

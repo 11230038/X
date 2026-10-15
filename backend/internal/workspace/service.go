@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -244,24 +245,91 @@ func (s *Service) Job(ctx context.Context, jobID string) (Job, error) {
 // than with an empty archive: an export that reported itself committed and left
 // nothing behind is a fact somebody has to be told about, and "here is a package
 // with no objects in it" would be the wrong story.
+//
+// This is the *parsing* way in, and the only thing that uses it is the import
+// preview — a preview has to look at every member before it writes anything, and
+// that means the whole package is in memory while it does. A caller that means
+// to hand the bytes on unread wants Download instead; see the note there.
 func (s *Service) Open(ctx context.Context, job Job) (*Archive, error) {
 	if err := s.ready(); err != nil {
 		return nil, err
 	}
-	if job.ArchivePath == "" {
-		return nil, fmt.Errorf("%w: job %s has no package", ErrBadPackage, job.ID)
-	}
-	path := filepath.Join(s.root, job.ArchivePath)
-	file, err := os.Open(path)
+	file, size, err := s.openPackage(job)
 	if err != nil {
-		return nil, fmt.Errorf("open the package of job %s", job.ID)
+		return nil, err
 	}
 	defer file.Close()
+	return OpenArchive(file, size)
+}
+
+// StoredArchive is a package on its way out: the bytes, how many of them there
+// are, and nothing parsed.
+//
+// It carries no type, because a package has none to carry — the row is a ZIP and
+// the only honest name for it is application/zip, which the route supplies. It
+// is a different shape from library.StoredFile for the reason every domain has
+// its own: a package is this service's subject, and a file the library's.
+type StoredArchive struct {
+	// Content is the package itself, opened for reading. The caller closes it.
+	Content io.ReadCloser
+	// SizeBytes is the whole package, manifest and all.
+	SizeBytes int64
+}
+
+// Download opens the package of a job for a caller that intends to stream it.
+//
+// It exists beside Open because the two are different questions, and the
+// difference is the whole point of §2.5: Open parses a package — every member's
+// bytes end up in an Archive's Objects map — which is what a preview needs and
+// what a download must never do, because one package may be
+// WORKSPACE_MAX_ARCHIVE_BYTES (512 MiB by default) and streaming that to a
+// socket through a parsed copy of itself is the entire file resident for no
+// reason at all.
+//
+// So this answers a stream and a length and nothing else: no OpenArchive, no
+// manifest, no digest, no objects. What makes that a rule rather than an
+// intention is that both ways in resolve the path through openPackage below, so
+// a job's package means one thing in both; the parsing stays on Open's side of
+// the line, where its only caller is the import preview.
+func (s *Service) Download(ctx context.Context, job Job) (*StoredArchive, error) {
+	if err := s.ready(); err != nil {
+		return nil, err
+	}
+	file, size, err := s.openPackage(job)
+	if err != nil {
+		return nil, err
+	}
+	return &StoredArchive{Content: file, SizeBytes: size}, nil
+}
+
+// openPackage resolves the package a job names under the archive root and opens
+// it, answering how many bytes it holds. The caller closes what it gets back.
+//
+// It is the one place that decides what "this job's package" means, and it is
+// shared rather than written twice because the two callers above must not drift:
+// a download that resolved a path differently from the preview would be a way to
+// hand out something the preview never looked at.
+//
+// A job whose row names no package is refused here rather than answered with an
+// empty file: "this job has no package" and "here is a package with nothing in
+// it" are different stories about what the job did, and only the first is true.
+// The path is joined onto the root rather than used as given, because
+// archive_path is relative by construction (`write` below) and a row that had
+// become absolute must not be able to name a file outside the root.
+func (s *Service) openPackage(job Job) (*os.File, int64, error) {
+	if job.ArchivePath == "" {
+		return nil, 0, fmt.Errorf("%w: job %s has no package", ErrBadPackage, job.ID)
+	}
+	file, err := os.Open(filepath.Join(s.root, job.ArchivePath))
+	if err != nil {
+		return nil, 0, fmt.Errorf("open the package of job %s", job.ID)
+	}
 	info, err := file.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("read the package of job %s", job.ID)
+		file.Close()
+		return nil, 0, fmt.Errorf("read the package of job %s", job.ID)
 	}
-	return OpenArchive(file, info.Size())
+	return file, info.Size(), nil
 }
 
 // write collects nothing and writes everything: the objects it is given become

@@ -1,6 +1,6 @@
 package server
 
-// The six package routes as they are mounted (§2.16).
+// The seven package routes as they are mounted (§2.16).
 //
 // What this file is the only place for is the mounting itself: that each route
 // exists at the path and method a client was told, that it is behind the token,
@@ -13,6 +13,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -57,6 +58,19 @@ func (routerWorkspaceStub) Import(context.Context, workspace.CommitRequest) (wor
 
 func (routerWorkspaceStub) Job(context.Context, string) (workspace.Job, error) {
 	return routerWorkspaceJob(workspace.StatePreview), nil
+}
+
+// Download streams the stub's own id as the package. That is deliberate rather
+// than cute: this file's cases fingerprint a route by what only its handler
+// answers, and the download is the one package route whose body is not a job —
+// so the bytes have to carry the fingerprint instead of a field.
+func (routerWorkspaceStub) Download(
+	context.Context, workspace.Job,
+) (*workspace.StoredArchive, error) {
+	return &workspace.StoredArchive{
+		Content:   io.NopCloser(strings.NewReader(routerWorkspaceJobID)),
+		SizeBytes: int64(len(routerWorkspaceJobID)),
+	}, nil
 }
 
 func (routerWorkspaceStub) Recover(context.Context, workspace.RecoverRequest) (workspace.Job, error) {
@@ -117,6 +131,11 @@ func TestRouterRegistersThePackageRoutes(t *testing.T) {
 		}, http.StatusCreated},
 		{http.MethodGet, "/api/v1/workspace/exports", func() *http.Request {
 			return signedJSONRequest(http.MethodGet, "/api/v1/workspace/exports", "")
+		}, http.StatusOK},
+		// The download is the one route here that answers with the package rather
+		// than with a job, so the fingerprint below arrives as the body's bytes.
+		{http.MethodGet, "/api/v1/workspace/exports/job_1/content", func() *http.Request {
+			return signedJSONRequest(http.MethodGet, "/api/v1/workspace/exports/job_1/content", "")
 		}, http.StatusOK},
 		{http.MethodPost, "/api/v1/workspace/imports/preview", func() *http.Request {
 			// The preview's happy path needs the bytes, so this is the one case
@@ -198,6 +217,7 @@ func TestRouterMountsThePackageRoutesWithNoSurface(t *testing.T) {
 	t.Run("the package routes are not", func(t *testing.T) {
 		for _, path := range []string{
 			"/api/v1/workspace/exports",
+			"/api/v1/workspace/exports/job_1/content",
 			"/api/v1/workspace/jobs/job_1",
 		} {
 			recorder := httptest.NewRecorder()

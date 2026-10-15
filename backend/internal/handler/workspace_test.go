@@ -1,6 +1,6 @@
 package handler
 
-// The six package routes (§2.13, §2.16).
+// The seven package routes (§2.13, §2.16).
 //
 // What is under test here is the route's own work and nothing behind it: which
 // request reaches which call, what a refused request is answered with, and the
@@ -10,8 +10,11 @@ package handler
 // restate the service's rules in the handler's file.
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -177,6 +180,109 @@ func TestWorkspacePreviewRefusesAPackageOverTheBound(t *testing.T) {
 	}
 	if stub.previewSize != 0 {
 		t.Errorf("a package over the bound reached the service, %d bytes of it", stub.previewSize)
+	}
+}
+
+// ── download ────────────────────────────────────────────────────────────────
+
+// TestDownloadExportsStreamsThePackageAndRefusesAnotherAccountsJob is §2.5's
+// counterexample, and the route that makes an export an export.
+//
+// Where the package comes from is `internal/workspace`'s case — that Download
+// opens the file a job's row names, that its bytes are the file's, and that Open
+// still parses the same job through the same resolution. What is only this
+// file's is what the route adds: the bytes arrive unaltered and as a file rather
+// than as an envelope, and the account on the token is applied *before* anything
+// is opened.
+func TestDownloadExportsStreamsThePackageAndRefusesAnotherAccountsJob(t *testing.T) {
+	packageBytes := []byte("PK\x03\x04 a package")
+	stub := &workspaceStub{
+		jobResult: aJob("job_2", workspace.StateCommitted, handlerAccountID),
+		downloadResult: workspace.StoredArchive{
+			Content:   io.NopCloser(bytes.NewReader(packageBytes)),
+			SizeBytes: int64(len(packageBytes)),
+		},
+	}
+	recorder := postAs(t, newWorkspaceRouter(stub), http.MethodGet,
+		"/api/v1/workspace/exports/job_2/content", "")
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Body.Bytes(); !bytes.Equal(got, packageBytes) {
+		t.Errorf("body = %q, want the package's own bytes", got)
+	}
+	if stub.downloadInput.ID != "job_2" {
+		t.Errorf("the service was asked for %q", stub.downloadInput.ID)
+	}
+	// The three headers that make what arrives a file to save: a name, the one
+	// type a package can honestly claim, and the instruction not to let the
+	// browser decide otherwise.
+	if got := recorder.Header().Get("Content-Disposition"); got != "attachment; filename=job_2.zip" {
+		t.Errorf("Content-Disposition = %q, want an attachment named job_2.zip", got)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "application/zip" {
+		t.Errorf("Content-Type = %q, want application/zip", got)
+	}
+	if got := recorder.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+
+	// Somebody else's job and a job that was never issued are one answer, byte
+	// for byte, for the reason the status route gives the same pair: an answer
+	// that could tell them apart has said the row exists (AUTH-06). The service
+	// is not reached at all, and that half is asserted rather than assumed — a
+	// route that refused only after calling Download would have opened another
+	// account's package to find out it should not have.
+	foreign := &workspaceStub{jobResult: aJob("job_2", workspace.StateCommitted, handlerAccountID+1)}
+	mine := postAs(t, newWorkspaceRouter(foreign), http.MethodGet,
+		"/api/v1/workspace/exports/job_2/content", "")
+	never := postAs(t, newWorkspaceRouter(&workspaceStub{jobErr: workspace.ErrNoSuchJob}),
+		http.MethodGet, "/api/v1/workspace/exports/nobody/content", "")
+	for _, recorder := range []*httptest.ResponseRecorder{mine, never} {
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404; body=%s", recorder.Code, recorder.Body.String())
+		}
+		if code := failAs(t, recorder); code != "not_found" {
+			t.Errorf("code = %q, want not_found", code)
+		}
+	}
+	if foreign.downloadInput.ID != "" {
+		t.Errorf("another account's job reached the service: %+v", foreign.downloadInput)
+	}
+}
+
+// TestDownloadRefusesAJobWithNoPackage pins what a job with nothing to hand over
+// is answered with on the way out.
+//
+// The case exists because the wrong answer here is a plausible accident rather
+// than an obvious one. `ErrBadPackage` means two things by direction — on the
+// way in it is the caller's package that is wrong, which §2.16 answers with a
+// 400, and here it is this job that has no package, which is the same answer as
+// a job that is not there. A route that set its headers before opening anything
+// would answer 200 with a length of zero, and a client would save that as an
+// empty ZIP: the one outcome the design calls out.
+func TestDownloadRefusesAJobWithNoPackage(t *testing.T) {
+	job := aJob("job_2", workspace.StatePreview, handlerAccountID)
+	job.ArchivePath = ""
+	stub := &workspaceStub{
+		jobResult:   job,
+		downloadErr: fmt.Errorf("%w: job job_2 has no package", workspace.ErrBadPackage),
+	}
+	recorder := postAs(t, newWorkspaceRouter(stub), http.MethodGet,
+		"/api/v1/workspace/exports/job_2/content", "")
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if code := failAs(t, recorder); code != "not_found" {
+		t.Errorf("code = %q, want not_found", code)
+	}
+	if disposition := recorder.Header().Get("Content-Disposition"); disposition != "" {
+		t.Errorf("a refused download set Content-Disposition = %q", disposition)
+	}
+	if recorder.Body.Len() != 0 {
+		t.Errorf("a refused download wrote %d bytes", recorder.Body.Len())
 	}
 }
 
