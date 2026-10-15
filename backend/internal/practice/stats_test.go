@@ -2,24 +2,29 @@ package practice
 
 // The statistics against a real database. Every claim here is a claim about SQL
 // this package writes and the engine has an opinion about: what a bucket label
-// means, whether a JSON path that does not exist counts as a false, and whether
-// the two halves of the union really line up bucket for bucket.
+// means, whether a review that was never judged counts as a false, whether the
+// two halves of the union really line up bucket for bucket, and which index the
+// engine reaches for.
 //
 // The correctness of a review is the one that matters most, because it is the
-// one that fails silently: read the wrong JSON path and every review counts as
+// one that fails silently: read the wrong field and every review counts as
 // neither right nor wrong, so a user who got everything right is shown an
 // accuracy of zero and nothing anywhere reports an error. The cases below pin
-// the path by constructing the reviews that tell the paths apart — a skip after
-// a wrong answer, whose answer face still says the old verdict.
+// the field by constructing the reviews that tell the candidates apart — a skip
+// after a wrong answer, whose answer face still says the old verdict — and the
+// last of them pins the one thing that separates the field being read now from
+// the JSON path it replaced, which is not an answer but a plan.
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"backend/internal/authz"
+	"backend/internal/data"
 	"backend/internal/data/testdb"
 	"backend/internal/notebook"
 )
@@ -184,6 +189,156 @@ func TestAccuracyCountsTheJudgedReviewsAndNotTheSkips(t *testing.T) {
 	if point.Accuracy != 0.5 {
 		t.Errorf("the accuracy is %v, wanted 0.5", point.Accuracy)
 	}
+}
+
+// The equivalence case for §2.8, and it is written to be green on both sides of
+// the change: the reviews are put in the table with the column and the document
+// saying the same thing, so it passes whether the statement reads
+// `is_correct` or `$.judgment.is_correct`. What it pins is that the two agree
+// where it matters — on the review nobody judged.
+//
+// The rows are written here rather than submitted through the service, because
+// what is under test is the SQL: a submitted skip is written by a writer this
+// case would then be trusting to have written the column too.
+func TestStatsAccuracyIgnoresUnjudgedReviews(t *testing.T) {
+	h := newStatsHarness(t)
+	storeQuestionAt(t, h.resource, "nbe_1", fillFor("闭包是什么"), statsBeforeDay)
+
+	review := func(requestID string, at time.Time, correct *bool, outcome any) {
+		t.Helper()
+		var column any
+		if correct != nil {
+			column = *correct
+		}
+		testdb.Exec(t, h.resource, "INSERT INTO practice_review_events "+
+			"(request_id, notebook_entries_id, is_correct, outcome_json, review_time) VALUES (?, ?, ?, ?, ?)",
+			requestID, "nbe_1", column, outcome, at)
+	}
+	judged := func(value bool) *bool { return &value }
+
+	review("rev_1", statsDay.Add(8*time.Hour), judged(true), `{"judgment":{"is_correct":true}}`)
+	review("rev_2", statsDay.Add(9*time.Hour), judged(false), `{"judgment":{"is_correct":false}}`)
+	// The skip. Its document carries no judgement at all and its answer face still
+	// holds the verdict of the review before it, which is the shape that makes
+	// `$.entry.is_correct` the wrong field to read: counted from there, a learner
+	// who skipped a question they had just got right is credited with another
+	// right answer.
+	review("rev_3", statsDay.Add(10*time.Hour), nil, `{"judgment":null,"entry":{"is_correct":true}}`)
+	// And a row whose document is not there at all, which is the other way a
+	// review arrives unjudged.
+	review("rev_4", statsDay.Add(11*time.Hour), nil, nil)
+
+	point := bucketAt(t, h.stats(t, StatsQuery{From: statsDay, To: statsDay}), "2026-10-06")
+	if point.Reviews != 4 {
+		t.Errorf("four reviews were written and the bucket counts %d", point.Reviews)
+	}
+	if point.Correct != 1 || point.Wrong != 1 {
+		t.Errorf("one right and one wrong review read %+v", point)
+	}
+	// The accuracy is a division over the reviews that were judged, so an
+	// unjudged one moves neither the numerator nor the denominator: it is not a
+	// wrong answer and not a right one.
+	if point.Accuracy != 0.5 {
+		t.Errorf("the accuracy is %v, wanted 0.5", point.Accuracy)
+	}
+}
+
+// The reason the statement changed, and the only thing that distinguishes it
+// from the one it replaced: the document cannot be indexed and the column can.
+//
+// The reviews half now reads nothing that is not in
+// `idx_practice_review_events_entry_outcome` — the question, the verdict and the
+// time are all columns of it — so the window is a range on that index instead of
+// a full scan with a document parsed per row. That is what this case watches, and
+// it has to watch the plan rather than the answer: both statements return the
+// same counters, which is the point of the equivalence case above.
+func TestStatsAccuracyUsesTheIndex(t *testing.T) {
+	h := newStatsHarness(t)
+	storeQuestionAt(t, h.resource, "nbe_1", fillFor("闭包是什么"), statsBeforeDay)
+	storeQuestionAt(t, h.resource, "nbe_2", fillFor("逃逸分析是什么"), statsBeforeDay)
+	// Rows to have a plan about: a cost-based optimizer choosing between a full
+	// scan and an index on a table of four rows is choosing at random, so the case
+	// gives it a table worth deciding about.
+	seedReviews(t, h.resource, "nbe_1", 600, statsDay.Add(9*time.Hour))
+	seedReviews(t, h.resource, "nbe_2", 600, statsDay.Add(10*time.Hour))
+
+	scope, owner := ownerPredicate("notebook_entries", testCaller())
+	from, to := statsDay, statsDay.Add(24*time.Hour)
+	plan := explain(t, h.resource, "EXPLAIN "+statsSeriesSQL(BucketDay, scope), from, to, owner, from, to, owner)
+	if !strings.Contains(plan, "idx_practice_review_events_entry_outcome") {
+		t.Fatalf("the plan does not name idx_practice_review_events_entry_outcome, so the reviews half is "+
+			"reading the document per row again:\n%s", plan)
+	}
+}
+
+// seedReviews writes n judged reviews of one question, straight into the table
+// and all inside one day. It exists for the plan case and says nothing about the
+// service: what a plan needs from a case is volume, not history.
+func seedReviews(t *testing.T, resource *data.Resource, entryID string, n int, at time.Time) {
+	t.Helper()
+	placeholders := make([]string, 0, n)
+	args := make([]any, 0, n*5)
+	for index := range n {
+		placeholders = append(placeholders, "(?, ?, ?, ?, ?)")
+		args = append(args, fmt.Sprintf("rev_%s_%d", entryID, index), entryID,
+			index%2 == 0, fmt.Sprintf(`{"judgment":{"is_correct":%t}}`, index%2 == 0), at)
+	}
+	testdb.Exec(t, resource, "INSERT INTO practice_review_events "+
+		"(request_id, notebook_entries_id, is_correct, outcome_json, review_time) VALUES "+
+		strings.Join(placeholders, ", "), args...)
+}
+
+// explain runs a statement through the engine's planner and returns what it said,
+// as text.
+//
+// Every cell is read as a string and the whole answer is handed back, because the
+// columns a plan comes back in are the engine's business and the question a case
+// asks of it is which table and which index the plan names — not which column the
+// engine chose to name it in.
+func explain(t *testing.T, resource *data.Resource, statement string, args ...any) string {
+	t.Helper()
+	rows, err := resource.GORM().Raw(statement, args...).Rows()
+	if err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+	columns, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("read the plan's columns: %v", err)
+	}
+
+	var plan strings.Builder
+	for rows.Next() {
+		values := make([]any, len(columns))
+		destinations := make([]any, len(columns))
+		for index := range values {
+			destinations[index] = &values[index]
+		}
+		if err := rows.Scan(destinations...); err != nil {
+			t.Fatalf("read the plan: %v", err)
+		}
+		for _, value := range values {
+			plan.WriteString(planCell(value))
+			plan.WriteByte(' ')
+		}
+		plan.WriteByte('\n')
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read the plan: %v", err)
+	}
+	return plan.String()
+}
+
+// planCell renders one cell of a plan. A text column arrives as its bytes, and
+// printing those with %v would print a list of numbers instead of the table name
+// the case is looking for.
+func planCell(value any) string {
+	if raw, ok := value.([]byte); ok {
+		return string(raw)
+	}
+	return fmt.Sprintf("%v", value)
 }
 
 func TestAWeekIsLabelledByItsMonday(t *testing.T) {

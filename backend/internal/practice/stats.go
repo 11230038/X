@@ -336,23 +336,28 @@ func bucketSQL(bucket Bucket, column string) string {
 // aggregations and summing them per bucket is what makes the series line up
 // bucket for bucket without a second round trip to check that they do.
 //
-// The correctness of a review is `$.judgment.is_correct`, and the two things
-// that path is not are both worth stating. It is not `$.is_correct`: the stored
-// response is the API response, whose `is_correct` sits inside the judgement
-// and inside the answer face, and a path that does not exist returns NULL
-// rather than failing — every review would count as neither correct nor wrong,
-// and the chart would show an accuracy of zero for a user who got everything
-// right.
+// The correctness of a review is the `is_correct` column, which migration 00011
+// lifted out of the document for this query: it is the same fact that sits at
+// `$.judgment.is_correct`, and the reason to read it here rather than there is
+// that a JSON path cannot be indexed. `idx_practice_review_events_entry_outcome`
+// covers every column the reviews half reads, so the window is a range on an
+// index; decoding the path made the same half a full scan with a document parsed
+// per row (§2.8).
 //
-// It is not the answer face's `is_correct` either, which does exist at
-// `$.entry.is_correct` and is the wrong fact: a skipped question writes no
-// answer face, so that field is whatever the question carried before it was
-// skipped. Counting it would credit a skip with the verdict of the review
-// before it.
+// The fact is three-valued on both sides, which is what makes this a
+// replacement rather than a change. A review nobody judged — a skip — is NULL in
+// the column, exactly as a missing JSON path reads as NULL, and `NULL = TRUE` is
+// NULL just as the path's absence made the old comparison NULL. So a skip is in
+// neither count either way, and no behaviour moves with the query.
 //
-// A review that was judged is compared with TRUE and with FALSE separately.
-// Neither comparison is true for a skip — the path is absent, so the comparison
-// is NULL — which is what leaves skips out of both counts.
+// What the column is not is either of the two other things a reviewer might
+// reach for: `$.is_correct` does not exist (the stored response is the API
+// response, where the field sits inside the judgement and inside the answer
+// face), and `$.entry.is_correct` exists but is the wrong fact — a skipped
+// question writes no answer face, so that field is whatever the question carried
+// before it was skipped, and counting it would credit a skip with the verdict of
+// the review before it. The migration's backfill is the same distinction, read
+// from the other end.
 //
 // Both halves are narrowed to the caller's own questions. The events half has no
 // owner column, so it is narrowed through the question it is filed under, with
@@ -371,8 +376,8 @@ func statsSeriesSQL(bucket Bucket, scope string) string {
 		"COALESCE(SUM(added), 0) AS added " +
 		"FROM (" +
 		"SELECT " + review + " AS bucket, COUNT(*) AS reviews, " +
-		"SUM(JSON_EXTRACT(outcome_json, '$.judgment.is_correct') = TRUE) AS correct, " +
-		"SUM(JSON_EXTRACT(outcome_json, '$.judgment.is_correct') = FALSE) AS wrong, " +
+		"SUM(is_correct = TRUE) AS correct, " +
+		"SUM(is_correct = FALSE) AS wrong, " +
 		"0 AS added " +
 		"FROM practice_review_events WHERE review_time >= ? AND review_time < ? " +
 		"AND notebook_entries_id IN (SELECT notebook_entries_id FROM notebook_entries WHERE " + scope + ") " +
