@@ -182,6 +182,36 @@ func TestLoadRejectsInvalidTokenTTL(t *testing.T) {
 	}
 }
 
+// TestLoadRejectsInvalidLockoutSettings walks each of the three numbers through
+// the shapes that parse and must still be refused, because the reading of all
+// three is "greater than zero" and the interesting failure is the one that is
+// zero: a threshold of zero is reached by the first failure, so it locks the
+// account on the first wrong password rather than never locking it.
+func TestLoadRejectsInvalidLockoutSettings(t *testing.T) {
+	cases := []struct {
+		key    string
+		values []string
+	}{
+		{testLockoutThresholdKey, []string{"0", "-1", "abc"}},
+		{testLockoutWindowKey, []string{"0s", "-1m", "soon"}},
+		{testLockoutDurationKey, []string{"0s", "-1m", "soon"}},
+	}
+
+	for _, tt := range cases {
+		for _, value := range tt.values {
+			t.Run(tt.key+"="+value, func(t *testing.T) {
+				values := validValues()
+				values[tt.key] = value
+
+				_, err := Load(writeDotenv(t, values))
+				if err == nil || !strings.Contains(err.Error(), tt.key) {
+					t.Fatalf("Load() error = %v, want an error naming %s", err, tt.key)
+				}
+			})
+		}
+	}
+}
+
 func TestLoadNeverEchoesTheJWTSecret(t *testing.T) {
 	values := validValues()
 	values[testTokenTTLKey] = "not-a-duration"
@@ -211,6 +241,7 @@ func TestLoadRejectsMissingAndEmptyValues(t *testing.T) {
 		{name: "missing database password", key: "DB_PASSWORD", remove: true},
 		{name: "empty database name", key: "DB_NAME"},
 		{name: "empty HTTP address", key: "HTTP_ADDR"},
+		{name: "missing lockout threshold", key: testLockoutThresholdKey, remove: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			values := validValues()

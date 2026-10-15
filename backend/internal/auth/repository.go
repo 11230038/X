@@ -9,6 +9,7 @@ import (
 	"backend/internal/data/models"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // accountColumns lists the only columns this adapter reads. The four a
@@ -96,6 +97,86 @@ func (r *GORMRepository) RevokeTokens(ctx context.Context, userID int64, at time
 		Model(&models.User{}).
 		Where("user_id = ?", userID).
 		Update("token_valid_after", at.UTC()).Error
+	if err != nil {
+		return mapRepositoryError(err)
+	}
+	return nil
+}
+
+// RecordFailure counts one failed sign-in, and writes the lock once the run of
+// them reaches the policy's threshold.
+//
+// The read and the write are one transaction with a locking read, because the
+// rule compares a number this statement is about to change: two requests that both
+// read four would both write five, and half of a paired guessing attack would go
+// uncounted. The lock is taken on a row that exists, which under this engine's
+// READ-COMMITTED is a record lock — there is no gap to leave unlocked here, since
+// the row the count lives in is the one being read.
+//
+// A run that keeps going while the account is locked keeps the lock: the count is
+// compared with "at or over" the threshold, so hammering a locked account does not
+// let the lock lapse in the middle of the attempt.
+func (r *GORMRepository) RecordFailure(
+	ctx context.Context, userID int64, at time.Time, policy FailurePolicy,
+) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("auth repository is not initialized")
+	}
+	moment := at.UTC()
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var model models.User
+		err := tx.
+			Select([]string{"user_id", "failed_attempts", "failed_window_start"}).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ?", userID).
+			First(&model).Error
+		if err != nil {
+			return mapRepositoryError(err)
+		}
+
+		count := model.FailedAttempts
+		start := model.FailedWindowStart
+		// A window that is empty, or that started longer ago than the window lasts,
+		// has run out: this failure is the first of a new run rather than one more
+		// of the old one. There is no "last failed at" column, so when the run
+		// started is the only thing the row remembers about it (§2.3).
+		if start == nil || !start.Add(policy.Window).After(moment) {
+			start = &moment
+			count = 1
+		} else {
+			count++
+		}
+
+		updates := map[string]any{
+			"failed_attempts":     count,
+			"failed_window_start": *start,
+		}
+		if count >= policy.Threshold {
+			updates["locked_until"] = moment.Add(policy.Duration)
+		}
+		return tx.Model(&models.User{}).Where("user_id = ?", userID).Updates(updates).Error
+	})
+}
+
+// ClearFailures forgets the run of failed sign-ins.
+//
+// It clears the lock as well, even though the successful sign-in that calls it
+// could only have got there with the lock already expired: an expired moment reads
+// as "not locked" at every use, so leaving it would keep a column that says two
+// things — was this account once locked, and is it locked now. What an account
+// that just signed in knows for certain is that there is no lock to remember.
+func (r *GORMRepository) ClearFailures(ctx context.Context, userID int64) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("auth repository is not initialized")
+	}
+	err := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Where("user_id = ?", userID).
+		Updates(map[string]any{
+			"failed_attempts":     0,
+			"failed_window_start": nil,
+			"locked_until":        nil,
+		}).Error
 	if err != nil {
 		return mapRepositoryError(err)
 	}

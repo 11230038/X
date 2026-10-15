@@ -8,14 +8,17 @@ import (
 )
 
 const (
-	testPassword        = "unit-test-password"
-	testJWTSecret       = "unit-test-jwt-secret-with-enough-bytes"
-	testJWTIssuer       = "x-backend-test"
-	testTokenTTLKey     = "AUTH_TOKEN_TTL"
-	testLLMAPIKey       = "unit-test-llm-api-key"
-	testEmbeddingKey    = "EMBEDDING_API_KEY"
-	testEmbeddingModel  = "qwen3.7-text-embedding-flash"
-	testEmbeddingAPIKey = "unit-test-embedding-api-key"
+	testPassword            = "unit-test-password"
+	testJWTSecret           = "unit-test-jwt-secret-with-enough-bytes"
+	testJWTIssuer           = "x-backend-test"
+	testTokenTTLKey         = "AUTH_TOKEN_TTL"
+	testLockoutThresholdKey = "AUTH_LOCKOUT_THRESHOLD"
+	testLockoutWindowKey    = "AUTH_LOCKOUT_WINDOW"
+	testLockoutDurationKey  = "AUTH_LOCKOUT_DURATION"
+	testLLMAPIKey           = "unit-test-llm-api-key"
+	testEmbeddingKey        = "EMBEDDING_API_KEY"
+	testEmbeddingModel      = "qwen3.7-text-embedding-flash"
+	testEmbeddingAPIKey     = "unit-test-embedding-api-key"
 )
 
 func validValues() map[string]string {
@@ -33,6 +36,9 @@ func validValues() map[string]string {
 		"AUTH_JWT_SECRET":           testJWTSecret,
 		"AUTH_JWT_ISSUER":           testJWTIssuer,
 		testTokenTTLKey:             "24h",
+		testLockoutThresholdKey:     "5",
+		testLockoutWindowKey:        "15m",
+		testLockoutDurationKey:      "15m",
 		"DB_HOST":                   "localhost",
 		"DB_PORT":                   "2881",
 		"DB_NAME":                   "x_test",

@@ -20,14 +20,20 @@ const (
 )
 
 type fakeRepository struct {
-	records     map[string]Record
-	byID        map[int64]Record
-	nextID      int64
-	createCalls int
-	findCalls   int
-	revokeCalls int
-	revokedUser int64
-	revokedAt   time.Time
+	records      map[string]Record
+	byID         map[int64]Record
+	nextID       int64
+	createCalls  int
+	findCalls    int
+	revokeCalls  int
+	revokedUser  int64
+	revokedAt    time.Time
+	failureCalls int
+	failedUser   int64
+	failedAt     time.Time
+	failedPolicy FailurePolicy
+	clearCalls   int
+	clearedUser  int64
 }
 
 func newFakeRepository() *fakeRepository {
@@ -95,6 +101,29 @@ func (f *fakeRepository) RevokeTokens(_ context.Context, userID int64, at time.T
 	return nil
 }
 
+// RecordFailure records the call and the moment it was handed, and does not count
+// anything. The rule it stands in for — a window, a threshold, a lock written
+// into a row — is a comparison against columns this fake does not have, and a
+// double cannot attest to it: it would restate the rule and then agree with
+// itself. That rule is checked where it lives, in lockout_db_test.go, over the
+// real adapter. What a case in this file reads off this are the calls.
+func (f *fakeRepository) RecordFailure(
+	_ context.Context, userID int64, at time.Time, policy FailurePolicy,
+) error {
+	f.failureCalls++
+	f.failedUser = userID
+	f.failedAt = at
+	f.failedPolicy = policy
+	return nil
+}
+
+// ClearFailures records the call the same way, and for the same reason.
+func (f *fakeRepository) ClearFailures(_ context.Context, userID int64) error {
+	f.clearCalls++
+	f.clearedUser = userID
+	return nil
+}
+
 func (f *fakeRepository) addAccount(t *testing.T, username, password string, disabled bool) Record {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
@@ -115,9 +144,10 @@ func (f *fakeRepository) addAccount(t *testing.T, username, password string, dis
 func newTestService(t *testing.T, repository Repository) *Service {
 	t.Helper()
 	service, err := NewService(Options{
-		Secret: testSecretRepeated,
-		Issuer: exampleTokenIssuer,
-		TTL:    testTokenTTL,
+		Secret:  testSecretRepeated,
+		Issuer:  exampleTokenIssuer,
+		TTL:     testTokenTTL,
+		Lockout: lockoutPolicy,
 	}, repository)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
@@ -288,6 +318,88 @@ func TestLoginOnlyRevealsDisabledAfterThePasswordMatches(t *testing.T) {
 	}
 	if _, err := service.Login(ctx, LoginInput{Username: exampleUsername, Password: testPassword}); !errors.Is(err, ErrAccountDisabled) {
 		t.Fatalf("Login() with correct password = %v, want ErrAccountDisabled", err)
+	}
+}
+
+// TestLoginWhileLockedDoesNotRevealTheAccount is the case the order of Login's
+// checks exists for.
+//
+// If being locked were decided before the password, anybody could point five
+// wrong passwords at a username and read the answer to learn whether that account
+// is real — locked means it exists, invalid credentials means it may not. So a
+// locked account answers a wrong password exactly the way an account that is not
+// there does, and the lock is only ever spoken of to somebody who proved the
+// account is theirs.
+func TestLoginWhileLockedDoesNotRevealTheAccount(t *testing.T) {
+	repository := newFakeRepository()
+	account := repository.addAccount(t, exampleUsername, testPassword, false)
+	service := newTestService(t, repository)
+	clock := withTestClock(service)
+	ctx := context.Background()
+
+	locked := account
+	until := clock.now().Add(time.Minute)
+	locked.LockedUntil = &until
+	repository.byID[account.User.UserID] = locked
+	repository.records[exampleUsername] = locked
+
+	wrongPassword := LoginInput{Username: exampleUsername, Password: otherPassword}
+	if result, err := service.Login(ctx, wrongPassword); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("Login() on a locked account with a wrong password = %v (token %q), want %v",
+			err, result.Token, ErrInvalidCredentials)
+	}
+	// The same answer for a username nobody holds, which is the whole point: the
+	// two are indistinguishable from out here.
+	if _, err := service.Login(ctx, LoginInput{Username: "nobody", Password: otherPassword}); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("Login() on a username nobody holds = %v, want %v", err, ErrInvalidCredentials)
+	}
+	// The failure the locked account's attempt earned was counted — locked is not
+	// a reason to stop counting, it is what counting leads to.
+	if repository.failureCalls != 1 || repository.failedUser != account.User.UserID {
+		t.Errorf("recorded %d failure(s) for account %d, want one for %d",
+			repository.failureCalls, repository.failedUser, account.User.UserID)
+	}
+
+	if result, err := service.Login(ctx, LoginInput{Username: exampleUsername, Password: testPassword}); !errors.Is(err, ErrAccountLocked) {
+		t.Fatalf("Login() on a locked account with the right password = %v (token %q), want %v",
+			err, result.Token, ErrAccountLocked)
+	}
+	// A refusal that clears the run would undo the lock by being attempted, and a
+	// refusal that counted a failure would mean the owner's own attempt deepens it.
+	if repository.clearCalls != 0 || repository.failureCalls != 1 {
+		t.Errorf("the locked attempt added %d failure(s) and %d clear(s), want neither",
+			repository.failureCalls-1, repository.clearCalls)
+	}
+}
+
+// TestLoginRecordsTheFailureAtTheServicesClock pins what the adapter is handed.
+// It cannot count anything — the rule lives with the columns — but the moment and
+// the policy are decided here, and a failure counted against a clock of the
+// adapter's own choosing would be measured against a window nobody configured.
+func TestLoginRecordsTheFailureAtTheServicesClock(t *testing.T) {
+	repository := newFakeRepository()
+	account := repository.addAccount(t, exampleUsername, testPassword, false)
+	service := newTestService(t, repository)
+	clock := withTestClock(service)
+
+	if _, err := service.Login(context.Background(),
+		LoginInput{Username: exampleUsername, Password: otherPassword}); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("Login() error = %v, want %v", err, ErrInvalidCredentials)
+	}
+
+	if repository.failureCalls != 1 {
+		t.Fatalf("recorded %d failures, want 1", repository.failureCalls)
+	}
+	if repository.failedUser != account.User.UserID {
+		t.Errorf("counted a failure for account %d, want %d", repository.failedUser, account.User.UserID)
+	}
+	if !repository.failedAt.Equal(clock.now()) {
+		t.Errorf("counted the failure at %v, want the service's clock reading %v",
+			repository.failedAt, clock.now())
+	}
+	if repository.failedPolicy != lockoutPolicy {
+		t.Errorf("counted the failure under %+v, want the configured %+v",
+			repository.failedPolicy, lockoutPolicy)
 	}
 }
 
@@ -516,10 +628,19 @@ func TestNewServiceValidatesOptions(t *testing.T) {
 		options Options
 		repo    Repository
 	}{
-		{name: "short secret", options: Options{Secret: "short", Issuer: exampleTokenIssuer, TTL: testTokenTTL}, repo: repository},
-		{name: "empty issuer", options: Options{Secret: testSecretRepeated, TTL: testTokenTTL}, repo: repository},
-		{name: "zero ttl", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer}, repo: repository},
-		{name: "missing repository", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, TTL: testTokenTTL}},
+		{name: "short secret", options: Options{Secret: "short", Issuer: exampleTokenIssuer, TTL: testTokenTTL, Lockout: lockoutPolicy}, repo: repository},
+		{name: "empty issuer", options: Options{Secret: testSecretRepeated, TTL: testTokenTTL, Lockout: lockoutPolicy}, repo: repository},
+		{name: "zero ttl", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, Lockout: lockoutPolicy}, repo: repository},
+		{name: "missing repository", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, TTL: testTokenTTL, Lockout: lockoutPolicy}},
+		// A threshold of zero is reached by every failure, so the first wrong
+		// password would lock the account. It is refused rather than interpreted,
+		// and so are the other two, which have no reading at all.
+		{name: "zero lockout threshold", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, TTL: testTokenTTL,
+			Lockout: FailurePolicy{Window: time.Minute, Duration: time.Minute}}, repo: repository},
+		{name: "zero lockout window", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, TTL: testTokenTTL,
+			Lockout: FailurePolicy{Threshold: 5, Duration: time.Minute}}, repo: repository},
+		{name: "zero lockout duration", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, TTL: testTokenTTL,
+			Lockout: FailurePolicy{Threshold: 5, Window: time.Minute}}, repo: repository},
 	}
 
 	for _, tt := range tests {

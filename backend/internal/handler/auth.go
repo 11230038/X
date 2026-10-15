@@ -174,6 +174,12 @@ func (h *AuthHandler) writeLoginError(c *gin.Context, err error) {
 		httpx.WriteError(c, http.StatusUnauthorized, "invalid_credentials", "invalid username or password")
 	case errors.Is(err, auth.ErrAccountDisabled):
 		httpx.WriteError(c, http.StatusForbidden, "account_disabled", "account is disabled")
+	case errors.Is(err, auth.ErrAccountLocked):
+		// A third answer, and a different one from the two above: this account is
+		// not disabled and no administrator has to do anything. It stops being
+		// locked on its own, so the client is being told to wait rather than to
+		// ask somebody — which is why the code is not account_disabled.
+		httpx.WriteError(c, http.StatusForbidden, "account_locked", "account is locked after too many failed sign-ins")
 	default:
 		h.writeAuthFailure(c, "login_failed", err)
 	}

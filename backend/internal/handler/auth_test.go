@@ -228,6 +228,10 @@ func TestAuthHandlerMapsLoginErrors(t *testing.T) {
 	}{
 		{err: auth.ErrInvalidCredentials, wantStatus: 401, wantCode: "invalid_credentials"},
 		{err: auth.ErrAccountDisabled, wantStatus: 403, wantCode: "account_disabled"},
+		// Locked is its own code rather than sharing account_disabled: the two are
+		// both 403 and nothing else about them is the same. This one ends on its
+		// own, so a client is being told to wait, not to ask an administrator.
+		{err: auth.ErrAccountLocked, wantStatus: 403, wantCode: "account_locked"},
 		{err: errors.New(handlerInternal), wantStatus: 500, wantCode: "login_failed"},
 	}
 

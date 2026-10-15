@@ -24,7 +24,8 @@ type User struct {
 	// this value, and nil takes no part in it.
 	TokenValidAfter *time.Time `gorm:"column:token_valid_after"`
 	// FailedAttempts counts the run of failed logins that FailedWindowStart
-	// opened. Reaching the lockout threshold writes LockedUntil and clears both.
+	// opened. Reaching the lockout threshold writes LockedUntil; what clears the
+	// run is a sign-in that succeeds, not the lock.
 	FailedAttempts int `gorm:"column:failed_attempts;not null"`
 	// FailedWindowStart is when that run began; a failure after the window has
 	// passed starts a new run at one.

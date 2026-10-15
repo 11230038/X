@@ -20,9 +20,24 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	// ErrAccountDisabled reports an account that exists but may not sign in.
 	ErrAccountDisabled = errors.New("account disabled")
+	// ErrAccountLocked reports an account that has failed too many logins in a row
+	// and is refused for a while. It is not ErrAccountDisabled: a lock ends on its
+	// own, and it only ever refuses a login — the tokens an account already holds
+	// keep working until they are taken back (§2.3).
+	ErrAccountLocked = errors.New("account locked")
 	// ErrInvalidToken reports a token that failed signature, format, or claim checks.
 	ErrInvalidToken = errors.New("invalid token")
 )
+
+// FailurePolicy is how many failed sign-ins, counted over how long, earn a lock,
+// and how long that lock lasts. All three are the deployment's to choose and all
+// three are required to be positive: a threshold of zero would be reached by the
+// first failure.
+type FailurePolicy struct {
+	Threshold int
+	Window    time.Duration
+	Duration  time.Duration
+}
 
 // User is the projection that is safe to return to HTTP callers.
 type User struct {
@@ -83,11 +98,24 @@ type Repository interface {
 	// RevokeTokens records the moment at or before which this account's tokens
 	// stopped counting. The moment is the caller's: see Service.now.
 	RevokeTokens(context.Context, int64, time.Time) error
+	// RecordFailure counts one failed sign-in and locks the account once the run of
+	// them reaches the policy's threshold. The moment is the caller's for the same
+	// reason: the window and the lock are both decided against moments already in
+	// the row.
+	RecordFailure(context.Context, int64, time.Time, FailurePolicy) error
+	// ClearFailures forgets the run of failed sign-ins. It is what a successful
+	// sign-in writes.
+	ClearFailures(context.Context, int64) error
 }
 
-// Options configure password hashing and token issuance.
+// Options configure password hashing, token issuance, and the lockout that
+// guards login.
 type Options struct {
 	Secret string
 	Issuer string
 	TTL    time.Duration
+	// Lockout has no default here on purpose: its three numbers come from the
+	// configuration file, and a service constructed without them is a deployment
+	// whose lockout nobody chose.
+	Lockout FailurePolicy
 }

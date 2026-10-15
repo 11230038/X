@@ -102,6 +102,11 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		Secret: cfg.Auth.Secret,
 		Issuer: cfg.Auth.Issuer,
 		TTL:    cfg.Auth.TTL,
+		Lockout: auth.FailurePolicy{
+			Threshold: cfg.Auth.LockoutThreshold,
+			Window:    cfg.Auth.LockoutWindow,
+			Duration:  cfg.Auth.LockoutDuration,
+		},
 	}, authRepository)
 	if err != nil {
 		return fmt.Errorf("initialize authentication: %w", err)

@@ -21,6 +21,7 @@ type Service struct {
 	repository Repository
 	signer     *TokenSigner
 	dummyHash  []byte
+	lockout    FailurePolicy
 	// now is the one clock this package reads. It is the same function the signer
 	// timestamps tokens with, and that is not a detail: whether a token still
 	// counts is decided by comparing the moment it was signed against the moment
@@ -43,9 +44,28 @@ func NewService(options Options, repository Repository) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("prepare password comparison: %w", err)
 	}
+	// There is no default policy. A threshold that arrived as zero would lock on
+	// the first wrong password, and one that arrived as a negative number is not a
+	// number of failures at all: both are deployments that meant something the
+	// configuration cannot say, so they stop here rather than at the first login.
+	if options.Lockout.Threshold <= 0 {
+		return nil, fmt.Errorf("the lockout threshold must be positive")
+	}
+	if options.Lockout.Window <= 0 {
+		return nil, fmt.Errorf("the lockout window must be positive")
+	}
+	if options.Lockout.Duration <= 0 {
+		return nil, fmt.Errorf("the lockout duration must be positive")
+	}
 	now := time.Now
 	signer.now = now
-	return &Service{repository: repository, signer: signer, dummyHash: dummyHash, now: now}, nil
+	return &Service{
+		repository: repository,
+		signer:     signer,
+		dummyHash:  dummyHash,
+		lockout:    options.Lockout,
+		now:        now,
+	}, nil
 }
 
 // Register validates the input, stores a bcrypt hash, and issues an access token.
@@ -71,6 +91,24 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (AuthResult
 }
 
 // Login verifies credentials and issues an access token.
+//
+// The order of the checks is the design, so it is written out as a sequence
+// rather than folded into conditions (§2.3):
+//
+//  1. a username outside the accepted bounds is refused without a lookup;
+//  2. a username that is not there is refused the same way;
+//  3. a wrong password is counted — this is the only step that writes a failure,
+//     and it runs only after the password is known to be wrong, so the count is
+//     about guesses rather than about asking;
+//  4. a correct password on a locked account is refused as locked;
+//  5. a correct password on a disabled account is refused as disabled;
+//  6. a correct password on an account that is neither clears the run and signs in.
+//
+// Steps 4 and 5 are both after the password, and that is the point: telling
+// somebody the account is locked or disabled before they have proved they own it
+// would turn this route into a way to ask whether a username exists. The cost is
+// stated in the design and accepted: a locked account gives no warning, so the
+// person it belongs to learns it by typing the right password.
 func (s *Service) Login(ctx context.Context, input LoginInput) (AuthResult, error) {
 	if !LoginUsernameInBounds(input.Username) {
 		s.equalizePasswordCheck(input.Password)
@@ -84,12 +122,29 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (AuthResult, erro
 		}
 		return AuthResult{}, err
 	}
+	// One reading for the two uses below: the moment a failure is counted at and
+	// the moment the lock is compared against are the same login, so they are the
+	// same now.
+	now := s.now().UTC()
 	if !verifyPassword(record.PasswordHash, input.Password) {
+		// A failure that could not be counted is not a login this can answer for:
+		// the whole point of counting in the database is that the count survives,
+		// and reporting a plain refusal over a counter that did not move would hide
+		// the reason it did not.
+		if err := s.repository.RecordFailure(ctx, record.User.UserID, now, s.lockout); err != nil {
+			return AuthResult{}, err
+		}
 		return AuthResult{}, ErrInvalidCredentials
+	}
+	if record.LockedUntil != nil && record.LockedUntil.After(now) {
+		return AuthResult{}, ErrAccountLocked
 	}
 	// The disabled state is only revealed once the password is known to be correct.
 	if record.Disabled {
 		return AuthResult{}, ErrAccountDisabled
+	}
+	if err := s.repository.ClearFailures(ctx, record.User.UserID); err != nil {
+		return AuthResult{}, err
 	}
 	return s.issue(record.User)
 }
