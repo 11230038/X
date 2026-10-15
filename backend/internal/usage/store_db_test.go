@@ -377,6 +377,30 @@ func TestDBPruneRemovesTheCallsBeforeTheMomentAndOnlyThose(t *testing.T) {
 	}
 }
 
+// The boundary itself, which the case above does not reach: a call that started
+// exactly at the moment the window cuts is kept.
+//
+// It gets its own case because the case above passes with a `<=` just as well as
+// with a `<` — every row in it is either clearly before the moment or clearly
+// after — and the difference is what makes `cmd/cleanup` safe to run on a
+// schedule: two runs whose cut lands on the same second remove the same rows
+// rather than disagreeing about the ones in between.
+func TestDBPruneKeepsACallThatStartedExactlyAtTheMoment(t *testing.T) {
+	ledger, resource, owner := newDBLedger(t)
+	insertRow(t, resource, aFinishedCall("call_on_the_moment", owner, atTen))
+
+	removed, err := ledger.Prune(context.Background(), atTen)
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if removed != 0 {
+		t.Errorf("Prune() = %d, want the call that started exactly at the moment kept", removed)
+	}
+	if left := read(t, ledger, Query{OwnerID: owner}); left.Finished.Calls != 1 {
+		t.Errorf("after the prune the report is %+v, want the call still counted", left)
+	}
+}
+
 // A ledger with no handle is a wiring mistake, and the one thing it must not do
 // is answer that nobody has spent anything.
 func TestAnUnwiredLedgerRefusesRatherThanAnsweringZero(t *testing.T) {
