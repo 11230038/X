@@ -461,9 +461,10 @@ func TestAuthenticateReloadsTheAccount(t *testing.T) {
 
 	t.Run("token from another signer", func(t *testing.T) {
 		other, err := NewService(Options{
-			Secret: strings.Repeat("b", 32),
-			Issuer: exampleTokenIssuer,
-			TTL:    testTokenTTL,
+			Secret:  strings.Repeat("b", 32),
+			Issuer:  exampleTokenIssuer,
+			TTL:     testTokenTTL,
+			Lockout: lockoutPolicy,
 		}, repository)
 		if err != nil {
 			t.Fatal(err)

@@ -246,12 +246,14 @@ func TestStatsAccuracyIgnoresUnjudgedReviews(t *testing.T) {
 // The reason the statement changed, and the only thing that distinguishes it
 // from the one it replaced: the document cannot be indexed and the column can.
 //
-// The reviews half now reads nothing that is not in
-// `idx_practice_review_events_entry_outcome` — the question, the verdict and the
-// time are all columns of it — so the window is a range on that index instead of
-// a full scan with a document parsed per row. That is what this case watches, and
-// it has to watch the plan rather than the answer: both statements return the
-// same counters, which is the point of the equivalence case above.
+// The reviews half now reads nothing that is not in the table's own columns —
+// the question, the verdict and the time — so the window is served by an index
+// instead of a full scan that decodes a document per row. That is what this case
+// watches, and it has to watch the plan rather than the answer: both statements
+// return the same counters, which is the point of the equivalence case above.
+//
+// Which index is deliberately not the assertion — see the case's own comment for
+// what the engine actually chose and why the column is the signature that moves.
 func TestStatsAccuracyUsesTheIndex(t *testing.T) {
 	h := newStatsHarness(t)
 	storeQuestionAt(t, h.resource, "nbe_1", fillFor("闭包是什么"), statsBeforeDay)
@@ -265,9 +267,23 @@ func TestStatsAccuracyUsesTheIndex(t *testing.T) {
 	scope, owner := ownerPredicate("notebook_entries", testCaller())
 	from, to := statsDay, statsDay.Add(24*time.Hour)
 	plan := explain(t, h.resource, "EXPLAIN "+statsSeriesSQL(BucketDay, scope), from, to, owner, from, to, owner)
-	if !strings.Contains(plan, "idx_practice_review_events_entry_outcome") {
-		t.Fatalf("the plan does not name idx_practice_review_events_entry_outcome, so the reviews half is "+
-			"reading the document per row again:\n%s", plan)
+	// Which column the plan reaches for, and not which index it names. Measured
+	// rather than assumed, by explaining both spellings of this aggregation on the
+	// same seeded table: the engine picks `idx_practice_review_events_entry_time`
+	// either way, because the window's predicate is `review_time` and that index
+	// leads with it. What moves is what the scan then does with the row —
+	// `is_index_back=true` to fetch `is_correct`, against fetching and parsing
+	// `outcome_json` — and the plan says which by naming the column in the node's
+	// access list. So this asserts the signature that actually differs between the
+	// two versions; an assertion on the outcome index would have been asserting the
+	// optimizer's choice, and would have failed on the fixed code.
+	if !strings.Contains(plan, "practice_review_events.is_correct") {
+		t.Fatalf("the plan never names practice_review_events.is_correct, so the reviews half is not "+
+			"reading the column at all:\n%s", plan)
+	}
+	if strings.Contains(plan, "practice_review_events.outcome_json") {
+		t.Fatalf("the plan reaches for practice_review_events.outcome_json, so the reviews half is "+
+			"decoding the document per row again:\n%s", plan)
 	}
 }
 

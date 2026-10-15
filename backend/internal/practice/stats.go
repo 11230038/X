@@ -5,11 +5,13 @@ package practice
 //
 // Two things about this file are load-bearing and easy to get wrong:
 //
-// The correctness of a review is read out of the stored response
-// (`outcome_json`) rather than out of a column, because the event table has no
-// column for it and no index that could serve one. That is affordable at this
-// version's scale — one person's practice history, thousands of rows — and the
-// first thing to change when it stops being affordable is to add the column.
+// The correctness of a review is read out of the `is_correct` column that
+// migration 00011 added, and not out of the stored response alongside it. This
+// used to be the other way round, with a paragraph here arguing that decoding
+// `outcome_json` was affordable at this version's scale; the column landed and
+// this became the first thing to change, which is what V6 §2.8 did. The two read
+// the same fact and there is an equivalence case for it, so the change is
+// invisible except in the plan — see statsSeriesSQL.
 //
 // An empty bucket is a bucket. The series a chart draws has one point per
 // bucket in the window, and a day nobody practised has a point at zero; a
@@ -339,10 +341,18 @@ func bucketSQL(bucket Bucket, column string) string {
 // The correctness of a review is the `is_correct` column, which migration 00011
 // lifted out of the document for this query: it is the same fact that sits at
 // `$.judgment.is_correct`, and the reason to read it here rather than there is
-// that a JSON path cannot be indexed. `idx_practice_review_events_entry_outcome`
-// covers every column the reviews half reads, so the window is a range on an
-// index; decoding the path made the same half a full scan with a document parsed
-// per row (§2.8).
+// that a JSON path cannot be indexed, so the document had to be fetched and
+// parsed for every row in the window (§2.8).
+//
+// Which index serves the window was measured rather than assumed, because it is
+// not the one 00011 added for this. The engine picks
+// `idx_practice_review_events_entry_time` — (notebook_entries_id, review_time
+// DESC) — because the window's predicate is `review_time` and that index leads
+// with it, and it goes back to the row (`is_index_back`) for the one column the
+// key does not carry. `idx_practice_review_events_entry_outcome` puts
+// `is_correct` second, so `review_time` is not a prefix of it and it cannot serve
+// a time window at all; it is the index for "how did this question's reviews
+// go", which is a different question from this one.
 //
 // The fact is three-valued on both sides, which is what makes this a
 // replacement rather than a change. A review nobody judged — a skip — is NULL in

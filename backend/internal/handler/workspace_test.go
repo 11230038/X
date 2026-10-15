@@ -281,8 +281,13 @@ func TestDownloadRefusesAJobWithNoPackage(t *testing.T) {
 	if disposition := recorder.Header().Get("Content-Disposition"); disposition != "" {
 		t.Errorf("a refused download set Content-Disposition = %q", disposition)
 	}
-	if recorder.Body.Len() != 0 {
-		t.Errorf("a refused download wrote %d bytes", recorder.Body.Len())
+	// The type rather than the length is what says "not a package". Every refusal
+	// in this API is the shared error envelope, so a body of zero bytes is not the
+	// shape of a refusal here and asserting one would be asserting a second
+	// convention. What a client could actually act on wrongly is a response it
+	// saves as a ZIP, and the type is what it decides that by.
+	if got := recorder.Header().Get("Content-Type"); strings.Contains(got, "zip") {
+		t.Errorf("a refused download answered Content-Type = %q", got)
 	}
 }
 
