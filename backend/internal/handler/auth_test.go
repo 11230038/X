@@ -33,6 +33,8 @@ type authStub struct {
 	err          error
 	registerCall *auth.RegisterInput
 	loginCall    *auth.LoginInput
+	revokeCalls  int
+	revokedUser  int64
 }
 
 func (s *authStub) Register(_ context.Context, input auth.RegisterInput) (auth.AuthResult, error) {
@@ -43,6 +45,12 @@ func (s *authStub) Register(_ context.Context, input auth.RegisterInput) (auth.A
 func (s *authStub) Login(_ context.Context, input auth.LoginInput) (auth.AuthResult, error) {
 	s.loginCall = &input
 	return s.result, s.err
+}
+
+func (s *authStub) RevokeTokens(_ context.Context, userID int64) error {
+	s.revokeCalls++
+	s.revokedUser = userID
+	return s.err
 }
 
 func sampleResult() auth.AuthResult {
@@ -238,6 +246,67 @@ func TestAuthHandlerMapsLoginErrors(t *testing.T) {
 	}
 }
 
+func TestAuthHandlerLogoutRevokesTheAccountInTheToken(t *testing.T) {
+	stub := &authStub{}
+	router := newAuthHandlerRouter(stub)
+
+	recorder := logout(t, router, true)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", recorder.Code, recorder.Body.String())
+	}
+	// The body is the whole of what a client is told: the tokens it holds are
+	// gone and nothing replaces them, so there is nothing to hand back.
+	if recorder.Body.Len() != 0 {
+		t.Errorf("body = %q, want it empty", recorder.Body.String())
+	}
+	// The id is the token's, not the request's: a body cannot name whose tokens
+	// stop counting, because there is no body.
+	if stub.revokeCalls != 1 || stub.revokedUser != handlerAccountID {
+		t.Errorf("revoked %d account(s), last = %d, want one call for %d",
+			stub.revokeCalls, stub.revokedUser, handlerAccountID)
+	}
+}
+
+func TestAuthHandlerLogoutWithoutATokenRevokesNothing(t *testing.T) {
+	stub := &authStub{}
+	recorder := logout(t, newAuthHandlerRouter(stub), false)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if stub.revokeCalls != 0 {
+		t.Fatalf("an unauthenticated request reached the service %d time(s)", stub.revokeCalls)
+	}
+}
+
+func TestAuthHandlerMapsLogoutFailure(t *testing.T) {
+	stub := &authStub{err: errors.New(handlerInternal)}
+	recorder := logout(t, newAuthHandlerRouter(stub), true)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"code":"logout_failed"`) {
+		t.Fatalf("body = %s, want code logout_failed", recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), handlerInternal) {
+		t.Fatal("response leaked the internal error")
+	}
+}
+
+// logout posts to the route the way a client does: nothing but the token.
+func logout(t *testing.T, router *gin.Engine, authenticated bool) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	if authenticated {
+		request.Header.Set("Authorization", "Bearer "+handlerToken)
+	}
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
 func TestAuthHandlerMeReturnsTheAuthenticatedUser(t *testing.T) {
 	router := newAuthHandlerRouter(&authStub{})
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
@@ -278,6 +347,7 @@ func newAuthHandlerRouter(authenticator Authenticator) *gin.Engine {
 	router.Use(middleware.RequestID())
 	router.POST("/api/v1/auth/register", handler.Register)
 	router.POST("/api/v1/auth/login", handler.Login)
+	router.POST("/api/v1/auth/logout", middleware.RequireAuth(handlerVerifierStub{}, logger), handler.Logout)
 	router.GET("/api/v1/auth/me", middleware.RequireAuth(handlerVerifierStub{}, logger), handler.Me)
 	return router
 }

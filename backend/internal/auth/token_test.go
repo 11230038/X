@@ -203,6 +203,21 @@ func TestTokenSignerRejectsInvalidClaimSets(t *testing.T) {
 		"empty username": {
 			RegisteredClaims: registeredClaims("1", time.Now()),
 		},
+		// Otherwise a perfectly good token, correctly signed by this signer, whose
+		// only fault is the missing iat. jwt accepts it — WithIssuedAt asks
+		// whether the claim is in the future, not whether it is there — so without
+		// the check in Verify this case is the one that goes red, and what it
+		// stands in for is worse than a red test: the revocation check reads iat on
+		// every authenticated request, and a nil there is a panic in the
+		// middleware chain rather than a refusal.
+		"missing issued at": {
+			Username: "alice", Role: "user",
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    testIssuer,
+				Subject:   "1",
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		},
 	}
 
 	for name, claims := range tests {

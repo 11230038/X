@@ -22,9 +22,14 @@ const maxAuthRequestBytes int64 = 4 << 10
 type Authenticator interface {
 	Register(context.Context, auth.RegisterInput) (auth.AuthResult, error)
 	Login(context.Context, auth.LoginInput) (auth.AuthResult, error)
+	// RevokeTokens takes back every token the account holds, including the one
+	// that made the request. There is no narrower form: nothing in a token tells
+	// two of an account's tokens apart, so "this device" is not a thing this
+	// build can be asked to sign out (§2.4).
+	RevokeTokens(context.Context, int64) error
 }
 
-// AuthHandler handles registration, login, and current-account requests.
+// AuthHandler handles registration, login, sign-out, and current-account requests.
 type AuthHandler struct {
 	authenticator Authenticator
 	logger        *slog.Logger
@@ -87,6 +92,30 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 	httpx.WriteSuccess(c, http.StatusOK, newSessionResponse(result))
+}
+
+// Logout takes back every token the account holds, the one that made this request
+// included, and answers with nothing.
+//
+// Nothing is issued in their place. A replacement token would have to be signed
+// after the moment just written, and at whole-second precision that asks the
+// revocation and the signing to land in different seconds — a security rule
+// resting on a coincidence of two clock reads. Signing in again is what a client
+// does instead, and the route says so by having no body to read (§2.2).
+func (h *AuthHandler) Logout(c *gin.Context) {
+	account, ok := callerAccount(c)
+	if !ok {
+		return
+	}
+	if h.authenticator == nil {
+		h.writeAuthFailure(c, "logout_failed", errors.New("auth service is not configured"))
+		return
+	}
+	if err := h.authenticator.RevokeTokens(c.Request.Context(), account.UserID); err != nil {
+		h.writeAuthFailure(c, "logout_failed", err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // Me returns the account established by the bearer token middleware.

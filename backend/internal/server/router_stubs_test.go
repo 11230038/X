@@ -350,6 +350,11 @@ func (routerAuthStub) Login(context.Context, auth.LoginInput) (auth.AuthResult, 
 	}, nil
 }
 
+// RevokeTokens takes nothing back, and that is the point of it being here: what
+// a stub has to satisfy is the route mounting, and a case about a token really
+// stopping is auth's — where the account row and the moment are both real.
+func (routerAuthStub) RevokeTokens(context.Context, int64) error { return nil }
+
 func (routerAuthStub) Authenticate(_ context.Context, token string) (auth.User, error) {
 	if token != routerAcceptedToken {
 		return auth.User{}, auth.ErrInvalidToken

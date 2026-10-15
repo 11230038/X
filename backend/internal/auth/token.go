@@ -91,6 +91,15 @@ func (s *TokenSigner) Verify(raw string) (Claims, error) {
 	if claims.Username == "" {
 		return Claims{}, ErrInvalidToken
 	}
+	// iat is required here even though the validator above does not require it.
+	// jwt's WithIssuedAt answers "is it in the future", not "is it there" — it
+	// calls its own check with required=false — so a token without one parses
+	// cleanly and leaves IssuedAt nil for everything that reads it. What reads it
+	// is the revocation check, on every authenticated request, which would then
+	// dereference nil and panic instead of refusing the token.
+	if claims.IssuedAt == nil {
+		return Claims{}, ErrInvalidToken
+	}
 	if _, err := claims.UserID(); err != nil {
 		return Claims{}, err
 	}

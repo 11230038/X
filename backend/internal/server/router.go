@@ -135,6 +135,12 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// can still ask why, and it is what a client reads to draw the refusals it
 	// has not been given yet (§2.16).
 	authenticated.GET("/me/permissions", handlers.Permissions.Get)
+	// Signing out is mounted with no surface for the same reason the route above
+	// is, and one of its own: an account that has been restricted out of every
+	// area must still be able to take its tokens back, and a token that has been
+	// taken back must not be held alive by a policy. The account it acts on is the
+	// one the token names, so there is nothing here to reach (§2.9).
+	authenticated.POST("/auth/logout", handlers.Auth.Logout)
 	system := reach(authz.SurfaceSystem)
 	system.GET("/auth/me", handlers.Auth.Me)
 	system.GET("/capabilities", handlers.Capabilities.List)

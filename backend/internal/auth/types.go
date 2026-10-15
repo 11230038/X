@@ -37,6 +37,17 @@ type Record struct {
 	User         User
 	PasswordHash string
 	Disabled     bool
+	// TokenValidAfter is when this account's tokens stopped counting. Nil is
+	// "never revoked", which is not the same as an early moment: a token is
+	// refused when it was signed at or before this value, and a nil value refuses
+	// nothing.
+	TokenValidAfter *time.Time
+	// FailedAttempts and FailedWindowStart are the run of failed logins the login
+	// path counts, and LockedUntil is when a lock ends — nil and a moment in the
+	// past both mean the account is not locked.
+	FailedAttempts    int
+	FailedWindowStart *time.Time
+	LockedUntil       *time.Time
 }
 
 // RegisterInput describes one registration attempt.
@@ -69,6 +80,9 @@ type Repository interface {
 	Create(context.Context, CreateParams) (Record, error)
 	FindByUsername(context.Context, string) (Record, error)
 	FindByID(context.Context, int64) (Record, error)
+	// RevokeTokens records the moment at or before which this account's tokens
+	// stopped counting. The moment is the caller's: see Service.now.
+	RevokeTokens(context.Context, int64, time.Time) error
 }
 
 // Options configure password hashing and token issuance.

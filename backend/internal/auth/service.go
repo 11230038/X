@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -20,6 +21,13 @@ type Service struct {
 	repository Repository
 	signer     *TokenSigner
 	dummyHash  []byte
+	// now is the one clock this package reads. It is the same function the signer
+	// timestamps tokens with, and that is not a detail: whether a token still
+	// counts is decided by comparing the moment it was signed against the moment
+	// it was revoked, so two clocks — even two that disagree by a second — would
+	// have the rule answer the wrong way about its own writes. One clock, used in
+	// two places.
+	now func() time.Time
 }
 
 // NewService validates the signing configuration and prepares password hashing.
@@ -35,7 +43,9 @@ func NewService(options Options, repository Repository) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("prepare password comparison: %w", err)
 	}
-	return &Service{repository: repository, signer: signer, dummyHash: dummyHash}, nil
+	now := time.Now
+	signer.now = now
+	return &Service{repository: repository, signer: signer, dummyHash: dummyHash, now: now}, nil
 }
 
 // Register validates the input, stores a bcrypt hash, and issues an access token.
@@ -104,7 +114,27 @@ func (s *Service) Authenticate(ctx context.Context, token string) (User, error) 
 	if record.Disabled {
 		return User{}, ErrAccountDisabled
 	}
+	// A token signed at or before the account's revocation moment no longer
+	// counts. Both moments are whole seconds — jwt truncates iat and the column
+	// holds no fractions — so the comparison is written with <= on purpose:
+	// refusing a token signed in the same second as the revocation costs the
+	// account one more login, while admitting one costs a revocation that
+	// silently did not happen. The disabled state above is still decided first,
+	// so a token on a disabled account is answered the way it always was.
+	if record.TokenValidAfter != nil && !claims.IssuedAt.Time.After(*record.TokenValidAfter) {
+		return User{}, ErrInvalidToken
+	}
 	return record.User, nil
+}
+
+// RevokeTokens takes back every token this account holds, the one that made the
+// request included: nothing in this build can tell two of an account's tokens
+// apart, so there is no such thing as revoking just one of them.
+func (s *Service) RevokeTokens(ctx context.Context, userID int64) error {
+	if userID <= 0 {
+		return ErrUserNotFound
+	}
+	return s.repository.RevokeTokens(ctx, userID, s.now().UTC())
 }
 
 func (s *Service) issue(user User) (AuthResult, error) {

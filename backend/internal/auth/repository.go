@@ -4,14 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"backend/internal/data/models"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
-// accountColumns lists the only columns this adapter reads.
-var accountColumns = []string{"user_id", "username", "role", "password", "disable"}
+// accountColumns lists the only columns this adapter reads. The four a
+// revocation or a lock is written into are read with the rest of the row because
+// Authenticate has to see them on every request and it is already reading this
+// row — a second query per request to ask "and is the token still good" would be
+// the same answer bought twice.
+var accountColumns = []string{
+	"user_id", "username", "role", "password", "disable",
+	"token_valid_after", "failed_attempts", "failed_window_start", "locked_until",
+}
 
 // GORMRepository persists accounts through GORM (seekdb via the MySQL protocol).
 type GORMRepository struct {
@@ -72,6 +80,28 @@ func (r *GORMRepository) find(ctx context.Context, query string, value any) (Rec
 	return recordFromModel(model), nil
 }
 
+// RevokeTokens writes the moment every token signed at or before it stops
+// counting. The moment arrives from the caller rather than from the database's
+// clock: what it is compared against is the token's own iat, and two clocks a
+// second apart would make the comparison answer the wrong way.
+//
+// An account that is not there is not an error here. Nothing was going to be
+// read back, and this is a write a caller makes about an account it has already
+// established — a missing row means the work is already done.
+func (r *GORMRepository) RevokeTokens(ctx context.Context, userID int64, at time.Time) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("auth repository is not initialized")
+	}
+	err := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Where("user_id = ?", userID).
+		Update("token_valid_after", at.UTC()).Error
+	if err != nil {
+		return mapRepositoryError(err)
+	}
+	return nil
+}
+
 func recordFromModel(model models.User) Record {
 	return Record{
 		User: User{
@@ -79,8 +109,12 @@ func recordFromModel(model models.User) Record {
 			Username: model.Username,
 			Role:     model.Role,
 		},
-		PasswordHash: model.PasswordHash,
-		Disabled:     model.Disable,
+		PasswordHash:      model.PasswordHash,
+		Disabled:          model.Disable,
+		TokenValidAfter:   model.TokenValidAfter,
+		FailedAttempts:    model.FailedAttempts,
+		FailedWindowStart: model.FailedWindowStart,
+		LockedUntil:       model.LockedUntil,
 	}
 }
 
