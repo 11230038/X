@@ -27,9 +27,15 @@ type Authenticator interface {
 	// two of an account's tokens apart, so "this device" is not a thing this
 	// build can be asked to sign out (§2.4).
 	RevokeTokens(context.Context, int64) error
+	// ChangePassword replaces the account's password, having checked the old one,
+	// and takes back every token it holds. It is the one write in this API that
+	// asks an account that is already signed in to prove itself again: a token
+	// says what an account may reach, not who is holding it (§2.9).
+	ChangePassword(context.Context, int64, string, string) error
 }
 
-// AuthHandler handles registration, login, sign-out, and current-account requests.
+// AuthHandler handles registration, login, sign-out, password changes, and
+// current-account requests.
 type AuthHandler struct {
 	authenticator Authenticator
 	logger        *slog.Logger
@@ -118,6 +124,52 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// passwordRequest is the body of a password change: the credential being
+// replaced, and the one replacing it.
+type passwordRequest struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
+// ChangePassword replaces the signed-in account's password.
+//
+// The account is the one the token names and never one from the request, which
+// is what keeps this from being a route for changing somebody else's password:
+// an administrator has no route to that at all — there is no such thing as
+// resetting a forgotten password in this build, and the absence is deliberate
+// (§0.2: it would need a mail channel).
+//
+// It is mounted with no surface, like the sign-out beside it. What a policy
+// decides is which areas of the product an account may reach, and the password
+// is what lets the account in: an account restricted out of every area must
+// still be able to replace it.
+//
+// Success is a 204 with no body. Every token this account holds has just been
+// taken back, this request's included, so there is no session left to hand back
+// and the client signs in again (§2.2).
+func (h *AuthHandler) ChangePassword(c *gin.Context) {
+	account, ok := callerAccount(c)
+	if !ok {
+		return
+	}
+	var request passwordRequest
+	if !h.decodeStrict(c, &request) {
+		return
+	}
+	if h.authenticator == nil {
+		h.writeAuthFailure(c, "password_change_failed", errors.New("auth service is not configured"))
+		return
+	}
+	err := h.authenticator.ChangePassword(
+		c.Request.Context(), account.UserID, request.OldPassword, request.NewPassword,
+	)
+	if err != nil {
+		h.writePasswordError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // Me returns the account established by the bearer token middleware.
 func (h *AuthHandler) Me(c *gin.Context) {
 	user, ok := middleware.CurrentUser(c)
@@ -128,28 +180,44 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	httpx.WriteSuccess(c, http.StatusOK, gin.H{"user": user})
 }
 
-// decodeCredentials reads one strict, size-bounded JSON credential object.
-func (h *AuthHandler) decodeCredentials(c *gin.Context) (credentialsRequest, bool) {
+// decodeStrict reads one size-bounded JSON object into target, and refuses
+// everything else the way every credential route refuses it.
+//
+// It is one function for the three of them — register, sign in, change password
+// — because the strictness is one policy rather than three. An unknown field, a
+// second document in the same body, and a body past the bound are each refused
+// here, and a route that grew its own copy of this would be a route where one of
+// the three is eventually not refused. The bound is this package's smallest
+// because all three bodies carry two short fields.
+func (h *AuthHandler) decodeStrict(c *gin.Context, target any) bool {
 	responseWriter := http.ResponseWriter(c.Writer)
 	if unwrapper, ok := responseWriter.(interface{ Unwrap() http.ResponseWriter }); ok {
 		responseWriter = unwrapper.Unwrap()
 	}
 	c.Request.Body = http.MaxBytesReader(responseWriter, c.Request.Body, maxAuthRequestBytes)
 
-	var request credentialsRequest
 	decoder := json.NewDecoder(c.Request.Body)
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
+	if err := decoder.Decode(target); err != nil {
 		var maxBytesError *http.MaxBytesError
 		if errors.As(err, &maxBytesError) {
 			httpx.WriteError(c, http.StatusRequestEntityTooLarge, "request_too_large", "request body is too large")
-			return credentialsRequest{}, false
+			return false
 		}
 		httpx.WriteError(c, http.StatusBadRequest, "invalid_request", "request body is invalid")
-		return credentialsRequest{}, false
+		return false
 	}
 	if err := decoder.Decode(new(struct{})); !errors.Is(err, io.EOF) {
 		httpx.WriteError(c, http.StatusBadRequest, "invalid_request", "request body is invalid")
+		return false
+	}
+	return true
+}
+
+// decodeCredentials reads one strict, size-bounded JSON credential object.
+func (h *AuthHandler) decodeCredentials(c *gin.Context) (credentialsRequest, bool) {
+	var request credentialsRequest
+	if !h.decodeStrict(c, &request) {
 		return credentialsRequest{}, false
 	}
 	return request, true
@@ -182,6 +250,31 @@ func (h *AuthHandler) writeLoginError(c *gin.Context, err error) {
 		httpx.WriteError(c, http.StatusForbidden, "account_locked", "account is locked after too many failed sign-ins")
 	default:
 		h.writeAuthFailure(c, "login_failed", err)
+	}
+}
+
+// writePasswordError answers a password change that did not happen.
+func (h *AuthHandler) writePasswordError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, auth.ErrWrongPassword):
+		// 403 and not 401: the token is valid and this is the account it names,
+		// so nothing is missing from what the client already presented. What
+		// failed is the second, deliberate proof this one route asks for — and a
+		// 401 would tell a client its token was bad, which is the one thing it
+		// was not, and would have it drop a credential that still works.
+		httpx.WriteError(c, http.StatusForbidden, "invalid_credentials", "the current password is not this account's")
+	case errors.Is(err, auth.ErrInvalidPassword):
+		// The same code registration answers with, for the same rule: a new
+		// password is judged by the policy every password is judged by, or the
+		// policy would only ever apply to accounts that never changed one.
+		httpx.WriteError(c, http.StatusBadRequest, "invalid_password", "the new password is invalid")
+	case errors.Is(err, auth.ErrUserNotFound):
+		// The account came from the token and the middleware reloaded it on this
+		// request, so the only way here is the account having been removed in the
+		// moment between the two reads.
+		httpx.WriteError(c, http.StatusUnauthorized, "invalid_token", "the account this token names no longer exists")
+	default:
+		h.writeAuthFailure(c, "password_change_failed", err)
 	}
 }
 

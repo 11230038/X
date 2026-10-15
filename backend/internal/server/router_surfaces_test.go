@@ -104,6 +104,12 @@ func TestRouterRegistersGovernanceUnderTheAdministrativeSurface(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/v1/admin/users", "", authz.SurfaceAdmin},
 		{http.MethodPatch, "/api/v1/admin/users/42", `{"preset":"learner"}`, authz.SurfaceAdmin},
+		// The two writes about whether an account can sign in at all, as against
+		// what it may reach once it has. They are here rather than on the
+		// unfaced group with the account's own sign-out because they act on
+		// somebody else's account, and that is the whole difference between them.
+		{http.MethodDelete, "/api/v1/admin/users/42/sessions", "", authz.SurfaceAdmin},
+		{http.MethodDelete, "/api/v1/admin/users/42/lock", "", authz.SurfaceAdmin},
 		{http.MethodGet, "/api/v1/admin/users/42/grants", "", authz.SurfaceAdmin},
 		{http.MethodPost, "/api/v1/admin/users/42/grants", `{"kind":"surface","id":"reading","allowed":true}`, authz.SurfaceAdmin},
 		{http.MethodDelete, "/api/v1/admin/users/42/grants", `{"kind":"surface","id":"reading"}`, authz.SurfaceAdmin},
@@ -154,8 +160,58 @@ func TestRouterRegistersGovernanceUnderTheAdministrativeSurface(t *testing.T) {
 				recorder := httptest.NewRecorder()
 				router := newTestRouterWithAuthorizer(t, readyChecker{}, nil, routerAuthorizerStub{})
 				router.ServeHTTP(recorder, routerRequest(testCase.method, testCase.path, testCase.body, true))
-				if recorder.Code != http.StatusOK && recorder.Code != http.StatusCreated {
-					t.Fatalf("status = %d, want 200 or 201; body=%s", recorder.Code, recorder.Body.String())
+				// 204 joins the two here because the two sign-in writes above say
+				// everything they have to say in the status: what changed is a
+				// state that now holds, and a body would be a client's copy of
+				// something only the account can be told by signing in again.
+				switch recorder.Code {
+				case http.StatusOK, http.StatusCreated, http.StatusNoContent:
+				default:
+					t.Fatalf("status = %d, want 200, 201 or 204; body=%s", recorder.Code, recorder.Body.String())
+				}
+			})
+		})
+	}
+}
+
+// TestRouterKeepsSigningOutAndChangingAPasswordOutsideEveryPolicy pins the two
+// routes an account has over its own credential, and the thing about them that
+// only a mount can show: neither is behind a surface (§2.9).
+//
+// The case to answer is a policy that refuses everything — an account whose
+// preset reaches nothing, or one whose every item has been withdrawn. If either
+// of these were mounted under a surface, such an account could not take its
+// tokens back and could not replace the password that lets it in, and the failure
+// would look like a client whose sign-out silently 403s. The permissions route
+// beside them is mounted unfaced for the same reason; these two are the stronger
+// case of it, because what is at stake is not being told why but being able to
+// get out.
+func TestRouterKeepsSigningOutAndChangingAPasswordOutsideEveryPolicy(t *testing.T) {
+	denied := newTestRouterWithAuthorizer(t, readyChecker{}, nil, routerAuthorizerStub{deny: true})
+
+	cases := []struct{ name, method, path, body string }{
+		{"signing out", http.MethodPost, "/api/v1/auth/logout", ""},
+		{"changing a password", http.MethodPut, "/api/v1/me/password",
+			`{"old_password":"correct-horse","new_password":"a-much-longer-one"}`},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Run("without a token it is unauthenticated", func(t *testing.T) {
+				recorder := httptest.NewRecorder()
+				router := newTestRouterWithAuthorizer(t, readyChecker{}, nil, routerAuthorizerStub{})
+				router.ServeHTTP(recorder,
+					routerRequest(testCase.method, testCase.path, testCase.body, false))
+				if recorder.Code != http.StatusUnauthorized {
+					t.Fatalf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
+				}
+			})
+
+			t.Run("a policy that refuses everything does not close it", func(t *testing.T) {
+				recorder := httptest.NewRecorder()
+				denied.ServeHTTP(recorder,
+					routerRequest(testCase.method, testCase.path, testCase.body, true))
+				if recorder.Code != http.StatusNoContent {
+					t.Fatalf("status = %d, want 204; body=%s", recorder.Code, recorder.Body.String())
 				}
 			})
 		})

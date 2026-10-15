@@ -184,7 +184,14 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		// questions: the administrator reads every account and every
 		// relationship, and a guardian reads the ones it holds. Both are mounted
 		// behind the surface that decides who may ask at all.
-		Admin:     handler.NewAdminHandler(ai.authorization, ai.authorization, logger),
+		// The two sign-in writes are the auth service rather than the
+		// authorization one: revoking an account's tokens and clearing its lock
+		// are the same acts the account performs on itself, asked by an
+		// administrator about somebody else. The audit goes in beside them
+		// because these two routes cannot be served without it.
+		Admin: handler.NewAdminHandler(
+			ai.authorization, ai.authorization, authService, ai.auditLog, logger,
+		),
 		Guardians: handler.NewGuardianHandler(ai.authorization, logger),
 		// The audit is its own surface's read: it is where the decisions the
 		// other routes make are read back, and it is mounted behind the

@@ -102,11 +102,12 @@ func newTestRouterWithGates(
 		Questions:   handler.NewQuestionHandler(routerQuestionsStub{}, logger),
 		Practice:    handler.NewPracticeHandler(routerPracticeStub{err: practiceErr}, routerQueueSize, logger),
 		Permissions: handler.NewPermissionsHandler(routerPermissionsStub{}, logger),
-		Admin:       handler.NewAdminHandler(routerAdminStub{}, routerAdminStub{}, logger),
-		Guardians:   handler.NewGuardianHandler(routerGuardianStub{}, logger),
-		Audit:       handler.NewAuditHandler(routerAuditStub{}, logger),
-		Reports:     handler.NewReportsHandler(routerDashboardStub{}, routerAuditWriterStub{}, logger),
-		Usage:       handler.NewUsageHandler(routerUsageStub{}, logger),
+		Admin: handler.NewAdminHandler(
+			routerAdminStub{}, routerAdminStub{}, routerAdminStub{}, routerAuditWriterStub{}, logger),
+		Guardians: handler.NewGuardianHandler(routerGuardianStub{}, logger),
+		Audit:     handler.NewAuditHandler(routerAuditStub{}, logger),
+		Reports:   handler.NewReportsHandler(routerDashboardStub{}, routerAuditWriterStub{}, logger),
+		Usage:     handler.NewUsageHandler(routerUsageStub{}, logger),
 		// The package routes are the one group here mounted with no surface, and
 		// the stub beside them is what lets router_workspace_test.go say so: a
 		// policy that refuses everything refuses the library and not these.
@@ -246,6 +247,14 @@ func (routerAdminStub) Assign(context.Context, authz.Caller, int64, authz.Item, 
 
 func (routerAdminStub) Withdraw(context.Context, int64, authz.Item) error { return nil }
 
+// The two sign-in writes are served by the same stub as the rest of governance
+// here, because what this file is about is which routes exist and which group
+// each sits in. What they do is handler/admin_test.go's business.
+
+func (routerAdminStub) RevokeTokens(context.Context, int64) error { return nil }
+
+func (routerAdminStub) Unlock(context.Context, int64) error { return nil }
+
 // routerGuardianStub answers the relationship routes.
 type routerGuardianStub struct{}
 
@@ -354,6 +363,12 @@ func (routerAuthStub) Login(context.Context, auth.LoginInput) (auth.AuthResult, 
 // a stub has to satisfy is the route mounting, and a case about a token really
 // stopping is auth's — where the account row and the moment are both real.
 func (routerAuthStub) RevokeTokens(context.Context, int64) error { return nil }
+
+// ChangePassword takes nothing either, for the reason above: whether the old
+// password was really checked and whether the account really ends up unable to
+// use the old one are questions about a stored hash, and they are asked in
+// internal/auth against a real database.
+func (routerAuthStub) ChangePassword(context.Context, int64, string, string) error { return nil }
 
 func (routerAuthStub) Authenticate(_ context.Context, token string) (auth.User, error) {
 	if token != routerAcceptedToken {

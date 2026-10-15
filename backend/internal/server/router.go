@@ -141,6 +141,13 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// taken back must not be held alive by a policy. The account it acts on is the
 	// one the token names, so there is nothing here to reach (§2.9).
 	authenticated.POST("/auth/logout", handlers.Auth.Logout)
+	// Changing the password is mounted with no surface for the same reason, and
+	// it is the stronger case of the two: the password is what lets an account in
+	// at all, so an account a preset has denied every area must still be able to
+	// replace it. It is the one route in this API written as a PUT, because a
+	// password is a single value replaced whole rather than a thing edited in
+	// parts (§2.9). The account is the token's, so there is nothing here to reach.
+	authenticated.PUT("/me/password", handlers.Auth.ChangePassword)
 	system := reach(authz.SurfaceSystem)
 	system.GET("/auth/me", handlers.Auth.Me)
 	system.GET("/capabilities", handlers.Capabilities.List)
@@ -348,6 +355,14 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	admin := reach(authz.SurfaceAdmin)
 	admin.GET("/admin/users", handlers.Admin.ListUsers)
 	admin.PATCH("/admin/users/:userID", handlers.Admin.UpdateUser)
+	// The two writes about whether an account can get in at all, as opposed to
+	// what it may reach once it has. Both are named after the account's property
+	// rather than an action — the lock is a thing an account has and the sessions
+	// are things it holds, so both are DELETEs under the account — and both write
+	// an audit entry whose subject is that account, because the administrator
+	// acting and the account acted on are two different people (§2.9, §4).
+	admin.DELETE("/admin/users/:userID/sessions", handlers.Admin.RevokeSessions)
+	admin.DELETE("/admin/users/:userID/lock", handlers.Admin.Unlock)
 	// A grant is one row per (account, item) and the item is two values — a kind
 	// and an id, half of which are the empty id that means "every item of this
 	// kind" — so the read is under the account and the write names the item in

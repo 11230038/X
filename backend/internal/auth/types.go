@@ -25,6 +25,12 @@ var (
 	// own, and it only ever refuses a login — the tokens an account already holds
 	// keep working until they are taken back (§2.3).
 	ErrAccountLocked = errors.New("account locked")
+	// ErrWrongPassword reports a password that does not match the account's stored
+	// hash. It exists for the one place a caller has to prove an identity it is
+	// already signed in as — changing its own password — where Login's
+	// ErrInvalidCredentials would be the wrong sentence: that one deliberately
+	// covers "no such account" as well, and here the account is not in question.
+	ErrWrongPassword = errors.New("wrong password")
 	// ErrInvalidToken reports a token that failed signature, format, or claim checks.
 	ErrInvalidToken = errors.New("invalid token")
 )
@@ -104,8 +110,15 @@ type Repository interface {
 	// the row.
 	RecordFailure(context.Context, int64, time.Time, FailurePolicy) error
 	// ClearFailures forgets the run of failed sign-ins. It is what a successful
-	// sign-in writes.
+	// sign-in writes, and it is also what an administrator's unlock writes: one
+	// state, two ways to reach it.
 	ClearFailures(context.Context, int64) error
+	// ReplacePassword writes a new hash and the moment the tokens signed with the
+	// old one stopped counting, as one write. The two are one change rather than
+	// two: a password that has been replaced while tokens signed with the old one
+	// still work is a state no caller asked for and none of them can name. The
+	// moment is the caller's, for the reason RevokeTokens gives.
+	ReplacePassword(context.Context, int64, string, time.Time) error
 }
 
 // Options configure password hashing, token issuance, and the lockout that

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"backend/internal/audit"
 	"backend/internal/authz"
 	"backend/internal/httpx"
 	"github.com/gin-gonic/gin"
@@ -26,6 +27,22 @@ type GrantAdmin interface {
 	Withdraw(ctx context.Context, userID int64, item authz.Item) error
 }
 
+// AccountSessions is the third thing governance decides about an account, beside
+// the preset it carries and the grants written on top of that: whether what it
+// holds still counts, and whether it is locked out (§2.3, §2.4).
+//
+// The two are separate from the preset change rather than folded into it because
+// they are separate acts with separate reasons. An administrator resetting a
+// preset is deciding what an account may reach; one revoking its sessions is
+// saying the person holding them now is not the account's owner; and one
+// unlocking it is deciding the run of failed sign-ins may stop counting. One
+// route per act keeps one audit entry per act: folded together, an entry about a
+// preset would carry the news that somebody's sessions were ended with it.
+type AccountSessions interface {
+	RevokeTokens(ctx context.Context, userID int64) error
+	Unlock(ctx context.Context, userID int64) error
+}
+
 // AdminHandler serves the governance routes (§2.16).
 //
 // It is what makes the four-layer model reachable at all: without it a preset
@@ -36,12 +53,22 @@ type GrantAdmin interface {
 type AdminHandler struct {
 	accounts AccountAdmin
 	grants   GrantAdmin
-	logger   *slog.Logger
+	sessions AccountSessions
+	// audit is where the two sign-in routes below leave their entry. It is
+	// required rather than optional, and unlike the preset change that is not a
+	// matter of what this handler has been handed: ending somebody's sessions is
+	// the governance act an audit most needs to be able to answer, and a build
+	// that would perform it unrecorded should refuse instead.
+	audit  AuditWriter
+	logger *slog.Logger
 }
 
 // NewAdminHandler constructs the governance handler.
-func NewAdminHandler(accounts AccountAdmin, grants GrantAdmin, logger *slog.Logger) *AdminHandler {
-	return &AdminHandler{accounts: accounts, grants: grants, logger: logger}
+func NewAdminHandler(
+	accounts AccountAdmin, grants GrantAdmin, sessions AccountSessions,
+	writer AuditWriter, logger *slog.Logger,
+) *AdminHandler {
+	return &AdminHandler{accounts: accounts, grants: grants, sessions: sessions, audit: writer, logger: logger}
 }
 
 // accountView is one row of the account list.
@@ -121,6 +148,101 @@ func (h *AdminHandler) UpdateUser(c *gin.Context) {
 		return
 	}
 	httpx.WriteSuccess(c, http.StatusOK, gin.H{"user_id": userID, "preset": request.Preset})
+}
+
+// RevokeSessions takes back every token one account holds.
+//
+// It is what an administrator has instead of that account's own sign-out, and
+// the reason a sign-out and this are one act rather than two: nothing in this
+// build tells two of an account's tokens apart, so "the sessions of account 42"
+// is the narrowest thing either of them can name (§2.4). What it does not do is
+// stop the account signing in again — that is the lock's business, and the two
+// are separate columns and separate routes for that reason.
+func (h *AdminHandler) RevokeSessions(c *gin.Context) {
+	h.writeSignInState(c, "revoke_sessions_failed", audit.ActionSessionsRevoked,
+		func(ctx context.Context, sessions AccountSessions, userID int64) error {
+			return sessions.RevokeTokens(ctx, userID)
+		})
+}
+
+// Unlock clears the run of failed sign-ins that locked an account, so its owner
+// can sign in before the lock would have run out on its own.
+//
+// This is the way out of the mechanism's own cost (§2.3): the count is kept per
+// username, so anybody who knows a username can spend its owner's next few
+// minutes outside. The threshold and the window make that expensive; this makes
+// it recoverable, and it is the reason the cost was accepted.
+func (h *AdminHandler) Unlock(c *gin.Context) {
+	h.writeSignInState(c, "unlock_failed", audit.ActionUnlocked,
+		func(ctx context.Context, sessions AccountSessions, userID int64) error {
+			return sessions.Unlock(ctx, userID)
+		})
+}
+
+// writeSignInState is the two routes above. Both name an account in their path,
+// both change something about whether it can sign in, both answer 204 with no
+// body, and both leave one entry naming the administrator as the actor and the
+// account as the subject — which is the pair the subject column exists for.
+//
+// Nothing here asks the account whether it exists. Both changes are statements
+// about a state rather than creations: "account 42's tokens do not count" and
+// "account 42 is not locked" are true of an account that was never there, and
+// the caller has got what it asked for either way. A 404 would say a state was
+// not established when it was.
+//
+// The entry is written after the change, and a failure to write it is reported
+// rather than logged and swallowed. Serving a 204 over a change that cannot be
+// found afterwards is the one answer this table exists to prevent; and because
+// both writes are idempotent — revoking twice and unlocking twice change nothing
+// the second time — the 500 is one a client may simply repeat.
+//
+// The change arrives as a closure over the interface rather than as a method
+// value taken at the call site, and that is not indirection for its own sake:
+// `h.sessions` may be nil — nothing has been wired — and taking a method value
+// from a nil interface panics where it is taken, before the check below can
+// answer a 500. The closure is what keeps the check first.
+func (h *AdminHandler) writeSignInState(
+	c *gin.Context, code string, action audit.Action,
+	change func(context.Context, AccountSessions, int64) error,
+) {
+	if h == nil || h.sessions == nil || h.audit == nil {
+		httpx.WriteError(c, http.StatusInternalServerError, "admin_unavailable", "governance is not configured")
+		return
+	}
+	userID, ok := h.userID(c)
+	if !ok {
+		return
+	}
+	actor, ok := callerAccount(c)
+	if !ok {
+		return
+	}
+	if err := change(c.Request.Context(), h.sessions, userID); err != nil {
+		h.fail(c, code, err)
+		return
+	}
+	err := h.audit.Record(c.Request.Context(), audit.Event{
+		Actor:  audit.Actor{ID: actor.UserID, Name: actor.Username, Role: actor.Role},
+		Action: action,
+		Target: audit.Ref{Kind: audit.TargetAccount, ID: strconv.FormatInt(userID, 10)},
+		// The actor and the subject are two accounts here, which is what this
+		// column is for: the account an entry is about is not the account that
+		// acted, and asking "what has been done to this account" has to be one
+		// query rather than a scan of every administrator's actions.
+		SubjectID: userID,
+		Result:    audit.ResultOK,
+		RequestID: httpx.RequestID(c),
+	})
+	if err != nil {
+		if h.logger != nil {
+			h.logger.Error("recording a governance write failed",
+				"request_id", httpx.RequestID(c), "action", string(action), "error", err)
+		}
+		httpx.WriteError(c, http.StatusInternalServerError, "audit_unavailable",
+			"the change was made but could not be recorded")
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // ListGrants returns the decisions recorded about one account.

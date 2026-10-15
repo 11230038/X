@@ -183,6 +183,38 @@ func (r *GORMRepository) ClearFailures(ctx context.Context, userID int64) error 
 	return nil
 }
 
+// ReplacePassword writes the new hash and the revocation moment in one statement.
+//
+// One statement rather than two, because the two columns are two halves of one
+// change: the account's credential was replaced, so everything signed with the
+// old one stops counting. Written separately there is a window — as long as a
+// network round trip — in which the new password is already in force and a token
+// signed with the old one still is, and a caller that saw a failure between the
+// two writes would have no way to tell which half had happened.
+//
+// An account that is not there is not an error, for the reason RevokeTokens
+// gives: this is a write about an account its caller has already established,
+// and here the establishment is stronger than usual — ChangePassword reads the
+// row and verifies the old password against it before calling this.
+func (r *GORMRepository) ReplacePassword(
+	ctx context.Context, userID int64, passwordHash string, at time.Time,
+) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("auth repository is not initialized")
+	}
+	err := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Where("user_id = ?", userID).
+		Updates(map[string]any{
+			"password":          passwordHash,
+			"token_valid_after": at.UTC(),
+		}).Error
+	if err != nil {
+		return mapRepositoryError(err)
+	}
+	return nil
+}
+
 func recordFromModel(model models.User) Record {
 	return Record{
 		User: User{

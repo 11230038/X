@@ -39,6 +39,16 @@ const (
 	// ActionPresetChanged is an administrator moving an account between
 	// presets.
 	ActionPresetChanged Action = "account.preset_changed"
+	// ActionSessionsRevoked is an administrator taking back every token one
+	// account holds (§2.4). The account's own sign-out is deliberately not here:
+	// it is a thing an account does to itself, and this table is about who did
+	// what to somebody else. What makes this worth a row is that the sessions an
+	// administrator ends are not the administrator's own.
+	ActionSessionsRevoked Action = "account.sessions_revoked"
+	// ActionUnlocked is an administrator clearing the run of failed sign-ins that
+	// locked an account, which lets its owner in before the lock would have run
+	// out on its own (§2.3).
+	ActionUnlocked Action = "account.unlocked"
 	// ActionGrantWritten is an administrator turning one item on or off.
 	ActionGrantWritten Action = "grant.written"
 	// ActionGrantWithdrawn is an administrator removing the decision recorded
@@ -91,6 +101,7 @@ const (
 var Actions = []Action{
 	ActionSurfaceDenied,
 	ActionAccountCreated, ActionPresetChanged,
+	ActionSessionsRevoked, ActionUnlocked,
 	ActionGrantWritten, ActionGrantWithdrawn,
 	ActionGuardianLinked, ActionGuardianRevoked,
 	ActionGuardianPermissionGranted, ActionGuardianPermissionRevoked,

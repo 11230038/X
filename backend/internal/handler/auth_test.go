@@ -35,6 +35,24 @@ type authStub struct {
 	loginCall    *auth.LoginInput
 	revokeCalls  int
 	revokedUser  int64
+
+	// passwordCall is the change-password request as it arrived, and those four
+	// values are the whole of what the handler has to get right: the account from
+	// the token, the two passwords from the body, and neither of them swapped.
+	passwordCall struct {
+		userID int64
+		old    string
+		new    string
+	}
+	passwordCalls int
+}
+
+func (s *authStub) ChangePassword(_ context.Context, userID int64, oldPassword, newPassword string) error {
+	s.passwordCalls++
+	s.passwordCall.userID = userID
+	s.passwordCall.old = oldPassword
+	s.passwordCall.new = newPassword
+	return s.err
 }
 
 func (s *authStub) Register(_ context.Context, input auth.RegisterInput) (auth.AuthResult, error) {
@@ -311,6 +329,130 @@ func logout(t *testing.T, router *gin.Engine, authenticated bool) *httptest.Resp
 	return recorder
 }
 
+func TestAuthHandlerChangesThePasswordOfTheAccountOnTheToken(t *testing.T) {
+	stub := &authStub{}
+	router := newAuthHandlerRouter(stub)
+
+	recorder := changePassword(t, router, `{"old_password":"`+handlerPassword+`","new_password":"a-much-longer-one"}`, true)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", recorder.Code, recorder.Body.String())
+	}
+	// Nothing comes back, and that is the whole of §2.2: every token this account
+	// held has just stopped counting, this request's included, so there is no
+	// session to hand over. A body carrying a replacement token is exactly what
+	// this version decided not to issue.
+	if recorder.Body.Len() != 0 {
+		t.Errorf("body = %q, want it empty", recorder.Body.String())
+	}
+	call := stub.passwordCall
+	if stub.passwordCalls != 1 || call.userID != handlerAccountID {
+		t.Errorf("reached the service %d time(s) for account %d, want once for %d",
+			stub.passwordCalls, call.userID, handlerAccountID)
+	}
+	// The two passwords are in the fields they arrived in: a handler that passed
+	// them the other way round would set the account's password to the string an
+	// attacker sent and hand the real one back to them.
+	if call.old != handlerPassword || call.new != "a-much-longer-one" {
+		t.Errorf("passed old=%q new=%q, want the old one then the new one", call.old, call.new)
+	}
+	if strings.Contains(recorder.Body.String(), handlerPassword) {
+		t.Error("the response echoed the password")
+	}
+}
+
+func TestAuthHandlerChangePasswordWithoutATokenChangesNothing(t *testing.T) {
+	stub := &authStub{}
+	recorder := changePassword(t, newAuthHandlerRouter(stub),
+		`{"old_password":"`+handlerPassword+`","new_password":"a-much-longer-one"}`, false)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if stub.passwordCalls != 0 {
+		t.Fatal("an unauthenticated request reached the service")
+	}
+}
+
+func TestAuthHandlerRejectsAMalformedPasswordChange(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantCode string
+	}{
+		{name: "malformed json", body: `{"old_password":`, wantCode: "invalid_request"},
+		// An unknown field is refused rather than ignored, exactly as it is on
+		// registration and sign-in: a client that sent `password` instead of
+		// `new_password` would otherwise have its request read as a change to the
+		// empty password.
+		{name: "unknown field", body: `{"old_password":"a","password":"b"}`, wantCode: "invalid_request"},
+		{name: "two documents", body: `{"old_password":"a","new_password":"b"}{"old_password":"c"}`, wantCode: "invalid_request"},
+		{name: "empty body", body: ``, wantCode: "invalid_request"},
+		{name: "oversized body", body: `{"old_password":"` + strings.Repeat("a", 8192) + `"}`, wantCode: "request_too_large"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stub := &authStub{}
+			recorder := changePassword(t, newAuthHandlerRouter(stub), tt.body, true)
+
+			if !strings.Contains(recorder.Body.String(), `"code":"`+tt.wantCode+`"`) {
+				t.Fatalf("body = %s, want code %s", recorder.Body.String(), tt.wantCode)
+			}
+			if stub.passwordCalls != 0 {
+				t.Fatal("a malformed request reached the service")
+			}
+		})
+	}
+}
+
+func TestAuthHandlerMapsPasswordErrors(t *testing.T) {
+	tests := []struct {
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		// The token is good — this is the account it names — so the failure is
+		// not an authentication one. A 401 here would have a client drop a
+		// credential that still works.
+		{err: auth.ErrWrongPassword, wantStatus: 403, wantCode: "invalid_credentials"},
+		// The same code registration answers with, because it is the same rule:
+		// a new password is judged by the policy every password is judged by.
+		{err: auth.ErrInvalidPassword, wantStatus: 400, wantCode: "invalid_password"},
+		{err: errors.New(handlerInternal), wantStatus: 500, wantCode: "password_change_failed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.wantCode, func(t *testing.T) {
+			router := newAuthHandlerRouter(&authStub{err: tt.err})
+			recorder := changePassword(t, router,
+				`{"old_password":"`+handlerPassword+`","new_password":"a-much-longer-one"}`, true)
+
+			if recorder.Code != tt.wantStatus || !strings.Contains(recorder.Body.String(), `"code":"`+tt.wantCode+`"`) {
+				t.Fatalf("status/body = %d %s, want %d %s",
+					recorder.Code, recorder.Body.String(), tt.wantStatus, tt.wantCode)
+			}
+			if strings.Contains(recorder.Body.String(), handlerInternal) {
+				t.Fatal("response leaked the internal error")
+			}
+		})
+	}
+}
+
+// changePassword puts to the route the way a client does: a body with the two
+// passwords, and the token when the case is about an authenticated one.
+func changePassword(t *testing.T, router *gin.Engine, body string, authenticated bool) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/me/password", strings.NewReader(body))
+	request.Header.Set("Content-Type", handlerBodyAccept)
+	if authenticated {
+		request.Header.Set("Authorization", "Bearer "+handlerToken)
+	}
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
 func TestAuthHandlerMeReturnsTheAuthenticatedUser(t *testing.T) {
 	router := newAuthHandlerRouter(&authStub{})
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
@@ -352,6 +494,7 @@ func newAuthHandlerRouter(authenticator Authenticator) *gin.Engine {
 	router.POST("/api/v1/auth/register", handler.Register)
 	router.POST("/api/v1/auth/login", handler.Login)
 	router.POST("/api/v1/auth/logout", middleware.RequireAuth(handlerVerifierStub{}, logger), handler.Logout)
+	router.PUT("/api/v1/me/password", middleware.RequireAuth(handlerVerifierStub{}, logger), handler.ChangePassword)
 	router.GET("/api/v1/auth/me", middleware.RequireAuth(handlerVerifierStub{}, logger), handler.Me)
 	return router
 }

@@ -192,6 +192,66 @@ func (s *Service) RevokeTokens(ctx context.Context, userID int64) error {
 	return s.repository.RevokeTokens(ctx, userID, s.now().UTC())
 }
 
+// Unlock clears an account's run of failed sign-ins and the lock it earned, so
+// its owner can get in now rather than waiting the lock out.
+//
+// Nothing here asks whether the account exists. Both of this route's writes —
+// this one and the revocation beside it — are statements about a state, not
+// creations: "this account's tokens do not count" and "this account is not
+// locked" are true of an account that was never there, and a caller that named
+// no account has got what it asked for either way. The account's own sign-in
+// clears the same three columns on a row it has just read.
+func (s *Service) Unlock(ctx context.Context, userID int64) error {
+	if userID <= 0 {
+		return ErrUserNotFound
+	}
+	return s.repository.ClearFailures(ctx, userID)
+}
+
+// ChangePassword replaces the account's password and takes back every token it
+// holds, the one that made this request included.
+//
+// The old password is required, and that is this route's whole reason for
+// existing apart from a plain write: a token proves what an account may reach,
+// not who is holding it, so a stolen token would otherwise be enough to take the
+// account over — the thief sets a new password and the owner is outside. Asking
+// for the password again is the one thing that distinguishes the two.
+//
+// The order below is the same rule Login states from the other side: nothing
+// about the request is answered until the caller has proved it is the account.
+// A wrong old password is the whole answer, whether or not the new one would
+// have been accepted, so a caller that guessed the old one learns nothing from
+// this route about what a password must look like.
+//
+// The new password is judged by the same policy a registration is, because it is
+// the same field with the same readers, and a rule that held only at registration
+// would hold only against accounts that never changed their password.
+//
+// Replacing it takes back every token, so the client signs in again: that is
+// §2.2's decision, and the reason there is no exemption for the token that made
+// the request is that nothing in this build can tell one of an account's tokens
+// from another.
+func (s *Service) ChangePassword(ctx context.Context, userID int64, oldPassword, newPassword string) error {
+	if userID <= 0 {
+		return ErrUserNotFound
+	}
+	record, err := s.repository.FindByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if !verifyPassword(record.PasswordHash, oldPassword) {
+		return ErrWrongPassword
+	}
+	if err := ValidatePassword(newPassword); err != nil {
+		return err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+	return s.repository.ReplacePassword(ctx, userID, string(hash), s.now().UTC())
+}
+
 func (s *Service) issue(user User) (AuthResult, error) {
 	token, expiresAt, err := s.signer.Sign(user)
 	if err != nil {

@@ -34,6 +34,11 @@ type fakeRepository struct {
 	failedPolicy FailurePolicy
 	clearCalls   int
 	clearedUser  int64
+
+	replaceCalls int
+	replacedUser int64
+	replacedHash string
+	replacedAt   time.Time
 }
 
 func newFakeRepository() *fakeRepository {
@@ -121,6 +126,23 @@ func (f *fakeRepository) RecordFailure(
 func (f *fakeRepository) ClearFailures(_ context.Context, userID int64) error {
 	f.clearCalls++
 	f.clearedUser = userID
+	return nil
+}
+
+// ReplacePassword records both halves of the call it is handed, and writes
+// neither into a record. That is the same restraint the two above keep and it has
+// the same reason — whether the account can then sign in with the new password is
+// a comparison against a hash in a row, which is lockout_db_test.go's and
+// credentials_db_test.go's to make over the real adapter, not this fake's to
+// restate. What the cases in this file read off this are the two values passed
+// down and the moment they were passed at.
+func (f *fakeRepository) ReplacePassword(
+	_ context.Context, userID int64, passwordHash string, at time.Time,
+) error {
+	f.replaceCalls++
+	f.replacedUser = userID
+	f.replacedHash = passwordHash
+	f.replacedAt = at
 	return nil
 }
 
