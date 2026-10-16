@@ -22,3 +22,4 @@ frontend/*.log
 Agent.md
 .agents/
 .claude/
+架构优化文档.md
