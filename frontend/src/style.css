@@ -1,8 +1,50 @@
+/*
+ * 全局样式与设计变量。
+ *
+ * 尺寸照 `设计说明书.md` §2.1：基准画布 1440×900，内容区最小按 1280 宽保证，
+ * **不设计窄屏与移动端**。所以这里不写媒体查询去适配小屏 —— 那是一条明确的
+ * 设计边界，不是漏了。
+ *
+ * 只有浅色一套。§3.7 的两套主题里深色那一套是**单独校准**出来的设计产物
+ * （长文、公式、代码块、图表的对比度要单独校），不是把浅色反一下；设计还没
+ * 交付，所以这里不预先编一套假的。颜色全部走自定义属性，主题到了就换这一层。
+ */
+
 :root {
+  /* 骨架四段。一级导航与列表栏可收合，两个值各有一个收合态。 */
+  --nav-width: 220px;
+  --nav-width-collapsed: 64px;
+  --list-width: 280px;
+  --panel-width: 320px;
+
+  --surface: #ffffff;
+  --surface-sunken: #f6f7f9;
+  --surface-raised: #ffffff;
+  --border: #e3e5e9;
+  --border-strong: #cfd3da;
+
+  --text: #1f2430;
+  --text-muted: #6b7280;
+  --text-faint: #9aa1ae;
+
+  --accent: #2f6feb;
+  --accent-soft: #eaf0fe;
+  --danger: #c0392b;
+  --danger-soft: #fdecea;
+  --warning: #9a6700;
+  --warning-soft: #fff5e0;
+  --success: #1f7a4d;
+  --success-soft: #e8f5ee;
+
+  --radius: 8px;
+  --radius-sm: 6px;
+  --gap: 12px;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif;
-  color: #1f2937;
-  background: #f3f4f6;
+    "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--text);
+  background: var(--surface-sunken);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -16,26 +58,44 @@
 html,
 body,
 #app {
-  min-width: 320px;
-  min-height: 100%;
+  /* 四段式骨架自己管高度，页面不滚动 —— 滚动发生在两栏内部。 */
+  height: 100%;
   margin: 0;
 }
 
 body {
-  min-height: 100vh;
+  /* 基准画布 1440，内容区最小 1280：窗口更窄时横向出现滚动条，而不是把四段
+     挤变形。`min-width` 放在 body 上是为了让滚动条属于整个窗口。 */
+  min-width: 1280px;
+  overflow: hidden;
 }
 
-.app-shell {
-  display: grid;
-  min-height: 100vh;
-  place-items: center;
-  padding: 2rem;
-}
-
-h1 {
+h1,
+h2,
+h3,
+p,
+figure {
   margin: 0;
-  color: #111827;
-  font-size: clamp(2rem, 5vw, 3.5rem);
-  font-weight: 700;
-  letter-spacing: -0.04em;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--accent);
+}
+
+/* §7.4 无障碍：焦点必须看得见。用 `:focus-visible` 而不是 `:focus`，这样鼠标
+   点过之后不会留一个框，键盘走过来一定有。 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

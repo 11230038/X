@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -46,8 +47,13 @@ func TestAnUnauthenticatedRequestIsRefusedBeforeTheUpgrade(t *testing.T) {
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		t.Fatalf("the refusal is not the API envelope: %v (%s)", err, body)
 	}
-	if envelope.Error.Code == "" {
-		t.Errorf("the refusal carries no code: %s", body)
+	// The code is named rather than merely required to be non-empty, because the
+	// socket's gate is a different middleware from the one every other route
+	// uses: a request that arrived with no credential must be answered the same
+	// way it was before the ticket branch existed, and "some code" would not
+	// notice if it started saying something else.
+	if envelope.Error.Code != "authorization_required" {
+		t.Errorf("code = %q, want authorization_required; body=%s", envelope.Error.Code, body)
 	}
 }
 
@@ -61,6 +67,63 @@ func TestAWrongTokenIsRefusedTheSameWay(t *testing.T) {
 	}
 	if response == nil || response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("Dial() gave %v and %+v, want a 401", err, response)
+	}
+}
+
+// TestATicketConnects is the path the front end actually takes, exercised
+// through the same gate the server mounts. A browser has nowhere to put an
+// Authorization header on a handshake, so if this did not work the interface
+// would have no way to reach a turn at all.
+func TestATicketConnects(t *testing.T) {
+	fixture := newWSFixture(t)
+	client := fixture.connectWithTicket(t)
+
+	// Not merely connected: the account the ticket resolved to is the one the
+	// connection acts as. That is asserted where it is observable — the turn the
+	// connection asks for carries it — because a ticket that verified but
+	// published nothing would connect just as well and run every turn as nobody.
+	client.send(map[string]any{"type": CommandStartTurn, "content": "你好"})
+	client.recvOf(FrameCommandAck)
+
+	starts := fixture.turns.startRequests()
+	if len(starts) != 1 {
+		t.Fatalf("the runtime was asked to start %+v", starts)
+	}
+	if starts[0].OwnerID != testCaller.UserID {
+		t.Errorf("the turn runs as account %d, want %d", starts[0].OwnerID, testCaller.UserID)
+	}
+}
+
+// TestAWrongTicketIsRefusedTheSameWay pins that the ticket branch refuses at the
+// same place the bearer branch does — before the upgrade. A ticket cannot be
+// sent in a header, so it is the one credential whose refusal has to be read out
+// of an HTTP response rather than out of a failed write.
+func TestAWrongTicketIsRefusedTheSameWay(t *testing.T) {
+	fixture := newWSFixture(t)
+
+	socket, response, err := fixture.dialTicket(t, "not-the-ticket")
+	if err == nil {
+		_ = socket.CloseNow()
+		t.Fatal("a request with the wrong ticket was upgraded to a socket")
+	}
+	if response == nil {
+		t.Fatalf("Dial() failed with %v and no HTTP response to report it in", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", response.StatusCode)
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("reading the refusal: %v", err)
+	}
+	// Named, and not the same name the bearer branch gives: what a client has to
+	// do about the two differs — fetch a new ticket, or sign in again — so a
+	// refusal that read the same either way would be a client told to do the
+	// wrong thing.
+	if !strings.Contains(string(body), `"code":"invalid_ticket"`) {
+		t.Errorf("body = %s, want invalid_ticket", body)
 	}
 }
 

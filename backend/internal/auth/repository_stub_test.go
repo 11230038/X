@@ -20,6 +20,7 @@ const (
 	exampleUsername    = "alice"
 	exampleTokenIssuer = "x-backend"
 	testTokenTTL       = time.Hour
+	testTicketTTL      = 30 * time.Second
 	testSecretRepeated = "0123456789abcdef0123456789abcdef"
 	otherPassword      = "0123456789"
 )
@@ -171,10 +172,11 @@ func (f *fakeRepository) addAccount(t *testing.T, username, password string, dis
 func newTestService(t *testing.T, repository Repository) *Service {
 	t.Helper()
 	service, err := NewService(Options{
-		Secret:  testSecretRepeated,
-		Issuer:  exampleTokenIssuer,
-		TTL:     testTokenTTL,
-		Lockout: lockoutPolicy,
+		Secret:    testSecretRepeated,
+		Issuer:    exampleTokenIssuer,
+		TTL:       testTokenTTL,
+		TicketTTL: testTicketTTL,
+		Lockout:   lockoutPolicy,
 	}, repository)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)

@@ -113,8 +113,11 @@ func newTestRouterWithGates(
 		// policy that refuses everything refuses the library and not these.
 		Workspace:     handler.NewWorkspaceHandler(routerWorkspaceStub{}, logger),
 		TokenVerifier: authenticator,
-		Authorizer:    authorizer,
-		Limiter:       limiter,
+		// The same stub answers both, because in the server it is one service: the
+		// ticket a client is handed a moment ago is the ticket the socket accepts.
+		TicketVerifier: authenticator,
+		Authorizer:     authorizer,
+		Limiter:        limiter,
 		// KnowledgeBase is deliberately left out. This file is about which
 		// routes exist and which group they sit in; what a knowledge base
 		// endpoint answers is handler/kb_test.go's business, and wiring a stub
@@ -373,6 +376,34 @@ func (routerAuthStub) ChangePassword(context.Context, int64, string, string) err
 func (routerAuthStub) Authenticate(_ context.Context, token string) (auth.User, error) {
 	if token != routerAcceptedToken {
 		return auth.User{}, auth.ErrInvalidToken
+	}
+	return auth.User{UserID: 1, Username: "alice", Role: "user"}, nil
+}
+
+// IssueWebSocketTicket hands back a ticket and the moment it stops working. As
+// with the two writes above, what is being satisfied here is the route mounting:
+// whether the ticket really verifies, really expires, and really stops working
+// when the account's tokens are taken back is asked in internal/auth, where the
+// secret and the clock are real.
+func (routerAuthStub) IssueWebSocketTicket(context.Context, int64) (string, time.Time, error) {
+	return routerWsTicket, routerTicketExpiry, nil
+}
+
+const routerWsTicket = "signed-ticket"
+
+// routerTicketExpiry is the moment the stub's ticket stops working. It is a
+// fixed instant rather than a call to time.Now, so that a case about the route
+// can assert what came back.
+var routerTicketExpiry = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+
+// Redeem accepts exactly the ticket IssueWebSocketTicket handed out. It is
+// deliberately as narrow as Authenticate beside it: the point of the stub is
+// that a request arriving with the wrong credential is a refusal rather than a
+// plausible account, which is what lets a routing case tell the ticket path
+// apart from a route that simply has no gate on it.
+func (routerAuthStub) Redeem(_ context.Context, ticket string) (auth.User, error) {
+	if ticket != routerWsTicket {
+		return auth.User{}, auth.ErrInvalidTicket
 	}
 	return auth.User{UserID: 1, Username: "alice", Role: "user"}, nil
 }

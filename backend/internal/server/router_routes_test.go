@@ -119,3 +119,39 @@ func TestRouterRegistersThePermissionsRoute(t *testing.T) {
 		}
 	})
 }
+
+// TestRouterRegistersTheWebSocketTicketRoute pins the route a browser needs
+// before it can open a socket at all.
+//
+// Like the permissions route above, it is mounted with no surface on purpose,
+// and the denial sub-case is what says so: what a policy decides is which areas
+// of the product an account may reach, and this reaches none of them — it hands
+// back a credential, and the surface it will be spent on is checked where it is
+// spent. An account restricted out of every area can still be handed the ticket
+// it will be turned away with, which is a refusal that names the right reason.
+func TestRouterRegistersTheWebSocketTicketRoute(t *testing.T) {
+	router := newTestRouterWithAuthorizer(t, readyChecker{}, nil, routerAuthorizerStub{deny: true})
+	const path = "/api/v1/ws-ticket"
+
+	t.Run("without a token", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, path, nil))
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
+		}
+	})
+
+	t.Run("a denial elsewhere does not close it", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, path, nil)
+		request.Header.Set("Authorization", "Bearer "+routerAcceptedToken)
+		router.ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+		}
+		if !strings.Contains(recorder.Body.String(), `"ticket":"`+routerWsTicket+`"`) {
+			t.Fatalf("body = %s", recorder.Body.String())
+		}
+	})
+}

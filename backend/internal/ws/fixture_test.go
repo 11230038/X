@@ -50,6 +50,23 @@ func (stubVerifier) Authenticate(_ context.Context, token string) (auth.User, er
 	return auth.User{UserID: 1, Username: "tester", Role: "user"}, nil
 }
 
+// testTicket is the ticket the fixture's socket accepts, and stubTickets the
+// verifier that accepts exactly it. The two credentials resolve to the same
+// account, because in the server they do: a ticket is not a second identity, it
+// is the same one reached by a shorter-lived handle that fits in a URL.
+const testTicket = "test-ticket"
+
+type stubTickets struct{}
+
+var _ middleware.TicketVerifier = stubTickets{}
+
+func (stubTickets) Redeem(_ context.Context, ticket string) (auth.User, error) {
+	if ticket != testTicket {
+		return auth.User{}, auth.ErrInvalidTicket
+	}
+	return auth.User{UserID: 1, Username: "tester", Role: "user"}, nil
+}
+
 // stubStream is a turn's event stream, driven by the test rather than by a hub.
 type stubStream struct {
 	events chan event.Event
@@ -242,7 +259,11 @@ func newWSFixture(t *testing.T) *wsFixture {
 	}
 
 	router := gin.New()
-	router.GET("/api/v1/ws", middleware.RequireAuth(stubVerifier{}, logger), handler.Serve)
+	// The real gate, not the bearer one: the ticket branch is the reason a
+	// browser can connect at all, so a fixture that mounted RequireAuth would be
+	// exercising a route the front end cannot use.
+	router.GET("/api/v1/ws",
+		middleware.RequireSocketAuth(stubVerifier{}, stubTickets{}, logger), handler.Serve)
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 	// The handler's own shutdown is what closes connections the HTTP server
@@ -259,6 +280,32 @@ func newWSFixture(t *testing.T) *wsFixture {
 
 func (f *wsFixture) url() string {
 	return "ws" + strings.TrimPrefix(f.http.URL, "http") + "/api/v1/ws"
+}
+
+// dialTicket is what a browser does: it puts the credential in the URL, because
+// `new WebSocket(url, protocols)` gives it nowhere else to put one.
+func (f *wsFixture) dialTicket(t *testing.T, ticket string) (*websocket.Conn, *http.Response, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+	return websocket.Dial(ctx, f.url()+"?ticket="+ticket, &websocket.DialOptions{})
+}
+
+// connectWithTicket opens a connection the way the front end will, and returns
+// the same client the bearer cases use — the wire is identical past the gate,
+// which is the property being relied on rather than a convenience.
+func (f *wsFixture) connectWithTicket(t *testing.T) *client {
+	t.Helper()
+	socket, response, err := f.dialTicket(t, testTicket)
+	if err != nil {
+		status := 0
+		if response != nil {
+			status = response.StatusCode
+		}
+		t.Fatalf("Dial() error = %v (status %d)", err, status)
+	}
+	t.Cleanup(func() { _ = socket.CloseNow() })
+	return &client{t: t, socket: socket}
 }
 
 // connect opens an authenticated connection, closed when the test ends.

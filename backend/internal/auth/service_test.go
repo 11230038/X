@@ -294,10 +294,11 @@ func TestAuthenticateReloadsTheAccount(t *testing.T) {
 
 	t.Run("token from another signer", func(t *testing.T) {
 		other, err := NewService(Options{
-			Secret:  strings.Repeat("b", 32),
-			Issuer:  exampleTokenIssuer,
-			TTL:     testTokenTTL,
-			Lockout: lockoutPolicy,
+			Secret:    strings.Repeat("b", 32),
+			Issuer:    exampleTokenIssuer,
+			TTL:       testTokenTTL,
+			TicketTTL: testTicketTTL,
+			Lockout:   lockoutPolicy,
 		}, repository)
 		if err != nil {
 			t.Fatal(err)
@@ -323,18 +324,22 @@ func TestNewServiceValidatesOptions(t *testing.T) {
 		options Options
 		repo    Repository
 	}{
-		{name: "short secret", options: Options{Secret: "short", Issuer: exampleTokenIssuer, TTL: testTokenTTL, Lockout: lockoutPolicy}, repo: repository},
-		{name: "empty issuer", options: Options{Secret: testSecretRepeated, TTL: testTokenTTL, Lockout: lockoutPolicy}, repo: repository},
-		{name: "zero ttl", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, Lockout: lockoutPolicy}, repo: repository},
-		{name: "missing repository", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, TTL: testTokenTTL, Lockout: lockoutPolicy}},
+		// Every case below leaves exactly one thing wrong and everything else
+		// right, so a rejection names the field it is about rather than whichever
+		// check happens to run first.
+		{name: "short secret", options: Options{Secret: "short", Issuer: exampleTokenIssuer, TTL: testTokenTTL, TicketTTL: testTicketTTL, Lockout: lockoutPolicy}, repo: repository},
+		{name: "empty issuer", options: Options{Secret: testSecretRepeated, TTL: testTokenTTL, TicketTTL: testTicketTTL, Lockout: lockoutPolicy}, repo: repository},
+		{name: "zero ttl", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, TicketTTL: testTicketTTL, Lockout: lockoutPolicy}, repo: repository},
+		{name: "zero ticket ttl", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, TTL: testTokenTTL, Lockout: lockoutPolicy}, repo: repository},
+		{name: "missing repository", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, TTL: testTokenTTL, TicketTTL: testTicketTTL, Lockout: lockoutPolicy}},
 		// A threshold of zero is reached by every failure, so the first wrong
 		// password would lock the account. It is refused rather than interpreted,
 		// and so are the other two, which have no reading at all.
-		{name: "zero lockout threshold", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, TTL: testTokenTTL,
+		{name: "zero lockout threshold", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, TTL: testTokenTTL, TicketTTL: testTicketTTL,
 			Lockout: FailurePolicy{Window: time.Minute, Duration: time.Minute}}, repo: repository},
-		{name: "zero lockout window", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, TTL: testTokenTTL,
+		{name: "zero lockout window", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, TTL: testTokenTTL, TicketTTL: testTicketTTL,
 			Lockout: FailurePolicy{Threshold: 5, Duration: time.Minute}}, repo: repository},
-		{name: "zero lockout duration", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, TTL: testTokenTTL,
+		{name: "zero lockout duration", options: Options{Secret: testSecretRepeated, Issuer: exampleTokenIssuer, TTL: testTokenTTL, TicketTTL: testTicketTTL,
 			Lockout: FailurePolicy{Threshold: 5, Window: time.Minute}}, repo: repository},
 	}
 

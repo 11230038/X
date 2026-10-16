@@ -38,6 +38,13 @@ type Handlers struct {
 	Workspace        *handler.WorkspaceHandler
 	WebSocket        *ws.Handler
 	TokenVerifier    middleware.TokenVerifier
+	// TicketVerifier redeems the short-lived credential a browser connects to the
+	// websocket with, since a browser has nowhere to put an Authorization header
+	// on a handshake. It is required by the websocket route and by nothing else:
+	// a router built without one refuses a browser's connection attempt with a
+	// 500 that names the missing wiring, rather than with a 401 that would blame
+	// the caller's ticket.
+	TicketVerifier middleware.TicketVerifier
 	// Authorizer answers what an account may reach. It is what the routes below
 	// are narrowed by, and it is required: a router built without one refuses
 	// every authenticated request rather than serving them unchecked.
@@ -111,9 +118,16 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// that reads somebody else's material is about a permission on a
 	// relationship, and it says so here rather than inside its handler, where
 	// the check would be a second place a policy decision is made.
+	// gate is that check on its own, separate from the group it is mounted on,
+	// because one route needs it over a different first gate: the socket is
+	// reached with a ticket rather than a bearer token, and its surface must not
+	// be a requirement spelled a second time — the two spellings would be free to
+	// drift, and only the one nobody edited would still be right.
+	gate := func(requirement middleware.Requirement) gin.HandlerFunc {
+		return middleware.AuthorizeWith(handlers.Authorizer, requirement, handlers.Refusals, logger)
+	}
 	reachAs := func(requirement middleware.Requirement) *gin.RouterGroup {
-		return authenticated.Group("",
-			middleware.AuthorizeWith(handlers.Authorizer, requirement, handlers.Refusals, logger))
+		return authenticated.Group("", gate(requirement))
 	}
 	reach := func(surface string) *gin.RouterGroup {
 		return reachAs(middleware.Surface(surface))
@@ -148,6 +162,14 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// password is a single value replaced whole rather than a thing edited in
 	// parts (§2.9). The account is the token's, so there is nothing here to reach.
 	authenticated.PUT("/me/password", handlers.Auth.ChangePassword)
+	// Minting a websocket ticket is mounted with no surface for the same reason
+	// the two routes above are: it hands back a credential, and which areas that
+	// credential may reach is decided where it is spent, not where it is made. It
+	// is what a browser gets instead of putting its access token in a URL, which
+	// is the one thing it cannot do — a handshake has no headers to put it in
+	// (§7). Nothing is rate-limited here: the limiter bounds work that leaves the
+	// process, and this reaches nothing (§2.10).
+	authenticated.POST("/ws-ticket", handlers.Auth.IssueWebSocketTicket)
 	system := reach(authz.SurfaceSystem)
 	system.GET("/auth/me", handlers.Auth.Me)
 	system.GET("/capabilities", handlers.Capabilities.List)
@@ -408,10 +430,24 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// asking is what happened here, and a version filtered by the account on the
 	// token would answer a different question under the same name.
 	admin.GET("/audit", handlers.Audit.List)
-	// The socket is authenticated by the middleware above before it is
-	// upgraded, so an unauthenticated request is answered as an HTTP request
-	// rather than becoming a connection (WS-06).
+	// The socket is authenticated before it is upgraded, so an unauthenticated
+	// request is answered as an HTTP request rather than becoming a connection
+	// (WS-06).
 	//
+	// Its own group, rather than chat's, for one reason: a browser cannot set an
+	// Authorization header on a WebSocket handshake, so it arrives carrying a
+	// ticket in the query string instead, and RequireAuth would answer it 401
+	// before any of the rest ran — the ticket would never be read. RequireSocketAuth
+	// accepts either credential, so the clients that can set a header (cmd/turnprobe
+	// among them) are unaffected.
+	//
+	// What does *not* change is the two gates behind it. A ticket answers who the
+	// caller is; it says nothing about whether they may be here, so the chat
+	// surface is checked on this group exactly as it is on the one above — same
+	// requirement, same authorizer, mounted through the same gate.
+	socketAuth := apiV1.Group("", middleware.RequireSocketAuth(
+		handlers.TokenVerifier, handlers.TicketVerifier, logger))
+	socketChat := socketAuth.Group("", gate(middleware.Surface(authz.SurfaceChat)))
 	// It is mounted with the model class because it is the door every
 	// conversational turn goes through: a turn's calls to the provider are made
 	// inside the connection, and no middleware can count the calls themselves —
@@ -419,7 +455,7 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// conversation is then a connection rather than a rate, which is the limit
 	// that can be enforced at a door, and the account's actual spend is bounded
 	// where it is written down, by §2.9's quota.
-	chat.GET("/ws", rateLimit(limit.Model), handlers.WebSocket.Serve)
+	socketChat.GET("/ws", rateLimit(limit.Model), handlers.WebSocket.Serve)
 	router.NoRoute(handlers.System.NotFound)
 	router.NoMethod(handlers.System.MethodNotAllowed)
 

@@ -35,18 +35,34 @@ func RequireAuth(verifier TokenVerifier, logger *slog.Logger) gin.HandlerFunc {
 		}
 		user, err := verifier.Authenticate(c.Request.Context(), token)
 		if err != nil {
-			switch {
-			case errors.Is(err, auth.ErrAccountDisabled):
-				httpx.WriteError(c, http.StatusForbidden, "account_disabled", "account is disabled")
-			case errors.Is(err, auth.ErrInvalidToken):
-				httpx.WriteError(c, http.StatusUnauthorized, "invalid_token", "bearer token is invalid")
-			default:
-				writeAuthFailure(c, logger, err)
-			}
+			writeCredentialError(c, logger, err, "invalid_token", "bearer token is invalid")
 			return
 		}
 		c.Set(currentUserKey, user)
 		c.Next()
+	}
+}
+
+// writeCredentialError answers a credential — a bearer token or a websocket
+// ticket — that was presented and refused.
+//
+// The two refusals that mean the same thing on either route are answered here;
+// what the credential itself is called is the caller's, because the same
+// underlying failure reads differently depending on what the client sent:
+// "pass a valid token" and "fetch a new ticket" are different instructions.
+//
+// A failure that is not a refusal at all — the signer being unreachable, a
+// repository error — is not a statement about the credential, so it is not
+// answered with 401 and the client is not told to go and replace something that
+// was never the problem.
+func writeCredentialError(c *gin.Context, logger *slog.Logger, err error, invalidCode, invalidMessage string) {
+	switch {
+	case errors.Is(err, auth.ErrAccountDisabled):
+		httpx.WriteError(c, http.StatusForbidden, "account_disabled", "account is disabled")
+	case errors.Is(err, auth.ErrInvalidTicket), errors.Is(err, auth.ErrInvalidToken):
+		httpx.WriteError(c, http.StatusUnauthorized, invalidCode, invalidMessage)
+	default:
+		writeAuthFailure(c, logger, err)
 	}
 }
 

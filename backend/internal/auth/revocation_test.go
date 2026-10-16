@@ -34,6 +34,7 @@ func withTestClock(service *Service) *testClock {
 	clock := &testClock{at: time.Now().UTC().Truncate(time.Second)}
 	service.now = clock.now
 	service.signer.now = clock.now
+	service.tickets.now = clock.now
 	return clock
 }
 

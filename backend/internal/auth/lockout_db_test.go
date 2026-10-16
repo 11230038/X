@@ -47,10 +47,11 @@ func newLockoutService(t *testing.T, policy FailurePolicy) (*Service, *GORMRepos
 	t.Helper()
 	repo, _ := newDBRepository(t)
 	service, err := NewService(Options{
-		Secret:  testSecretRepeated,
-		Issuer:  exampleTokenIssuer,
-		TTL:     testTokenTTL,
-		Lockout: policy,
+		Secret:    testSecretRepeated,
+		Issuer:    exampleTokenIssuer,
+		TTL:       testTokenTTL,
+		TicketTTL: testTicketTTL,
+		Lockout:   policy,
 	}, repo)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)

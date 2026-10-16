@@ -26,7 +26,14 @@ const (
 	// that assert the account reached the domain compare against it, so that
 	// changing it here is one edit rather than a hunt.
 	handlerAccountID int64 = 7
+	// handlerTicket is what the stub mints.
+	handlerTicket = "signed.ws.ticket"
 )
+
+// handlerTicketExpiry is the moment the stub's ticket stops working — a fixed
+// instant, so that a case can assert what the handler put in the body rather
+// than that it put something there.
+var handlerTicketExpiry = time.Unix(1_800_000_030, 0).UTC()
 
 type authStub struct {
 	result       auth.AuthResult
@@ -45,6 +52,27 @@ type authStub struct {
 		new    string
 	}
 	passwordCalls int
+
+	// ticketCall is the account a ticket was minted for. It is the whole of what
+	// the handler has to get right: the account comes from the token, so a route
+	// that minted for anybody else would show up here as the wrong number.
+	ticketCall  int64
+	ticketCalls int
+	ticket      string
+	ticketErr   error
+}
+
+func (s *authStub) IssueWebSocketTicket(_ context.Context, userID int64) (string, time.Time, error) {
+	s.ticketCalls++
+	s.ticketCall = userID
+	if s.ticketErr != nil {
+		return "", time.Time{}, s.ticketErr
+	}
+	ticket := s.ticket
+	if ticket == "" {
+		ticket = handlerTicket
+	}
+	return ticket, handlerTicketExpiry, nil
 }
 
 func (s *authStub) ChangePassword(_ context.Context, userID int64, oldPassword, newPassword string) error {
@@ -298,6 +326,96 @@ func TestAuthHandlerMeWithoutAuthenticationFails(t *testing.T) {
 	}
 }
 
+// postTicket asks for a websocket ticket as the stub verifier's account.
+func postTicket(t *testing.T, router *gin.Engine, authenticated bool) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/ws-ticket", nil)
+	if authenticated {
+		request.Header.Set("Authorization", "Bearer "+handlerToken)
+	}
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func TestAuthHandlerIssueWebSocketTicketMintsForTheCaller(t *testing.T) {
+	stub := &authStub{}
+	recorder := postTicket(t, newAuthHandlerRouter(stub), true)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Data struct {
+			Ticket    string `json:"ticket"`
+			ExpiresAt string `json:"expires_at"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Data.Ticket != handlerTicket {
+		t.Errorf("ticket = %q, want %q", response.Data.Ticket, handlerTicket)
+	}
+	if response.Data.ExpiresAt != handlerTicketExpiry.Format(time.RFC3339) {
+		t.Errorf("expires_at = %q, want %q", response.Data.ExpiresAt, handlerTicketExpiry.Format(time.RFC3339))
+	}
+	// The account is the token's. There is no field in the request that could
+	// have named a different one, which is the property being pinned: this is not
+	// a route for minting somebody else's ticket.
+	if stub.ticketCalls != 1 || stub.ticketCall != handlerAccountID {
+		t.Errorf("minted %d ticket(s) for account %d, want 1 for %d",
+			stub.ticketCalls, stub.ticketCall, handlerAccountID)
+	}
+}
+
+// TestAuthHandlerIssueWebSocketTicketCarriesNoAccount is the body's shape as an
+// assertion. A ticket that described its owner would be a second place that
+// description could go stale, and the caller already has one.
+func TestAuthHandlerIssueWebSocketTicketCarriesNoAccount(t *testing.T) {
+	recorder := postTicket(t, newAuthHandlerRouter(&authStub{}), true)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+	}
+	for _, field := range []string{`"username"`, `"role"`, `"user_id"`, `"user"`} {
+		if strings.Contains(recorder.Body.String(), field) {
+			t.Errorf("body carries %s: %s", field, recorder.Body.String())
+		}
+	}
+}
+
+func TestAuthHandlerIssueWebSocketTicketWithoutAuthenticationFails(t *testing.T) {
+	stub := &authStub{}
+	recorder := postTicket(t, newAuthHandlerRouter(stub), false)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"code":"authorization_required"`) {
+		t.Errorf("body = %s", recorder.Body.String())
+	}
+	// Nothing was minted. The route's whole value is that the credential comes
+	// from an authenticated request, so a tokenless one must not reach the domain.
+	if stub.ticketCalls != 0 {
+		t.Errorf("minted %d ticket(s) without a token", stub.ticketCalls)
+	}
+}
+
+func TestAuthHandlerIssueWebSocketTicketFailureIsGeneric(t *testing.T) {
+	stub := &authStub{ticketErr: errors.New(handlerInternal)}
+	recorder := postTicket(t, newAuthHandlerRouter(stub), true)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"code":"ticket_issue_failed"`) {
+		t.Errorf("body = %s", recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), handlerInternal) {
+		t.Fatal("response leaked the internal error")
+	}
+}
+
 // newAuthHandlerRouter mounts the auth handler behind the real bearer middleware,
 // so the pair is exercised together.
 func newAuthHandlerRouter(authenticator Authenticator) *gin.Engine {
@@ -310,6 +428,7 @@ func newAuthHandlerRouter(authenticator Authenticator) *gin.Engine {
 	router.POST("/api/v1/auth/login", handler.Login)
 	router.POST("/api/v1/auth/logout", middleware.RequireAuth(handlerVerifierStub{}, logger), handler.Logout)
 	router.PUT("/api/v1/me/password", middleware.RequireAuth(handlerVerifierStub{}, logger), handler.ChangePassword)
+	router.POST("/api/v1/ws-ticket", middleware.RequireAuth(handlerVerifierStub{}, logger), handler.IssueWebSocketTicket)
 	router.GET("/api/v1/auth/me", middleware.RequireAuth(handlerVerifierStub{}, logger), handler.Me)
 	return router
 }

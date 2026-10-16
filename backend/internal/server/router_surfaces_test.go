@@ -80,6 +80,88 @@ func TestRouterRefusesAnAccountThePolicyDenies(t *testing.T) {
 	})
 }
 
+// TestRouterKeepsTheSocketUnderTheChatSurface is the case that pays for the
+// socket's own group.
+//
+// The socket is the one route whose first gate is not RequireAuth — a browser
+// has nowhere to put an Authorization header on a handshake, so it arrives with
+// a ticket in the query string and the route reads either credential. Moving it
+// out of the chat group is therefore a line somebody has to edit twice, and the
+// half that is easy to lose is the second one: a socket whose ticket is accepted
+// and whose surface is never checked is a working connection to an area the
+// account was refused. A 403 naming the chat surface is what says both mounts
+// are still there.
+func TestRouterKeepsTheSocketUnderTheChatSurface(t *testing.T) {
+	router := newTestRouterWithAuthorizer(t, readyChecker{}, nil, routerAuthorizerStub{deny: true})
+	const path = "/api/v1/ws"
+
+	t.Run("a refusal names the chat surface", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer "+routerAcceptedToken)
+		router.ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403; body=%s", recorder.Code, recorder.Body.String())
+		}
+		if !strings.Contains(recorder.Body.String(), `"surface":"chat"`) {
+			t.Fatalf("body = %s, want the chat surface named", recorder.Body.String())
+		}
+	})
+
+	t.Run("a ticket is read where a token would have been refused", func(t *testing.T) {
+		// The whole reason the route has its own group: a request carrying a ticket
+		// and no Authorization header reaches the surface check rather than being
+		// answered 401 on the way in. A 403 naming the chat surface is that fact —
+		// the ticket was redeemed, the account was established, and only then was
+		// the policy consulted.
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet,
+			path+"?ticket="+routerWsTicket, nil))
+
+		if recorder.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403; body=%s", recorder.Code, recorder.Body.String())
+		}
+		if !strings.Contains(recorder.Body.String(), `"surface":"chat"`) {
+			t.Fatalf("body = %s, want the chat surface named", recorder.Body.String())
+		}
+	})
+
+	t.Run("a ticket nobody signed stays out", func(t *testing.T) {
+		// The other half of the case above: the route now accepts something in the
+		// query string, so an unrecognised ticket must still be a refusal rather
+		// than a connection. This is the assertion that would catch the check being
+		// reached but not enforced.
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet,
+			path+"?ticket=hand-written", nil))
+
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
+		}
+		if !strings.Contains(recorder.Body.String(), `"code":"invalid_ticket"`) {
+			t.Fatalf("body = %s", recorder.Body.String())
+		}
+	})
+
+	t.Run("without either credential it is unauthenticated", func(t *testing.T) {
+		// The socket's first gate is a different one, so the code a credential-less
+		// request is answered with is its own assertion rather than a consequence
+		// of the bearer middleware standing in front. It has to still be a 401: an
+		// unauthenticated request must be answered as an HTTP request rather than
+		// becoming a connection (WS-06).
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
+		}
+		if !strings.Contains(recorder.Body.String(), `"code":"authorization_required"`) {
+			t.Fatalf("body = %s", recorder.Body.String())
+		}
+	})
+}
+
 // TestRouterRegistersGovernanceUnderTheAdministrativeSurface pins the routes
 // that make the authorization model reachable at all.
 //

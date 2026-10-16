@@ -20,14 +20,15 @@ const dummyPassword = "auth timing equalization placeholder"
 type Service struct {
 	repository Repository
 	signer     *TokenSigner
+	tickets    *ticketSigner
 	dummyHash  []byte
 	lockout    FailurePolicy
-	// now is the one clock this package reads. It is the same function the signer
-	// timestamps tokens with, and that is not a detail: whether a token still
-	// counts is decided by comparing the moment it was signed against the moment
+	// now is the one clock this package reads. It is the same function both
+	// signers stamp with, and that is not a detail: whether a credential still
+	// counts is decided by comparing the moment it was minted against the moment
 	// it was revoked, so two clocks — even two that disagree by a second — would
-	// have the rule answer the wrong way about its own writes. One clock, used in
-	// two places.
+	// have the rule answer the wrong way about its own writes. One clock, used
+	// in three places.
 	now func() time.Time
 }
 
@@ -59,9 +60,15 @@ func NewService(options Options, repository Repository) (*Service, error) {
 	}
 	now := time.Now
 	signer.now = now
+	tickets, err := newTicketSigner(options.Secret, options.TicketTTL)
+	if err != nil {
+		return nil, err
+	}
+	tickets.now = now
 	return &Service{
 		repository: repository,
 		signer:     signer,
+		tickets:    tickets,
 		dummyHash:  dummyHash,
 		lockout:    options.Lockout,
 		now:        now,
@@ -159,6 +166,21 @@ func (s *Service) Authenticate(ctx context.Context, token string) (User, error) 
 	if err != nil {
 		return User{}, err
 	}
+	return s.resolve(ctx, userID, claims.IssuedAt.Time)
+}
+
+// resolve turns "this account, as of this moment" into the account as it is now.
+//
+// It is the one place that answers whether a credential still counts, and both
+// credentials reach it: an access token passes the moment it was signed, a
+// websocket ticket the moment it was issued. Keeping it in one function is the
+// point — a rule about revocation that held for tokens but not for tickets
+// would be a hole in exactly the model the tickets were added to.
+//
+// The disabled state is decided before the revocation moment, so an account that
+// has been disabled is answered the way it always was, whatever its credentials
+// say about themselves.
+func (s *Service) resolve(ctx context.Context, userID int64, issuedAt time.Time) (User, error) {
 	record, err := s.repository.FindByID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
@@ -169,14 +191,13 @@ func (s *Service) Authenticate(ctx context.Context, token string) (User, error) 
 	if record.Disabled {
 		return User{}, ErrAccountDisabled
 	}
-	// A token signed at or before the account's revocation moment no longer
-	// counts. Both moments are whole seconds — jwt truncates iat and the column
-	// holds no fractions — so the comparison is written with <= on purpose:
-	// refusing a token signed in the same second as the revocation costs the
-	// account one more login, while admitting one costs a revocation that
-	// silently did not happen. The disabled state above is still decided first,
-	// so a token on a disabled account is answered the way it always was.
-	if record.TokenValidAfter != nil && !claims.IssuedAt.Time.After(*record.TokenValidAfter) {
+	// A credential minted at or before the account's revocation moment no longer
+	// counts. Both moments are whole seconds — jwt truncates iat, the ticket
+	// signer truncates its stamp, and the column holds no fractions — so the
+	// comparison is written with <= on purpose: refusing a credential minted in
+	// the same second as the revocation costs the account one more sign-in, while
+	// admitting one costs a revocation that silently did not happen.
+	if record.TokenValidAfter != nil && !issuedAt.After(*record.TokenValidAfter) {
 		return User{}, ErrInvalidToken
 	}
 	return record.User, nil

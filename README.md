@@ -1,13 +1,13 @@
 # X
 
-X 是一个前后端分离项目。当前阶段的开发只针对后端：`backend/` 是完整的 Go/Gin 服务，`frontend/` 只保留一个不含任何功能的 Vite 脚手架。
+X 是一个前后端分离项目。`backend/` 是完整的 Go/Gin 服务（V1–V6 已交付）；`frontend/` 目前是一条能跑通的纵切面——登录/注册、四段式骨架、一个会话、发一句、经 WebSocket 收流式回答。除对话以外的一级导航分组渲染出来但不可点。
 
 ## 项目结构
 
 ```text
 X/
 ├── backend/       # Go + Gin HTTP 服务
-├── frontend/      # Vue 3 + Vite 脚手架，当前不含功能代码
+├── frontend/      # Vue 3 + Vite，对话那条纵切面
 ├── data/upload/   # 本地上传运行数据（由应用创建，Git 忽略）
 ├── Agent.md       # 项目开发约定
 └── .gitignore
@@ -76,7 +76,7 @@ docker start seekdb
 - 文件上传：`UPLOAD_ROOT`、`UPLOAD_MAX_FILE_BYTES`、`UPLOAD_MAX_REQUEST_BYTES`
 - seekdb：`DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`、`DB_CHARSET`、`DB_COLLATION`、`DB_TLS`、`DB_TIMEZONE`、`DB_PING_TIMEOUT`
 - 连接池：`DB_MAX_OPEN_CONNS`、`DB_MAX_IDLE_CONNS`、`DB_CONN_MAX_LIFETIME`、`DB_CONN_MAX_IDLE_TIME`
-- 认证：`AUTH_JWT_SECRET`、`AUTH_JWT_ISSUER`、`AUTH_TOKEN_TTL`、`AUTH_LOCKOUT_THRESHOLD`（V6）、`AUTH_LOCKOUT_WINDOW`（V6）、`AUTH_LOCKOUT_DURATION`（V6）
+- 认证：`AUTH_JWT_SECRET`、`AUTH_JWT_ISSUER`、`AUTH_TOKEN_TTL`、`AUTH_LOCKOUT_THRESHOLD`（V6）、`AUTH_LOCKOUT_WINDOW`（V6）、`AUTH_LOCKOUT_DURATION`（V6）、`WS_TICKET_TTL`（前端立项时补）
 - 对话模型：`LLM_PROVIDER`、`LLM_BASE_URL`、`LLM_MODEL`、`LLM_API_KEYS`、`LLM_KEY_FAILURE_THRESHOLD`、`LLM_KEY_COOLDOWN`、`LLM_TIMEOUT`、`LLM_TASK_MODEL`、`LLM_TASK_MAX_TOKENS`、`LLM_CAPABILITY_CONFIG_JSON`
 - 一轮的边界：`TURN_INPUT_TIMEOUT`、`TURN_MAX_ROUNDS`、`TURN_MAX_ATTACHMENT_BYTES`
 - 嵌入模型（V2）：`EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_API_KEY`、`EMBEDDING_DIMENSION`、`EMBEDDING_TIMEOUT`、`EMBEDDING_BATCH_SIZE`
@@ -101,6 +101,8 @@ V4 的两个新能力（`mastery_path` / `immersive_reading`）**都只走 `resp
 V5 的十七个新键同样没有代码默认值——**缺键是启动失败，不是程序替部署编一个数**（`LLM_API_KEYS` 是第二版改名的那个旧键，不重复计）。它们分成六组：两个 `LLM_KEY_*` 是 key 池的两个阈值——连续失败几次把一把 key 打进冷却、冷却多久（冷却以 429 为准：500 是上游不舒服、401 是键配错了，都不该用一次 60 秒的冷却把配置错误伪装成暂时故障）；三个 `AUTHZ_*` 说的不是规则而是**基线**（规则在 `internal/authz` 里：`AUTHZ_DEFAULT_PRESET` 只决定新账号落在哪个 preset 上，两个 `AUTHZ_LEARNER_*` 只能在 Learner 的地板之上**往上加**，写错只会让它够得着更多、不会让它够不着）；两个 `AUDIT_*` 与三个 `USAGE_*` 各含一个保留期，而**保留期只被一条按窗口删的语句读到，不起定时作业**（清理由调用方触发，与"租约过期是一次比较"同一条；**V6 给了那个调用方**——`go run ./cmd/cleanup`，见下）；四个 `RATE_LIMIT_*` 里三个是每账号每类动作的令牌桶速率、`BURST` 是三个桶共用的容量（速率写 `0` 表示这一类不限，而 `BURST` 不能是 `0`——那是三个桶一个令牌都装不下）；三个 `WORKSPACE_*` 里的 `WORKSPACE_ARCHIVE_ROOT` 与 `UPLOAD_ROOT` 是**两个目录而不是一个的两种叫法**，`MAX_ARCHIVE_BYTES` 同时管读和写，`JOB_TIMEOUT` 是作业的墙钟上限。每一个键的取值理由都写在 [backend/.env.example](backend/.env.example) 那一行上面。
 
 V6 只加了三个键，都在认证那一组：`AUTH_LOCKOUT_THRESHOLD` / `AUTH_LOCKOUT_WINDOW` / `AUTH_LOCKOUT_DURATION`——**窗口内错够几次就锁、窗口多长、锁多久**，是三个可以被分别质疑的量，所以是三个键而不是一个。它们与其余键同级：没有代码默认值，缺一个就是启动失败。**阈值必须是正整数**：写成 `0` 会让第一次密码错误就锁定，没有哪种读法是一个部署想要的，所以 `Validate` 直接拒它（`internal/config/auth.go:48`）。三个键与 `.env.example` 里的注释都写明了一件事：**锁定只挡登录，不挡已经拿到的 token**——要踢掉已登录的会话得走 `POST /auth/logout` 或管理员那条吊销。
+
+`WS_TICKET_TTL` 是前端立项时补的第七个认证键，且是这一组里**唯一一个有上限的**（`5m`，超了直接拒绝启动）。原因是它管的凭据会出现在 URL 里，而 URL 被链路上每一跳无条件记录：**活得和 access token 一样长的票据就不是票据了，那只是把 token 挪进了 URL**。它单独是一个键而不是 `AUTH_TOKEN_TTL` 的某个比例，因为两者回答的问题不同——一个问"一次登录管多久"，一个问"一条被记下来的字符串多久之后不值得读"。
 
 `LLM_API_KEYS`、`EMBEDDING_API_KEY` 与 `AUTH_JWT_SECRET` 同级：不写日志、不进错误信息、不进响应体，占位值不替换会让服务停在启动阶段。
 
@@ -158,7 +160,8 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `GET` | `/api/v1/usage` | 用量聚合；`?since=&until=`（RFC3339）、`?model=&provider=&source=&session_id=` 逐条收窄、`?group_by=`（`model` / `provider` / `source` / `session` / `day`） |
 | `GET` | `/api/v1/system/version` | 版本、构建时间、Go 版本、migration 版本 |
 | `GET` | `/api/v1/system/status` | 运行模式、依赖的逐项 readiness、活跃回合数、索引 worker、**未收尾的调用数** |
-| `GET` | `/api/v1/ws` | WebSocket 入口，token 在升级前校验 |
+| `POST` | `/api/v1/ws-ticket` | **签一张连 WebSocket 用的票**，带 `Authorization: Bearer <JWT>`，返回 `{ticket, expires_at}`。浏览器没法在握手时设 `Authorization` 头，所以它先换一张票再把票放进 URL。**无面、不限流**（见「对话回合与 WebSocket」） |
+| `GET` | `/api/v1/ws` | WebSocket 入口，升级前校验；凭据**可以是 `Authorization: Bearer <JWT>`，也可以是 `?ticket=…`** |
 | `GET` | `/api/v1/library/files` | **文件库列举与搜索**；`?filename=&category=&since=&until=&deleted=&limit=&offset=`，`deleted=true` 看回收站 |
 | `GET` | `/api/v1/library/files/{id}/content` | **下载**；**唯一不走 JSON 信封的一条**，带 `Content-Disposition` 与 `nosniff` |
 | `GET` | `/api/v1/library/files/{id}` | 文件的 metadata 与解析状态（ATT-01） |
@@ -352,6 +355,14 @@ migration v19（V6）把"一个掌握路径最多一个活跃交互"交给 schem
 ### 对话回合与 WebSocket
 
 一轮对话在 `GET /api/v1/ws` 上跑。一条连接可以做多件事：开始一轮、订阅任意一轮的事件流、取消、回答模型的反问。**回合在服务端独立于连接运行**，事件按序号落库，所以断线之后可以带着 `after_seq` 回来接着看。
+
+**这条连接收两种凭据。** 命令行客户端（`cmd/turnprobe`）照旧发 `Authorization: Bearer <JWT>`；浏览器发不了——`new WebSocket(url, protocols)` 的第二个参数是子协议列表，不是 header——所以它先 `POST /api/v1/ws-ticket` 换一张票，再连 `?ticket=…`。两种凭据解出来的是同一个账号，`RequireSocketAuth` 先看票再看 header，所以两者都发也不会让一张坏票被一个好 token 盖住。
+
+票是 **HMAC-SHA256 签名的无状态凭据**，载荷是 `userID|iat|exp`，密钥复用 `AUTH_JWT_SECRET` 并用前缀 `deeptutor.ws-ticket.v1|` 做域分隔，时限由 `WS_TICKET_TTL` 给（**上限 5m**，`.env.example` 里写了为什么它必须短）。票**只当指针用**：兑换时回库重跑一遍禁用与 `token_valid_after`，所以登出、改密、管理员吊销或停用之后，一张签发时刻早于撤回时刻的票连不上——与那个账号的 token 同时失效。
+
+**票是 TTL 内可重放的，不是一次性的。** 这是无状态设计的明账：不做进程内凭据表（多副本下不成立），也不入库（为一个活 30 秒的凭据加一张表加一条清理路径不成比例）。前端契约不受影响——每次连接尝试都新签一张——但"一次性"这个词在这一版只是被 TTL 兜住，`internal/auth/ticket_test.go` 里有一条用例把它钉住，将来谁想改成一次性那条会红。
+
+**开连接是消耗模型额度的**（`limit.Model`），因为一轮对话对 provider 的调用发生在这条连接里面，没有任何中间件数得了那些调用——所以能按账号限的就是"多久开一条"。`/ws-ticket` 本身不限流：它只是一次 HMAC，不出进程。
 
 客户端帧是一个扁平 JSON 对象，`type` 是唯一的分发字段，必须带 `protocol_version: "2.0"`：版本不符会以终止性错误关闭连接，未知字段被忽略，未知 `type` 回非终止的 `unsupported_command`。
 
@@ -588,17 +599,28 @@ V6 加的不是功能，是**让已经有的东西有客人**：两条 migration
 
 ## 前端
 
-`frontend/` 目前只是 Vite 官方脚手架：`src/App.vue` 渲染一个静态标题，没有路由、页面、API 调用或认证状态。此前实现的登录、注册、登录态校验等前端功能已全部移除，后端接口暂时没有前端消费方。
+`frontend/` 是一条能跑通的纵切面：**登录（含注册）→ 四段式骨架 → 一个会话 → 发一句 → 经 WebSocket 收到流式回答并渲染**。依赖只有 `vue` 与 `vue-router`（没有 pinia、没有 axios、没有 eslint/prettier/vitest）。
 
 ```bash
 cd frontend
 npm install
 npm run dev          # 默认 http://localhost:5173
-npm run type-check
-npm run build
+npm run type-check   # 门禁之一
+npm run build        # 门禁之二
 ```
 
-当前阶段只做后端改动，前端保持为空壳；后续阶段再按当时的后端契约重新实现。
+**开发期需要一个在 `:8080` 上跑着的后端**（`cd backend && go run .`）：`vite.config.ts` 把 `/api` 代理过去，包括 WebSocket 升级。代理里**刻意不设 `changeOrigin`**——默认的 `false` 把浏览器的 `Host` 原样透传，后端的同源 Origin 校验才过得去；设成 `true` 会让握手 403。这一条是实测出来的，别顺手"补上"。
+
+| 目录 | 职责 |
+|---|---|
+| `src/api/` | `client.ts` 是全应用**唯一的 `fetch` 出口**；`errors.ts` 把后端的 `error.code` 映成界面上那一句 |
+| `src/ws/` | `protocol.ts` 是 `backend/internal/ws/protocol.go` 与 `internal/event/types.go` 的**逐字镜像**，改后端那两个文件时要同步改它 |
+| `src/session.ts` | 登录态（token 存 `localStorage`）。**唯一写 token 的地方** |
+| `src/router.ts` | `/login`、`/register`、`/chat`、`/chat/:sessionId` + 一条"未登录去 `/login`"的守卫 |
+| `src/components/shell/` | 四段式骨架（导航 / 列表栏 / 主内容 / 右侧面板），两个侧栏可收合 |
+| `src/views/` | `Login.vue`、`Register.vue`、`Chat.vue` |
+
+**这一版明确没有做的**（不是漏了）：断线重连与续传、生产部署（Go 服务不伺服前端产物）、除对话外的任何页面、Markdown/公式/代码高亮的渲染、界面中英双语、附件与知识库选择、前端 lint/format/单元测试工具链。逐条理由见 `frontend/` 里各文件顶部的注释。
 
 ## 开发约定
 

@@ -12,6 +12,7 @@ const (
 	testJWTSecret           = "unit-test-jwt-secret-with-enough-bytes"
 	testJWTIssuer           = "x-backend-test"
 	testTokenTTLKey         = "AUTH_TOKEN_TTL"
+	testTicketTTLKey        = "WS_TICKET_TTL"
 	testLockoutThresholdKey = "AUTH_LOCKOUT_THRESHOLD"
 	testLockoutWindowKey    = "AUTH_LOCKOUT_WINDOW"
 	testLockoutDurationKey  = "AUTH_LOCKOUT_DURATION"
@@ -36,6 +37,7 @@ func validValues() map[string]string {
 		"AUTH_JWT_SECRET":           testJWTSecret,
 		"AUTH_JWT_ISSUER":           testJWTIssuer,
 		testTokenTTLKey:             "24h",
+		testTicketTTLKey:            "30s",
 		testLockoutThresholdKey:     "5",
 		testLockoutWindowKey:        "15m",
 		testLockoutDurationKey:      "15m",

@@ -6,6 +6,10 @@ import (
 	"time"
 )
 
+// maxTicketTTL is the longest a websocket ticket may stay usable. It is a
+// ceiling rather than a suggestion: see AuthConfig.Validate.
+const maxTicketTTL = 5 * time.Minute
+
 // AuthConfig contains access-token signing settings and the login lockout that
 // guards them.
 //
@@ -17,6 +21,13 @@ type AuthConfig struct {
 	Secret string
 	Issuer string
 	TTL    time.Duration
+	// TicketTTL bounds the one-shot credential a browser trades for a WebSocket
+	// connection. It is a separate key from TTL rather than a fraction of it
+	// because the two answer different questions: TTL is how long a session lasts,
+	// TicketTTL is how long a string that will be written into a URL stays usable.
+	// Those are not the same kind of number and a deployment may well want to move
+	// one without the other.
+	TicketTTL time.Duration
 	// The lockout is three numbers rather than one, because "how many failures",
 	// "over how long" and "locked for how long" are three questions that can be
 	// argued with separately. The values shipped in .env.example make them the same
@@ -42,6 +53,17 @@ func (c AuthConfig) Validate() error {
 	if c.TTL <= 0 {
 		return fmt.Errorf("AUTH_TOKEN_TTL must be a positive duration")
 	}
+	// The ticket's TTL is bounded from above, which no other duration here is.
+	// The whole reason a ticket is allowed to travel in a URL — where every hop
+	// records it — is that it stops working long before anyone can read that
+	// record. A ticket that lives as long as an access token has quietly become
+	// one, and the only thing that would have said so is this line.
+	if c.TicketTTL <= 0 {
+		return fmt.Errorf("WS_TICKET_TTL must be a positive duration")
+	}
+	if c.TicketTTL > maxTicketTTL {
+		return fmt.Errorf("WS_TICKET_TTL must not exceed %s", maxTicketTTL)
+	}
 	// Zero would not mean "no lockout": a threshold of zero is reached by every
 	// failure, so the first wrong password would lock the account. It has to be
 	// refused here, because there is no reading of it that a deployment meant.
@@ -62,6 +84,10 @@ func loadAuthConfig(values map[string]string) (AuthConfig, error) {
 	if err != nil {
 		return AuthConfig{}, err
 	}
+	ticketTTL, err := parsePositiveDuration(values, "WS_TICKET_TTL")
+	if err != nil {
+		return AuthConfig{}, err
+	}
 	threshold, err := parsePositiveInt(values, "AUTH_LOCKOUT_THRESHOLD")
 	if err != nil {
 		return AuthConfig{}, err
@@ -79,6 +105,7 @@ func loadAuthConfig(values map[string]string) (AuthConfig, error) {
 		Secret:           values["AUTH_JWT_SECRET"],
 		Issuer:           strings.TrimSpace(values["AUTH_JWT_ISSUER"]),
 		TTL:              ttl,
+		TicketTTL:        ticketTTL,
 		LockoutThreshold: threshold,
 		LockoutWindow:    window,
 		LockoutDuration:  duration,

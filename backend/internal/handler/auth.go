@@ -32,6 +32,9 @@ type Authenticator interface {
 	// asks an account that is already signed in to prove itself again: a token
 	// says what an account may reach, not who is holding it (§2.9).
 	ChangePassword(context.Context, int64, string, string) error
+	// IssueWebSocketTicket mints the short-lived credential a browser trades for
+	// a WebSocket connection, and returns the moment it stops working.
+	IssueWebSocketTicket(context.Context, int64) (string, time.Time, error)
 }
 
 // AuthHandler handles registration, login, sign-out, password changes, and
@@ -122,6 +125,53 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// socketTicketResponse is the body of a ticket issue. It carries no account
+// detail: the caller already has one, and a ticket that described its owner
+// would be a second place that description could go stale.
+type socketTicketResponse struct {
+	Ticket    string    `json:"ticket"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// IssueWebSocketTicket mints the credential a browser connects with.
+//
+// It exists because a browser cannot set an Authorization header on a WebSocket
+// handshake — `new WebSocket(url, protocols)` takes a subprotocol list — so the
+// browser makes an ordinary HTTP request it *can* put a header on, and carries
+// the result in the connection's URL. That is why the ticket is short-lived
+// rather than merely secret: a URL is recorded by every hop it passes, and the
+// only thing that makes that survivable is the recorded string being worthless
+// by the time anyone reads it.
+//
+// The account is the one the token names and never one from the request, so this
+// is not a route for minting somebody else's ticket. It is mounted with no
+// surface, like the sign-out beside it: what a policy decides is which areas of
+// the product an account may reach, and whether this account may open the
+// websocket at all is decided on the websocket route itself, where the chat
+// surface is checked. An account restricted out of every area can still be given
+// the credential it will be turned away with.
+//
+// Nothing here is rate-limited. The limiter exists to bound work that leaves the
+// process and spends someone else's resource, and its three actions are the
+// three such classes this build has; minting a ticket is one HMAC over a few
+// bytes and reaches nothing.
+func (h *AuthHandler) IssueWebSocketTicket(c *gin.Context) {
+	account, ok := callerAccount(c)
+	if !ok {
+		return
+	}
+	if h.authenticator == nil {
+		h.writeAuthFailure(c, "ticket_issue_failed", errors.New("auth service is not configured"))
+		return
+	}
+	ticket, expires, err := h.authenticator.IssueWebSocketTicket(c.Request.Context(), account.UserID)
+	if err != nil {
+		h.writeAuthFailure(c, "ticket_issue_failed", err)
+		return
+	}
+	httpx.WriteSuccess(c, http.StatusOK, socketTicketResponse{Ticket: ticket, ExpiresAt: expires.UTC()})
 }
 
 // passwordRequest is the body of a password change: the credential being

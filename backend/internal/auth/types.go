@@ -33,6 +33,13 @@ var (
 	ErrWrongPassword = errors.New("wrong password")
 	// ErrInvalidToken reports a token that failed signature, format, or claim checks.
 	ErrInvalidToken = errors.New("invalid token")
+	// ErrInvalidTicket reports a websocket ticket that failed signature, format,
+	// or expiry checks. It is separate from ErrInvalidToken because the string
+	// arrived by a different route — in a URL rather than a header — and a client
+	// that has one of them wrong is a different client from one that has the
+	// other wrong: the ticket was fetched seconds ago, so a bad one is a bug in
+	// the handshake rather than a session that ended.
+	ErrInvalidTicket = errors.New("invalid ticket")
 )
 
 // FailurePolicy is how many failed sign-ins, counted over how long, earn a lock,
@@ -127,6 +134,10 @@ type Options struct {
 	Secret string
 	Issuer string
 	TTL    time.Duration
+	// TicketTTL is how long a websocket ticket stays usable. It has no default
+	// for the same reason the lockout has none: it comes from the configuration
+	// file, and a service built without it is a deployment nobody chose.
+	TicketTTL time.Duration
 	// Lockout has no default here on purpose: its three numbers come from the
 	// configuration file, and a service constructed without them is a deployment
 	// whose lockout nobody chose.

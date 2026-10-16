@@ -99,9 +99,10 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 	)
 	authRepository := auth.NewGORMRepository(database.GORM())
 	authService, err := auth.NewService(auth.Options{
-		Secret: cfg.Auth.Secret,
-		Issuer: cfg.Auth.Issuer,
-		TTL:    cfg.Auth.TTL,
+		Secret:    cfg.Auth.Secret,
+		Issuer:    cfg.Auth.Issuer,
+		TTL:       cfg.Auth.TTL,
+		TicketTTL: cfg.Auth.TicketTTL,
 		Lockout: auth.FailurePolicy{
 			Threshold: cfg.Auth.LockoutThreshold,
 			Window:    cfg.Auth.LockoutWindow,
@@ -215,7 +216,11 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		Workspace:     handler.NewWorkspaceHandler(ai.packages, logger),
 		WebSocket:     ai.socket,
 		TokenVerifier: authService,
-		Authorizer:    ai.authorization,
+		// One service reads both credentials a websocket connection may carry,
+		// because the ticket is not a second kind of identity — it is the same
+		// account, reached by a shorter-lived handle that fits in a URL.
+		TicketVerifier: authService,
+		Authorizer:     ai.authorization,
 		// Every refusal is written down from here rather than from a handler,
 		// because the middleware is the one place a refusal is produced: a
 		// record kept per handler is a record omitted per handler, and an
