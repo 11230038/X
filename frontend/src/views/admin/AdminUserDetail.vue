@@ -33,6 +33,7 @@ import { confirmAction } from '../../shared/confirm'
 import { toFailure } from '../../shared/resource'
 import { notify } from '../../shared/toast'
 
+import AdminAccountActions from './AdminAccountActions.vue'
 import AdminGuardianLinks from './AdminGuardianLinks.vue'
 
 const props = defineProps<{ user: AdminUser }>()
@@ -265,6 +266,9 @@ async function addGrant(): Promise<void> {
     <p v-if="actionFailure" class="error">
       这一步没能完成：{{ actionFailure.message }}
     </p>
+
+    <!-- 账号生命周期：只有超级管理员看得到，目标受保护时只留说明 -->
+    <AdminAccountActions :user="props.user" @changed="emit('changed')" />
 
     <!-- 基线 -->
     <section class="block">

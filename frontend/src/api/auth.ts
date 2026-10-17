@@ -10,6 +10,14 @@ export interface Account {
   username: string
   /** `user` / `admin` 之类，由后端决定。界面只读不判。 */
   role: string
+  /**
+   * 是不是部署白名单里的超级管理员。
+   *
+   * 它只用来决定**画不画**账号管理的那几个按钮；真正的门在服务端，四条生
+   * 命周期路由各自有一层白名单检查。别拿它当权限判断用 —— 改一下 localStorage
+   * 就能让这个字段为 true，而后端不会因此多放行一条请求。
+   */
+  super_admin: boolean
 }
 
 /** 注册与登录的返回，也是"已登录"这个状态的全部内容。 */

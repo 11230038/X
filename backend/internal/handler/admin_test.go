@@ -132,7 +132,11 @@ func newAdminRouter(stub *adminStub) *gin.Engine {
 func newAdminRouterWithAudit(stub *adminStub, writer AuditWriter) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	logger := testHandlerLogger()
-	handler := NewAdminHandler(stub, stub, stub, writer, logger)
+	// The lifecycle half is nil here: these cases are about the governance routes
+	// that predate it, and a stub would be a fourth thing to keep in step without
+	// asserting anything. A nil lifecycle is answered as admin_unavailable by the
+	// routes that need it, which is handler/admin_accounts_test.go's subject.
+	handler := NewAdminHandler(stub, stub, stub, nil, writer, logger, nil)
 	guarded := middleware.RequireAuth(handlerVerifierStub{}, logger)
 	router := gin.New()
 	router.Use(middleware.RequestID())

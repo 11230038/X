@@ -40,13 +40,21 @@ func (r *GORMRepository) Create(ctx context.Context, params CreateParams) (Recor
 	// The users table declares every column NOT NULL, so GORM must be handed
 	// explicit values: without a default tag it writes zero values, which would
 	// store an empty role and NULL JSON.
+	//
+	// The two optional fields come from the caller so registration keeps writing
+	// what it always wrote: no role means the ordinary one, and no preset means
+	// the empty string V5 reads as standard.
+	role := params.Role
+	if role == "" {
+		role = defaultRole
+	}
 	model := models.User{
 		Username:       params.Username,
 		PasswordHash:   params.PasswordHash,
 		Disable:        false,
 		Avatar:         "",
-		Role:           defaultRole,
-		Preset:         "",
+		Role:           role,
+		Preset:         params.Preset,
 		LearnerProfile: datatypes.JSON(`{}`),
 		Extra:          datatypes.JSON(`{}`),
 	}
@@ -211,6 +219,70 @@ func (r *GORMRepository) ReplacePassword(
 		}).Error
 	if err != nil {
 		return mapRepositoryError(err)
+	}
+	return nil
+}
+
+// Delete removes one account.
+//
+// It is a hard delete and the foreign keys do the rest: every table that names
+// the account as its owner was declared with ON DELETE CASCADE, so this one
+// statement is the whole of what an administrator means by deleting somebody.
+// The audit is the deliberate exception — its columns carry no foreign key, so
+// the record of the deletion outlives the account.
+func (r *GORMRepository) Delete(ctx context.Context, userID int64) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("auth repository is not initialized")
+	}
+	result := r.db.WithContext(ctx).Delete(&models.User{}, "user_id = ?", userID)
+	if result.Error != nil {
+		return mapRepositoryError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// SetDisabled writes whether an account may sign in.
+//
+// Disabling records the revocation moment in the same statement, because the
+// two are one change: a token minted before it stops counting on the next
+// request, which is what makes "disabled" mean now rather than whenever the
+// token would have expired. Enabling writes the flag alone; the tokens that
+// were taken back are not brought back, and the account signs in again.
+//
+// The row count cannot tell "missing" from "already this value": an update that
+// changes nothing is zero rows too. The second is not an error, so existence is
+// looked up only when the count is zero — the same shape SavePreset uses in the
+// authorization store.
+func (r *GORMRepository) SetDisabled(
+	ctx context.Context, userID int64, disabled bool, at time.Time,
+) error {
+	if r == nil || r.db == nil {
+		return fmt.Errorf("auth repository is not initialized")
+	}
+	updates := map[string]any{"disable": disabled}
+	if disabled {
+		updates["token_valid_after"] = at.UTC()
+	}
+	result := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Where("user_id = ?", userID).
+		Updates(updates)
+	if result.Error != nil {
+		return mapRepositoryError(result.Error)
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&models.User{}).
+		Where("user_id = ?", userID).Count(&count).Error; err != nil {
+		return mapRepositoryError(err)
+	}
+	if count == 0 {
+		return ErrUserNotFound
 	}
 	return nil
 }

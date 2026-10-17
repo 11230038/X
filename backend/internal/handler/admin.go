@@ -54,6 +54,14 @@ type AdminHandler struct {
 	accounts AccountAdmin
 	grants   GrantAdmin
 	sessions AccountSessions
+	// lifecycle is the account half only a super administrator may reach: the
+	// four ways an account comes into being, goes away, or has its credential
+	// or sign-in state changed.
+	lifecycle AccountLifecycle
+	// superAdmin says which accounts the deployment's allowlist names. It is
+	// read, never written, and a nil function means nobody — which is what the
+	// tests of the governance routes that predate the allowlist pass.
+	superAdmin func(int64) bool
 	// audit is where the two sign-in routes below leave their entry. It is
 	// required rather than optional, and unlike the preset change that is not a
 	// matter of what this handler has been handed: ending somebody's sessions is
@@ -66,9 +74,13 @@ type AdminHandler struct {
 // NewAdminHandler constructs the governance handler.
 func NewAdminHandler(
 	accounts AccountAdmin, grants GrantAdmin, sessions AccountSessions,
-	writer AuditWriter, logger *slog.Logger,
+	lifecycle AccountLifecycle, writer AuditWriter, logger *slog.Logger,
+	superAdmin func(int64) bool,
 ) *AdminHandler {
-	return &AdminHandler{accounts: accounts, grants: grants, sessions: sessions, audit: writer, logger: logger}
+	return &AdminHandler{
+		accounts: accounts, grants: grants, sessions: sessions, lifecycle: lifecycle,
+		superAdmin: superAdmin, audit: writer, logger: logger,
+	}
 }
 
 // accountView is one row of the account list.
@@ -85,6 +97,10 @@ type accountView struct {
 	Preset   string `json:"preset"`
 	PresetOf string `json:"preset_of"`
 	Disabled bool   `json:"disabled"`
+	// SuperAdmin is read from the deployment's allowlist, not from the row. It
+	// tells a client which accounts the four lifecycle routes would protect and
+	// which caller may draw the buttons at all.
+	SuperAdmin bool `json:"super_admin"`
 }
 
 // grantView is one grant: which item, and which way it was decided.
@@ -110,6 +126,7 @@ func (h *AdminHandler) ListUsers(c *gin.Context) {
 		listed = append(listed, accountView{
 			UserID: account.UserID, Username: account.Username, Role: account.Role,
 			Preset: account.Preset, PresetOf: account.PresetOf(), Disabled: account.Disabled,
+			SuperAdmin: h.superAdminOf(account.UserID),
 		})
 	}
 	httpx.WriteSuccess(c, http.StatusOK, gin.H{"users": listed})

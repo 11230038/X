@@ -106,7 +106,8 @@ func newTestRouterWithGates(
 		Practice:    handler.NewPracticeHandler(routerPracticeStub{err: practiceErr}, routerQueueSize, logger),
 		Permissions: handler.NewPermissionsHandler(routerPermissionsStub{}, logger),
 		Admin: handler.NewAdminHandler(
-			routerAdminStub{}, routerAdminStub{}, routerAdminStub{}, routerAuditWriterStub{}, logger),
+			routerAdminStub{}, routerAdminStub{}, routerAdminStub{},
+			routerAccountLifecycleStub{}, routerAuditWriterStub{}, logger, nil),
 		Guardians: handler.NewGuardianHandler(routerGuardianStub{}, logger),
 		Audit:     handler.NewAuditHandler(routerAuditStub{}, logger),
 		Reports:   handler.NewReportsHandler(routerDashboardStub{}, routerAuditWriterStub{}, logger),
@@ -436,11 +437,14 @@ func (routerAuthStub) RevokeTokens(context.Context, int64) error { return nil }
 // internal/auth against a real database.
 func (routerAuthStub) ChangePassword(context.Context, int64, string, string) error { return nil }
 
+// The allowlist flag is true here so that the four lifecycle routes' second gate
+// passes on the "an allowed account reaches it" half of the surface cases; which
+// account is on the allowlist is middleware/superadmin_test.go's business.
 func (routerAuthStub) Authenticate(_ context.Context, token string) (auth.User, error) {
 	if token != routerAcceptedToken {
 		return auth.User{}, auth.ErrInvalidToken
 	}
-	return auth.User{UserID: 1, Username: "alice", Role: "user"}, nil
+	return auth.User{UserID: 1, Username: "alice", Role: "user", SuperAdmin: true}, nil
 }
 
 // IssueWebSocketTicket hands back a ticket and the moment it stops working. As

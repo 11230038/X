@@ -228,6 +228,17 @@ func TestRouterRegistersGovernanceUnderTheAdministrativeSurface(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/v1/admin/users", "", authz.SurfaceAdmin},
 		{http.MethodPatch, "/api/v1/admin/users/42", `{"preset":"learner"}`, authz.SurfaceAdmin},
+		// The four account-lifecycle writes carry a second gate (the deployment's
+		// super-administrator allowlist), but they stand in the same group: the
+		// surface is checked first and this case is about the group. The stub token
+		// verifier answers as an allowlisted account, so the inner gate passes and
+		// what these assert is the mount, not the allowlist.
+		{http.MethodPost, "/api/v1/admin/users",
+			`{"username":"newcomer","password":"correct-horse","role":"user","preset":"standard"}`,
+			authz.SurfaceAdmin},
+		{http.MethodDelete, "/api/v1/admin/users/42", "", authz.SurfaceAdmin},
+		{http.MethodPut, "/api/v1/admin/users/42/password", `{"password":"a-much-longer-one"}`, authz.SurfaceAdmin},
+		{http.MethodPut, "/api/v1/admin/users/42/disabled", `{"disabled":true}`, authz.SurfaceAdmin},
 		// The two writes about whether an account can sign in at all, as against
 		// what it may reach once it has. They are here rather than on the
 		// unfaced group with the account's own sign-out because they act on

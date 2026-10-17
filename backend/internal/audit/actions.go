@@ -36,6 +36,25 @@ const (
 	ActionSurfaceDenied Action = "surface.denied"
 	// ActionAccountCreated is a registration.
 	ActionAccountCreated Action = "account.created"
+	// ActionAccountProvisioned is a super administrator creating an account.
+	// It is separate from ActionAccountCreated because the two are different
+	// sentences about different actors: one is somebody joining, and the other
+	// is an administrator deciding somebody exists.
+	ActionAccountProvisioned Action = "account.provisioned"
+	// ActionAccountDeleted is a super administrator removing an account and
+	// everything the schema cascades from it. The entry survives the account,
+	// because the audit carries no foreign key.
+	ActionAccountDeleted Action = "account.deleted"
+	// ActionPasswordReset is a super administrator replacing another account's
+	// password without knowing the old one. The account's own password change
+	// is deliberately not here: it is a thing an account does to itself.
+	ActionPasswordReset Action = "account.password_reset"
+	// ActionAccountDisabled and ActionAccountEnabled are the two directions of
+	// the sign-in flag. They are two actions rather than one carrying a boolean
+	// because each is a sentence an auditor asks for by name — "who shut this
+	// account off" and "who let it back in" are different questions.
+	ActionAccountDisabled Action = "account.disabled"
+	ActionAccountEnabled  Action = "account.enabled"
 	// ActionPresetChanged is an administrator moving an account between
 	// presets.
 	ActionPresetChanged Action = "account.preset_changed"
@@ -100,7 +119,9 @@ const (
 // list the check is written from, so that adding one is adding a line here.
 var Actions = []Action{
 	ActionSurfaceDenied,
-	ActionAccountCreated, ActionPresetChanged,
+	ActionAccountCreated, ActionAccountProvisioned, ActionAccountDeleted,
+	ActionPasswordReset, ActionAccountDisabled, ActionAccountEnabled,
+	ActionPresetChanged,
 	ActionSessionsRevoked, ActionUnlocked,
 	ActionGrantWritten, ActionGrantWithdrawn,
 	ActionGuardianLinked, ActionGuardianRevoked,

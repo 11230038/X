@@ -78,6 +78,12 @@
   color: var(--danger);
 }
 
+/* 白名单里的账号。它读的是部署配置，不是角色，所以和角色是两个并排的标签。 */
+.chip--super {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .detail {
   padding: 14px;
   border: 1px solid var(--border-strong);

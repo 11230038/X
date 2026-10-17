@@ -1,6 +1,6 @@
 # X
 
-X 是一个前后端分离项目。`backend/` 是完整的 Go/Gin 服务（V1–V6 已交付）；`frontend/` 覆盖了后端 121 条路由对应的全部页面——对话、人格、伙伴、协同写作、材料、知识库、题库与练习、掌握路径、学习地图、沉浸阅读、活书、视频学习、记忆、设置与管理台。后端没有路由的占位页已经全部移除；技能与工具共用一页只读能力目录。
+X 是一个前后端分离项目。`backend/` 是完整的 Go/Gin 服务（V1–V6 已交付）；`frontend/` 覆盖了后端 125 条路由对应的全部页面——对话、人格、伙伴、协同写作、材料、知识库、题库与练习、掌握路径、学习地图、沉浸阅读、活书、视频学习、记忆、设置与管理台。后端没有路由的占位页已经全部移除；技能与工具共用一页只读能力目录。
 
 ## 项目结构
 
@@ -94,6 +94,7 @@ docker start seekdb
 - 用量（V5）：`USAGE_RETENTION_DAYS`、`USAGE_DAILY_CALLS_PER_ACCOUNT`、`USAGE_MONTHLY_TOKENS_PER_ACCOUNT`
 - 限速（V5）：`RATE_LIMIT_MODEL_PER_MINUTE`、`RATE_LIMIT_RETRIEVAL_PER_MINUTE`、`RATE_LIMIT_UPLOAD_PER_MINUTE`、`RATE_LIMIT_SEARCH_PER_MINUTE`、`RATE_LIMIT_BURST`
 - 导入导出（V5）：`WORKSPACE_ARCHIVE_ROOT`、`WORKSPACE_MAX_ARCHIVE_BYTES`、`WORKSPACE_JOB_TIMEOUT`
+- 账号管理：`SUPER_ADMIN_USER_IDS`（逗号分隔的账号 ID；空值表示没有超级管理员）
 
 `QUESTION_MAX_COUNT` 必须**不小于** `QUESTION_DEFAULT_COUNT`——默认值大于上限时，一句没说几道的出题请求会每次都拒绝自己。`QUESTION_DEFAULT_COUNT` / `QUESTION_MAX_COUNT` 是"一次出几道题"，`PRACTICE_QUEUE_SIZE` 是"练习队列一次取几道"，`PRACTICE_JUDGE_MAX_TOKENS` 是主观题判分那一次调用的输出预算。`LLM_CAPABILITY_CONFIG_JSON` 里 `deep_question` 的条目是**必需**的：它声明的阶段名（`ideation` / `generation`）与 `chat` 的（`exploring` / `responding`）不同，按阶段名取 `max_tokens` 的查找在继承来的配置里查不到，服务会带着"缺哪几个阶段、该写哪个键"的信息拒绝启动。
 
@@ -106,6 +107,8 @@ V5 的十七个新键同样没有代码默认值——**缺键是启动失败，
 V6 只加了三个键，都在认证那一组：`AUTH_LOCKOUT_THRESHOLD` / `AUTH_LOCKOUT_WINDOW` / `AUTH_LOCKOUT_DURATION`——**窗口内错够几次就锁、窗口多长、锁多久**，是三个可以被分别质疑的量，所以是三个键而不是一个。它们与其余键同级：没有代码默认值，缺一个就是启动失败。**阈值必须是正整数**：写成 `0` 会让第一次密码错误就锁定，没有哪种读法是一个部署想要的，所以 `Validate` 直接拒它（`internal/config/auth.go:48`）。三个键与 `.env.example` 里的注释都写明了一件事：**锁定只挡登录，不挡已经拿到的 token**——要踢掉已登录的会话得走 `POST /auth/logout` 或管理员那条吊销。
 
 `WS_TICKET_TTL` 是前端立项时补的第七个认证键，且是这一组里**唯一一个有上限的**（`5m`，超了直接拒绝启动）。原因是它管的凭据会出现在 URL 里，而 URL 被链路上每一跳无条件记录：**活得和 access token 一样长的票据就不是票据了，那只是把 token 挪进了 URL**。它单独是一个键而不是 `AUTH_TOKEN_TTL` 的某个比例，因为两者回答的问题不同——一个问"一次登录管多久"，一个问"一条被记下来的字符串多久之后不值得读"。
+
+`SUPER_ADMIN_USER_IDS` 是账号生命周期管理（新建、删除、重置密码、启用 / 停用）的白名单，写**账号 ID** 而不是用户名，空值表示这个部署没有超级管理员（fail closed）。它**不是第五层授权**：`role` 仍然只有 `admin` / `user`，白名单只在请求到达那四条路由时被读一次，不进 `authz.Decide`。键必须存在，值可以为空；改完要重启后端——启动时若白名单里的某个 ID 没有对应的账号，服务拒绝启动，防止一个尚未出现的自增 ID 被下一个注册者继承。白名单上的账号（以及调用者自己）不能被删除、停用或重置密码，服务端返回 403 `protected_account`。本地 `admin` 账号是 2000001，所以本地写 `SUPER_ADMIN_USER_IDS=2000001`。
 
 `LLM_API_KEYS`、`EMBEDDING_API_KEY` 与 `AUTH_JWT_SECRET` 同级：不写日志、不进错误信息、不进响应体，占位值不替换会让服务停在启动阶段。
 
@@ -238,8 +241,12 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `GET` | `/api/v1/memory/audit` | 审计流水（MEM-02） |
 | `GET` | `/api/v1/memory/export` | 导出全部 Memory，含证据链（PRD §11.3） |
 | `GET` | `/api/v1/audit` | 审计流水，管理员专属；`?actor_id=&subject_id=&action=&target_kind=&target_id=&since=&until=&limit=` 逐条收窄，认不出的取值报 400 而不是忽略 |
-| `GET` | `/api/v1/admin/users` | 账号列表（`role` / `preset` / 是否禁用） |
+| `GET` | `/api/v1/admin/users` | 账号列表（`role` / `preset` / 是否禁用 / 是否超级管理员） |
 | `PATCH` | `/api/v1/admin/users/{userID}` | 改 `preset`；**会把权限清空的改动被拒**（400 `policy_would_be_empty`） |
+| `POST` | `/api/v1/admin/users` | **仅超级管理员**：新建账号，body `{username,password,role,preset}`，201 返回账号视图，**不签发 token** |
+| `DELETE` | `/api/v1/admin/users/{userID}` | **仅超级管理员**：硬删除账号，数据库外键级联带走其数据，204；审计行保留 |
+| `PUT` | `/api/v1/admin/users/{userID}/password` | **仅超级管理员**：重置密码（无需旧密码），同时作废该账号全部 token，204 |
+| `PUT` | `/api/v1/admin/users/{userID}/disabled` | **仅超级管理员**：`{disabled:boolean}` 启用 / 停用，停用同时作废全部 token，204 |
 | `DELETE` | `/api/v1/admin/users/{userID}/sessions` | **吊销**：把该账号的全部 token 作废（写 `token_valid_after`），204，写审计 |
 | `DELETE` | `/api/v1/admin/users/{userID}/lock` | **解锁**：清掉失败计数与锁定，204，写审计 |
 | `GET` / `POST` / `DELETE` | `/api/v1/admin/users/{userID}/grants` | 逐项授权的读 / 开 / 关；写成 body `{"kind","id","allowed"}`，关掉一项时 `DELETE` 也带 body |
@@ -622,7 +629,7 @@ V6 加的不是功能，是**让已经有的东西有客人**：两条 migration
 
 ## 前端
 
-`frontend/` 覆盖后端现有的全部页面：对话（断线重连、续传、心跳、引用与来源、工具卡、附件与知识库选择、人格选择、回收站）、人格管理、伙伴、协同写作、学习首页、练习、掌握路径、学习地图（按模块展示知识点四态与下一步）、沉浸阅读、活书（书架、大纲编辑、逐章生成、阅读进度与 Markdown 导出）、视频学习（手动搜索 B 站视频并用官方播放器内嵌播放）、文件库、知识库、题库、记忆（L1 / L2 / L3 / 归属分组图 / 去重与清理）、设置七个分区，以及管理台（用户、授权、监护关系、审计）。后端没有路由的占位页已经全部移除（最后一块 `/visualizations` 落到 404）；技能与工具共用一页只读能力目录（数据来自 `/capabilities`，不能启停）。**伙伴与协同写作没有自己的数据表**：两者都读同一份人格——伙伴是"选一个人格开始对话"的入口，协同写作是"选人格 + 选写作步骤 + 写一句主题"之后把开场白带进普通对话；写作本身仍然是一来一回的消息，不另存文档。
+`frontend/` 覆盖后端现有的全部页面：对话（断线重连、续传、心跳、引用与来源、工具卡、附件与知识库选择、人格选择、回收站）、人格管理、伙伴、协同写作、学习首页、练习、掌握路径、学习地图（按模块展示知识点四态与下一步）、沉浸阅读、活书（书架、大纲编辑、逐章生成、阅读进度与 Markdown 导出）、视频学习（手动搜索 B 站视频并用官方播放器内嵌播放）、文件库、知识库、题库、记忆（L1 / L2 / L3 / 归属分组图 / 去重与清理）、设置七个分区，以及管理台（用户、超级管理员专属的账号生命周期操作、授权、监护关系、审计）。后端没有路由的占位页已经全部移除（最后一块 `/visualizations` 落到 404）；技能与工具共用一页只读能力目录（数据来自 `/capabilities`，不能启停）。**伙伴与协同写作没有自己的数据表**：两者都读同一份人格——伙伴是"选一个人格开始对话"的入口，协同写作是"选人格 + 选写作步骤 + 写一句主题"之后把开场白带进普通对话；写作本身仍然是一来一回的消息，不另存文档。
 
 运行时依赖是 `vue`、`vue-router`、`markdown-it`、`highlight.js`、`katex` 与 `dompurify`；没有 pinia、没有 axios、没有 eslint/prettier/vitest。模型输出统一经 `markdown-it`（`html: false`）→ DOMPurify 后才进 `v-html`，全应用只有 `src/markdown/render.ts` 产出 HTML。
 

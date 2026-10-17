@@ -47,6 +47,10 @@ const (
 	// somebody wrote about themselves, so this is generous for the same reason a
 	// note's bound is: it is stored.
 	maxMemoryRequestBytes int64 = 8 << 10
+	// The largest governance body is a username and a password, or a new
+	// password, or one boolean. The password limit is 72 bytes, so this is
+	// generous by an order of magnitude and still a bound.
+	maxAdminRequestBytes int64 = 4 << 10
 	// The largest question import is a file of questions, one to a line, so it is
 	// the one body here that is not an object. It is measured in questions rather
 	// than in bytes — a question is a few hundred bytes, so this is a file of some

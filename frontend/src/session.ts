@@ -72,6 +72,21 @@ export function startSession(session: Session): void {
 }
 
 /**
+ * 用服务端刚回答的账号替换本地那份，**不碰 token**。
+ *
+ * 存在的理由只有一个：`super_admin` 是部署配置投影到账号上的字段，白名单改
+ * 了之后同一张 token 解出来的账号会变。刷新页面时重新问一次 `/auth/me`，
+ * 按钮的显隐就跟着变，不需要重新登录 —— 而重新登录本来也改变不了白名单。
+ *
+ * 不写 token 是硬约束：这个模块是唯一写 token 的地方，`replaceAccount` 只
+ * 负责账号那一半，写错另一半的入口不在这里。
+ */
+export function replaceAccount(next: Account): void {
+  account.value = next
+  localStorage.setItem(ACCOUNT_KEY, JSON.stringify(next))
+}
+
+/**
  * 清掉本地登录态。**不发请求** —— 凭据已经被服务端撤回了（或本来就没
  * 有），再去调登出只会拿到另一个 401。
  *

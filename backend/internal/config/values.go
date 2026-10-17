@@ -14,12 +14,24 @@ import (
 // file may hold secrets, and a failure message is read in places they should not
 // reach.
 
+// blankAllowedKeys are the required keys whose empty value is a deployment
+// somebody meant. There is one, and it is the exception for one reason: it is a
+// list of accounts, and "no account" is a complete answer. Every other key's
+// blank is a line the operator meant to finish, and refusing it at startup is
+// how the message can name the key rather than the symptom.
+var blankAllowedKeys = map[string]bool{
+	"SUPER_ADMIN_USER_IDS": true,
+}
+
 // requireValues checks that the file carries every key at all. It is breadth, not
 // depth: a key that is present but malformed is caught by its own section.
 func requireValues(values map[string]string) error {
 	for _, key := range requiredKeys {
 		value, ok := values[key]
-		if !ok || strings.TrimSpace(value) == "" {
+		if !ok {
+			return fmt.Errorf("%s is required in the configuration file", key)
+		}
+		if strings.TrimSpace(value) == "" && !blankAllowedKeys[key] {
 			return fmt.Errorf("%s is required in the configuration file", key)
 		}
 	}

@@ -28,6 +28,14 @@ const (
 	seedReviewRequestID    = "seed_review_request"
 )
 
+// seedQuestionOptions is the stored shape of a choice question's options: the
+// bank's reader decodes objects with a key and a text, and a bare string here
+// makes the whole question list fail with a 500. It lives at package level so a
+// unit test can decode it without a database.
+var seedQuestionOptions = datatypes.JSON(
+	`[{"key":"A","text":"PRIMARY KEY"},{"key":"B","text":"UNIQUE"},{"key":"C","text":"CHECK"},{"key":"D","text":"DEFAULT"}]`,
+)
+
 var seedUsers = []struct {
 	username string
 	password string
@@ -202,8 +210,10 @@ func seedConversation(tx *gorm.DB) error {
 func seedNotebookPractice(tx *gorm.DB) error {
 	question := "关系型数据库中哪种约束用于保证列值唯一？"
 	questionType := "single_choice"
-	userAnswer := "UNIQUE"
-	correctAnswer := "UNIQUE"
+	// A choice answer names the option keys, not their text: that is what the
+	// import path stores and what the bank compares against.
+	userAnswer := "B"
+	correctAnswer := "B"
 	difficulty := "easy"
 	quality := "verified"
 	assessmentType := "practice"
@@ -235,20 +245,18 @@ func seedNotebookPractice(tx *gorm.DB) error {
 		QuestionType:      questionType,
 		Difficulty:        &difficulty,
 		UserAnswer:        &userAnswer,
-		Options: datatypes.JSON(
-			`["PRIMARY KEY","UNIQUE","CHECK","DEFAULT"]`,
-		),
-		CorrectAnswer:  &correctAnswer,
-		Quality:        &quality,
-		AssessmentType: &assessmentType,
-		IsCorrect:      &isCorrect,
-		Result:         &result,
-		Resolved:       &resolved,
-		AttemptCount:   &attemptCount,
-		Bookmarked:     &bookmarked,
-		Source:         &source,
-		SessionID:      stringPointer(seedSessionID),
-		TurnID:         stringPointer(seedTurnID),
+		Options:           seedQuestionOptions,
+		CorrectAnswer:     &correctAnswer,
+		Quality:           &quality,
+		AssessmentType:    &assessmentType,
+		IsCorrect:         &isCorrect,
+		Result:            &result,
+		Resolved:          &resolved,
+		AttemptCount:      &attemptCount,
+		Bookmarked:        &bookmarked,
+		Source:            &source,
+		SessionID:         stringPointer(seedSessionID),
+		TurnID:            stringPointer(seedTurnID),
 	}
 	category := models.NotebookCategory{
 		NotebookCategoriesID: seedNotebookCategoryID,

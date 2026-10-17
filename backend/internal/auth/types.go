@@ -13,6 +13,10 @@ var (
 	ErrInvalidPassword = errors.New("invalid password")
 	// ErrUsernameTaken reports a username that already exists.
 	ErrUsernameTaken = errors.New("username taken")
+	// ErrUnknownRole reports a role this build does not write. Roles are a
+	// closed set of two, and an account created with a third one would be an
+	// account whose meaning no policy has a definition for.
+	ErrUnknownRole = errors.New("unknown role")
 	// ErrUserNotFound reports a missing account.
 	ErrUserNotFound = errors.New("user not found")
 	// ErrInvalidCredentials deliberately covers both unknown accounts and wrong
@@ -57,6 +61,13 @@ type User struct {
 	UserID   int64  `json:"user_id"`
 	Username string `json:"username"`
 	Role     string `json:"role"`
+	// SuperAdmin says whether this account is in the deployment's allowlist of
+	// accounts that may perform the account-lifecycle operations. It is not a
+	// role and it is deliberately not stored: the allowlist lives in the
+	// configuration file, and this field is stamped on every request from it.
+	// A client may draw a button from it; the server never reads it back from a
+	// request to decide anything.
+	SuperAdmin bool `json:"super_admin"`
 }
 
 // Record is the persistence view used only inside this package. It carries the
@@ -98,9 +109,28 @@ type AuthResult struct {
 }
 
 // CreateParams carries a new account to the repository.
+//
+// Role and Preset are optional so the registration path keeps writing what it
+// always wrote. The account-lifecycle path fills them in: an administrator
+// creating an account chooses both, and neither can be edited afterwards except
+// for the preset through the governance route.
 type CreateParams struct {
 	Username     string
 	PasswordHash string
+	Role         string
+	Preset       string
+}
+
+// CreateAccountInput describes an account an administrator is creating.
+//
+// It is not RegisterInput: registration always creates an ordinary user and
+// hands back a session, while this creates whatever the administrator asked for
+// and signs nobody in.
+type CreateAccountInput struct {
+	Username string
+	Password string
+	Role     string
+	Preset   string
 }
 
 // Repository persists accounts without modifying the schema.
@@ -108,6 +138,19 @@ type Repository interface {
 	Create(context.Context, CreateParams) (Record, error)
 	FindByUsername(context.Context, string) (Record, error)
 	FindByID(context.Context, int64) (Record, error)
+	// Delete removes one account. Everything the account owns goes with it
+	// through the foreign keys the schema already declares; the audit does not,
+	// because a record of what happened has to outlive the account it happened
+	// to. A missing account is ErrUserNotFound: unlike a revocation, this is a
+	// deletion a caller asks for by name, and "it was already gone" is an answer
+	// the caller should hear rather than a success it did not achieve.
+	Delete(context.Context, int64) error
+	// SetDisabled writes whether an account may sign in. Disabling also records
+	// the moment its tokens stopped counting, in the same write: a disabled
+	// account that keeps a working token is a state no caller asked for.
+	// Enabling writes the flag alone — the tokens were already taken back, and
+	// bringing them back is not something this operation can do.
+	SetDisabled(context.Context, int64, bool, time.Time) error
 	// RevokeTokens records the moment at or before which this account's tokens
 	// stopped counting. The moment is the caller's: see Service.now.
 	RevokeTokens(context.Context, int64, time.Time) error
@@ -142,4 +185,8 @@ type Options struct {
 	// configuration file, and a service constructed without them is a deployment
 	// whose lockout nobody chose.
 	Lockout FailurePolicy
+	// SuperAdminUserIDs is the deployment's allowlist of accounts that may
+	// perform the account-lifecycle operations. Empty is a valid deployment: it
+	// means nobody may, and the four routes refuse every caller.
+	SuperAdminUserIDs []int64
 }

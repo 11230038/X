@@ -367,6 +367,22 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	admin := reach(authz.SurfaceAdmin)
 	admin.GET("/admin/users", handlers.Admin.ListUsers)
 	admin.PATCH("/admin/users/:userID", handlers.Admin.UpdateUser)
+	// The four account-lifecycle writes are behind a second gate inside this
+	// group: the surface decides whether the caller is an administrator at all,
+	// and the allowlist decides whether this administrator may create, delete,
+	// disable or reset somebody. The order is the one that gives each refusal
+	// its true name — a caller who does not reach governance is refused and
+	// recorded by the surface; one who reaches it but is not listed is told so
+	// by this gate.
+	//
+	// The gate is mounted per route rather than on a subgroup so that the group
+	// above stays exactly what its name says: an administrator reaches these,
+	// and the four routes that say otherwise say so where they are written.
+	superAdmin := middleware.RequireSuperAdmin(logger)
+	admin.POST("/admin/users", superAdmin, handlers.Admin.CreateUser)
+	admin.DELETE("/admin/users/:userID", superAdmin, handlers.Admin.DeleteUser)
+	admin.PUT("/admin/users/:userID/password", superAdmin, handlers.Admin.ResetPassword)
+	admin.PUT("/admin/users/:userID/disabled", superAdmin, handlers.Admin.SetDisabled)
 	// The two writes about whether an account can get in at all, as opposed to
 	// what it may reach once it has. Both are named after the account's property
 	// rather than an action — the lock is a thing an account has and the sessions

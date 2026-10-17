@@ -15,6 +15,31 @@ export const ADMIN = {
   unlockScope: '清掉连续登录失败计数，这个人马上可以再登录。这个动作会记进审计。',
   revokeSessions: '吊销会话',
   revokeSessionsScope: '这个账号现有的登录立即失效。进行中的回答不会立刻停下。这个动作会记进审计。',
+  // 下面这一组只有超级管理员看得到。服务端仍然是唯一的门：这些文案藏在描
+  // 述界面上，不藏在权限判断上。
+  superAdmin: '超级管理员',
+  createUser: '新建用户',
+  createUserScope: '建好之后这个账号就能直接登录。只有超级管理员能建账号。',
+  initialPassword: '初始密码',
+  newPassword: '新密码',
+  confirmPassword: '再输一次',
+  passwordMismatch: '两次输入的密码不一样。',
+  usernameHint: '3–32 位，只能用字母、数字、下划线和连字符。',
+  passwordHint: '8–72 字节。',
+  accountActions: '账号操作',
+  resetPassword: '重置密码',
+  resetPasswordScope:
+    '不需要知道旧密码，直接换成新的。这个账号现有的登录会立即全部失效，需要用新密码重新登录。这个动作会记进审计。',
+  passwordResetDone: '密码已重置。这个账号的现有登录已全部失效。',
+  disableAccount: '停用账号',
+  enableAccount: '启用账号',
+  disableScope:
+    '停用后这个人不能登录，已登录的会话立即失效；数据都还在，启用后可以继续用（需要重新登录）。这个动作会记进审计。',
+  enableScope: '启用后这个人可以用原密码重新登录。停用期间签发的 token 不会恢复。这个动作会记进审计。',
+  deleteAccount: '删除账号',
+  deleteScope:
+    '连同这个人的对话、文件、知识库、题库、活书等一起删除，不能恢复。审计记录会保留。已上传文件的字节仍留在磁盘上。这个动作会记进审计。',
+  protectedAccount: '超级管理员账号不能在这里停用、重置或删除。',
   changePreset: '修改预设',
   presetScope: '预设是这个人开局拿到的基线；单独授权是叠在它上面的覆盖项。',
   policyWouldBeEmpty: '这个改动会让这个人一项权限都不剩，服务端拒绝了这个操作。',
@@ -62,6 +87,11 @@ export const ADMIN = {
 export const AUDIT_ACTIONS: Record<string, string> = {
   'surface.denied': '访问被拒绝',
   'account.created': '账号创建',
+  'account.provisioned': '管理员新建账号',
+  'account.deleted': '删除账号',
+  'account.password_reset': '重置密码',
+  'account.disabled': '停用账号',
+  'account.enabled': '启用账号',
   'account.preset_changed': '预设变更',
   'account.sessions_revoked': '吊销会话',
   'account.unlocked': '解锁账号',

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"backend/internal/authz"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -23,6 +24,10 @@ type Service struct {
 	tickets    *ticketSigner
 	dummyHash  []byte
 	lockout    FailurePolicy
+	// superAdmins is the configured allowlist, as a set. It is read on every
+	// request to stamp User.SuperAdmin and by the account-lifecycle operations'
+	// route gate; it is never written to the database.
+	superAdmins map[int64]struct{}
 	// now is the one clock this package reads. It is the same function both
 	// signers stamp with, and that is not a detail: whether a credential still
 	// counts is decided by comparing the moment it was minted against the moment
@@ -65,13 +70,24 @@ func NewService(options Options, repository Repository) (*Service, error) {
 		return nil, err
 	}
 	tickets.now = now
+	superAdmins := make(map[int64]struct{}, len(options.SuperAdminUserIDs))
+	for _, userID := range options.SuperAdminUserIDs {
+		// The configuration file refuses these too; checking again here is what
+		// keeps a service built by another caller from turning "zero" into an
+		// allowlist entry that no account can ever match.
+		if userID <= 0 {
+			return nil, fmt.Errorf("super administrator ids must be positive")
+		}
+		superAdmins[userID] = struct{}{}
+	}
 	return &Service{
-		repository: repository,
-		signer:     signer,
-		tickets:    tickets,
-		dummyHash:  dummyHash,
-		lockout:    options.Lockout,
-		now:        now,
+		repository:  repository,
+		signer:      signer,
+		tickets:     tickets,
+		dummyHash:   dummyHash,
+		lockout:     options.Lockout,
+		superAdmins: superAdmins,
+		now:         now,
 	}, nil
 }
 
@@ -95,6 +111,82 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (AuthResult
 		return AuthResult{}, err
 	}
 	return s.issue(record.User)
+}
+
+// CreateAccount stores an account an administrator asked for.
+//
+// It is beside Register rather than a flag on it because the two differ in the
+// two things that matter: this one signs nobody in, and it writes the role and
+// preset the administrator chose instead of the ordinary defaults. What it
+// shares is the part that must not be written twice — the username and password
+// policies and the bcrypt work.
+func (s *Service) CreateAccount(ctx context.Context, input CreateAccountInput) (User, error) {
+	if err := ValidateUsername(input.Username); err != nil {
+		return User{}, err
+	}
+	if err := ValidatePassword(input.Password); err != nil {
+		return User{}, err
+	}
+	if !authz.KnownRole(input.Role) {
+		return User{}, fmt.Errorf("%w: %q", ErrUnknownRole, input.Role)
+	}
+	if !authz.KnownPreset(input.Preset) {
+		return User{}, fmt.Errorf("%w: %q", authz.ErrUnknownPreset, input.Preset)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return User{}, fmt.Errorf("hash password: %w", err)
+	}
+	record, err := s.repository.Create(ctx, CreateParams{
+		Username:     input.Username,
+		PasswordHash: string(hash),
+		Role:         input.Role,
+		Preset:       input.Preset,
+	})
+	if err != nil {
+		return User{}, err
+	}
+	return s.project(record.User), nil
+}
+
+// DeleteAccount removes one account and everything the schema hangs off it.
+func (s *Service) DeleteAccount(ctx context.Context, userID int64) error {
+	if userID <= 0 {
+		return ErrUserNotFound
+	}
+	return s.repository.Delete(ctx, userID)
+}
+
+// ResetPassword replaces an account's password without knowing the old one.
+//
+// The existence check comes first because ReplacePassword deliberately treats a
+// missing row as success; that is right for ChangePassword, which has already
+// read the row, and wrong here, where the account is named by an administrator
+// and a mistyped id must not be answered with 204.
+func (s *Service) ResetPassword(ctx context.Context, userID int64, password string) error {
+	if err := ValidatePassword(password); err != nil {
+		return err
+	}
+	if _, err := s.repository.FindByID(ctx, userID); err != nil {
+		return err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+	return s.repository.ReplacePassword(ctx, userID, string(hash), s.now().UTC())
+}
+
+// SetDisabled writes whether an account may sign in.
+//
+// Disabling also takes back the tokens it holds, in the same write; enabling
+// does not bring them back. The account that is being enabled signs in again,
+// which is the only way to get a credential that counts.
+func (s *Service) SetDisabled(ctx context.Context, userID int64, disabled bool) error {
+	if userID <= 0 {
+		return ErrUserNotFound
+	}
+	return s.repository.SetDisabled(ctx, userID, disabled, s.now().UTC())
 }
 
 // Login verifies credentials and issues an access token.
@@ -200,7 +292,7 @@ func (s *Service) resolve(ctx context.Context, userID int64, issuedAt time.Time)
 	if record.TokenValidAfter != nil && !issuedAt.After(*record.TokenValidAfter) {
 		return User{}, ErrInvalidToken
 	}
-	return record.User, nil
+	return s.project(record.User), nil
 }
 
 // RevokeTokens takes back every token this account holds, the one that made the
@@ -274,11 +366,49 @@ func (s *Service) ChangePassword(ctx context.Context, userID int64, oldPassword,
 }
 
 func (s *Service) issue(user User) (AuthResult, error) {
+	user = s.project(user)
 	token, expiresAt, err := s.signer.Sign(user)
 	if err != nil {
 		return AuthResult{}, err
 	}
 	return AuthResult{User: user, Token: token, ExpiresAt: expiresAt}, nil
+}
+
+// project stamps the allowlist flag on an account on its way out.
+//
+// It is applied on every sign-in and every authenticated request rather than
+// stored with the account, because the allowlist is a property of the
+// deployment and not of the row: editing the configuration file and restarting
+// is what adds or removes a super administrator, and the next request sees it.
+func (s *Service) project(user User) User {
+	_, user.SuperAdmin = s.superAdmins[user.UserID]
+	return user
+}
+
+// IsSuperAdmin reports whether one account is in the deployment's allowlist.
+func (s *Service) IsSuperAdmin(userID int64) bool {
+	_, ok := s.superAdmins[userID]
+	return ok
+}
+
+// VerifySuperAdmins refuses an allowlist that names an account which is not
+// there.
+//
+// The check is a startup one, and the reason is an auto-increment table: an id
+// listed here but not yet assigned would be handed to whichever account is
+// created next. A typo would then grant the extra power to a stranger rather
+// than fail, which is the one failure mode of a whitelist that cannot be
+// noticed by reading the file.
+func (s *Service) VerifySuperAdmins(ctx context.Context) error {
+	for userID := range s.superAdmins {
+		if _, err := s.repository.FindByID(ctx, userID); err != nil {
+			if errors.Is(err, ErrUserNotFound) {
+				return fmt.Errorf("super administrator account %d does not exist", userID)
+			}
+			return fmt.Errorf("verify super administrator account %d: %w", userID, err)
+		}
+	}
+	return nil
 }
 
 // equalizePasswordCheck performs the same bcrypt work as a real comparison so an

@@ -111,6 +111,9 @@ func validValues() map[string]string {
 		"AUTHZ_DEFAULT_PRESET":         "standard",
 		"AUTHZ_LEARNER_CAPABILITIES":   "chat",
 		"AUTHZ_LEARNER_SURFACES":       "chat",
+		// Empty is the ordinary deployment: no account may create, delete,
+		// disable or reset another. A case that needs one fills it in.
+		"SUPER_ADMIN_USER_IDS": "",
 		"AUDIT_RETENTION_DAYS":         "180",
 		"AUDIT_MAX_PAGE_SIZE":          "200",
 		"USAGE_RETENTION_DAYS":         "365",

@@ -13,8 +13,10 @@ import EmptyState from '../../components/common/EmptyState.vue'
 import FailureState from '../../components/common/FailureState.vue'
 import SkeletonBlock from '../../components/common/SkeletonBlock.vue'
 import { ADMIN } from '../../copy/admin'
+import { currentAccount } from '../../session'
 import { toFailure } from '../../shared/resource'
 
+import AdminCreateUserDialog from './AdminCreateUserDialog.vue'
 import AdminUserDetail from './AdminUserDetail.vue'
 
 const users = ref<AdminUser[]>([])
@@ -36,6 +38,24 @@ const filteredUsers = computed(() => {
 const selectedUser = computed(
   () => users.value.find((user) => user.user_id === selectedId.value) ?? null,
 )
+
+/**
+ * 只有白名单里的账号看得到新建入口。显隐不是权限：四条生命周期路由在服务端
+ * 各有一层白名单检查，改掉本地存储让按钮出现也不会多放行一条请求。
+ */
+const canManage = computed(() => currentAccount.value?.super_admin === true)
+
+const createDialog = ref<InstanceType<typeof AdminCreateUserDialog> | null>(null)
+
+function openCreate(): void {
+  createDialog.value?.show()
+}
+
+/** 新建成功后重载列表，并选中刚建的那个 —— 下一步通常就是给它授权。 */
+async function onCreated(user: AdminUser): Promise<void> {
+  await loadUsers()
+  selectedId.value = user.user_id
+}
 
 function presetLabel(user: AdminUser): string {
   return `${user.preset || '—'} / ${user.preset_of}`
@@ -87,6 +107,9 @@ onMounted(() => {
           :placeholder="ADMIN.searchUsers"
         />
         <button type="button" class="ghost" @click="loadUsers">刷新</button>
+        <button v-if="canManage" type="button" class="primary" @click="openCreate">
+          {{ ADMIN.createUser }}
+        </button>
       </div>
 
       <EmptyState
@@ -106,6 +129,7 @@ onMounted(() => {
             <span class="user__name">{{ user.username }}</span>
             <span class="user__id">#{{ user.user_id }}</span>
             <span class="chip">{{ user.role === 'admin' ? ADMIN.roleAdmin : ADMIN.roleUser }}</span>
+            <span v-if="user.super_admin" class="chip chip--super">{{ ADMIN.superAdmin }}</span>
             <span class="user__preset">{{ presetLabel(user) }}</span>
             <span v-if="user.disabled" class="chip chip--bad">{{ ADMIN.disabled }}</span>
           </button>
@@ -118,6 +142,8 @@ onMounted(() => {
         @changed="loadUsers"
       />
     </template>
+
+    <AdminCreateUserDialog ref="createDialog" @created="onCreated" />
   </div>
 </template>
 

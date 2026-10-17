@@ -29,6 +29,18 @@ const (
 	RoleUser  = "user"
 )
 
+// Roles is every role this build writes.
+//
+// It is a list rather than a pair of constants for the same reason Presets is:
+// the account service has to refuse a third role, and the refusal belongs to
+// this package's vocabulary rather than to a comparison written where the role
+// is stored. A second `role == "root"`-style check elsewhere is exactly the
+// second private decision §7.1 refuses.
+var Roles = []string{RoleAdmin, RoleUser}
+
+// KnownRole reports whether a name is a role this build writes.
+func KnownRole(role string) bool { return contains(Roles, role) }
+
 // Caller is the account a request is being served for.
 //
 // Role travels with the id rather than being looked up where it is needed,

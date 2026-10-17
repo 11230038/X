@@ -45,6 +45,20 @@ type fakeRepository struct {
 	replacedUser int64
 	replacedHash string
 	replacedAt   time.Time
+
+	// The two methods the account lifecycle adds. As with the writes above, they
+	// record what they were handed; whether the row really went away and whether a
+	// disabled account really stops signing in are questions about SQL and are
+	// asked over the real adapter in the _db_ cases.
+	lastCreate       CreateParams
+	deleteCalls      int
+	deletedUser      int64
+	deleteErr        error
+	setDisabledCalls int
+	disabledUser     int64
+	disabledValue    bool
+	disabledAt       time.Time
+	setDisabledErr   error
 }
 
 func newFakeRepository() *fakeRepository {
@@ -57,12 +71,17 @@ func newFakeRepository() *fakeRepository {
 
 func (f *fakeRepository) Create(_ context.Context, params CreateParams) (Record, error) {
 	f.createCalls++
+	f.lastCreate = params
 	// Keyed by the exact username: casing is significant.
 	if _, exists := f.records[params.Username]; exists {
 		return Record{}, ErrUsernameTaken
 	}
+	role := params.Role
+	if role == "" {
+		role = defaultRole
+	}
 	record := Record{
-		User:         User{UserID: f.nextID, Username: params.Username, Role: defaultRole},
+		User:         User{UserID: f.nextID, Username: params.Username, Role: role},
 		PasswordHash: params.PasswordHash,
 	}
 	f.nextID++
@@ -152,6 +171,51 @@ func (f *fakeRepository) ReplacePassword(
 	return nil
 }
 
+// Delete removes the account from both indexes, and reports a missing one the way
+// the real adapter does: unlike a revocation, a deletion a caller asks for by
+// name has an answer for "it was already gone", and it is not success.
+func (f *fakeRepository) Delete(_ context.Context, userID int64) error {
+	f.deleteCalls++
+	f.deletedUser = userID
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	record, exists := f.byID[userID]
+	if !exists {
+		return ErrUserNotFound
+	}
+	delete(f.byID, userID)
+	delete(f.records, record.User.Username)
+	return nil
+}
+
+// SetDisabled records both halves of the call and writes both of the things the
+// real adapter writes: the flag, and — when disabling — the moment the account's
+// tokens stopped counting. That write is what this case can check without
+// restating SQL: the moment arrived from the caller's clock and was not left
+// behind.
+func (f *fakeRepository) SetDisabled(
+	_ context.Context, userID int64, disabled bool, at time.Time,
+) error {
+	f.setDisabledCalls++
+	f.disabledUser, f.disabledValue, f.disabledAt = userID, disabled, at
+	if f.setDisabledErr != nil {
+		return f.setDisabledErr
+	}
+	record, exists := f.byID[userID]
+	if !exists {
+		return ErrUserNotFound
+	}
+	record.Disabled = disabled
+	if disabled {
+		moment := at
+		record.TokenValidAfter = &moment
+	}
+	f.byID[userID] = record
+	f.records[record.User.Username] = record
+	return nil
+}
+
 func (f *fakeRepository) addAccount(t *testing.T, username, password string, disabled bool) Record {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
@@ -171,12 +235,22 @@ func (f *fakeRepository) addAccount(t *testing.T, username, password string, dis
 
 func newTestService(t *testing.T, repository Repository) *Service {
 	t.Helper()
+	return newTestServiceWithSuperAdmins(t, repository, nil)
+}
+
+// newTestServiceWithSuperAdmins is the same construction with the deployment's
+// allowlist filled in, for the cases about the flag the allowlist projects.
+func newTestServiceWithSuperAdmins(
+	t *testing.T, repository Repository, superAdminIDs []int64,
+) *Service {
+	t.Helper()
 	service, err := NewService(Options{
-		Secret:    testSecretRepeated,
-		Issuer:    exampleTokenIssuer,
-		TTL:       testTokenTTL,
-		TicketTTL: testTicketTTL,
-		Lockout:   lockoutPolicy,
+		Secret:            testSecretRepeated,
+		Issuer:            exampleTokenIssuer,
+		TTL:               testTokenTTL,
+		TicketTTL:         testTicketTTL,
+		Lockout:           lockoutPolicy,
+		SuperAdminUserIDs: superAdminIDs,
 	}, repository)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)

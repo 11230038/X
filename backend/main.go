@@ -108,8 +108,15 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 			Window:    cfg.Auth.LockoutWindow,
 			Duration:  cfg.Auth.LockoutDuration,
 		},
+		SuperAdminUserIDs: cfg.Authz.SuperAdminUserIDs,
 	}, authRepository)
 	if err != nil {
+		return fmt.Errorf("initialize authentication: %w", err)
+	}
+	// A listed account that does not exist would be handed to whichever account
+	// is created next, so the allowlist is checked before the process serves
+	// anything rather than at the first request that needs it.
+	if err := authService.VerifySuperAdmins(ctx); err != nil {
 		return fmt.Errorf("initialize authentication: %w", err)
 	}
 	sessionStore := session.NewGORMRepository(database.GORM())
@@ -195,7 +202,8 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		// administrator about somebody else. The audit goes in beside them
 		// because these two routes cannot be served without it.
 		Admin: handler.NewAdminHandler(
-			ai.authorization, ai.authorization, authService, ai.auditLog, logger,
+			ai.authorization, ai.authorization, authService, authService,
+			ai.auditLog, logger, authService.IsSuperAdmin,
 		),
 		Guardians: handler.NewGuardianHandler(ai.authorization, logger),
 		// The audit is its own surface's read: it is where the decisions the
