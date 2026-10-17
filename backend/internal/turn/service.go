@@ -55,7 +55,12 @@ type Options struct {
 	// that are about one. It is optional in the same sense: a nil one is a build
 	// with no reading layer in it, where a turn that carries a selection is a
 	// turn whose selection could not be read.
-	Readings     Readings
+	Readings Readings
+	// Personas resolves the saved prompt a turn runs under. It is optional in
+	// the same sense: a nil one is a build with no persona store, where a turn
+	// that names one is refused before it starts rather than run without the
+	// prompt it asked for.
+	Personas     Personas
 	Capabilities *capability.Registry
 	Tools        *tool.Registry
 	Policy       tool.Policy
@@ -86,6 +91,7 @@ type Runner struct {
 	router       Router
 	paths        Paths
 	readings     Readings
+	personas     Personas
 	capabilities *capability.Registry
 	tools        *tool.Registry
 	policy       tool.Policy
@@ -144,6 +150,7 @@ func NewRunner(options Options) (*Runner, error) {
 		router:       options.Router,
 		paths:        options.Paths,
 		readings:     options.Readings,
+		personas:     options.Personas,
 		capabilities: options.Capabilities,
 		tools:        options.Tools,
 		policy:       options.Policy,
@@ -157,205 +164,6 @@ func NewRunner(options Options) (*Runner, error) {
 		stopRoot:     stopRoot,
 		active:       make(map[string]*turnRun),
 	}, nil
-}
-
-// StartRequest is what a client asks for when it starts a turn.
-type StartRequest struct {
-	// OwnerID is whose turn this is, and it is zero for a turn with no account
-	// behind it — a test, or a connection nobody has signed in on (§2.7).
-	//
-	// The runner does not know what the account is for. It knows that a turn has
-	// a master, and the master is who the Memory it observes belongs to; a turn
-	// with no master writes no Memory at all, which is a narrower and safer rule
-	// than writing it somewhere shared. The id arrives from the authenticated
-	// websocket connection, because that boundary is the only layer that knows who
-	// is on the other end of it.
-	OwnerID int64
-	// SessionID continues an existing conversation. Empty starts a new one.
-	SessionID string
-	// Capability is what should run. Empty runs the default.
-	Capability string
-	// Content is what the user said.
-	Content string
-	// Attachments are the stored files this turn carries, in the order they were
-	// given. The order is what the turn's attachment numbers are: the first file
-	// here is the one the model reads as "1".
-	Attachments []string
-	// KnowledgeBases are the collections this turn may search. Empty means the
-	// turn carries none, which is not the same as carrying a default one: a turn
-	// that named no collection searches nothing (KB-07).
-	KnowledgeBases []string
-	// Selection is the passage the reader had chosen in a reading material, and
-	// it is empty for every turn that is not an immersive reading one (§2.8). It
-	// is one turn's material and not a conversation's: it is what the reader was
-	// looking at when they asked, and it is not stored — a saved selection would
-	// be somebody else's highlight in the second tab.
-	Selection *Selection
-}
-
-// Started is what starting a turn produced.
-//
-// The session comes back with the turn because a client that started a new
-// conversation needs its id to continue it, and the turn id names the stream it
-// should now subscribe to.
-type Started struct {
-	Session session.Session
-	Turn    Turn
-}
-
-// Start creates the turn and runs it in the background.
-//
-// It returns as soon as the turn is stored, before any of it has run: the model
-// call takes seconds, and a client that waited for it would be a client that
-// could not cancel it, because the id it would cancel by has not reached it.
-func (r *Runner) Start(ctx context.Context, request StartRequest) (Started, error) {
-	content := strings.TrimSpace(request.Content)
-	if content == "" {
-		return Started{}, ErrEmptyMessage
-	}
-	// The account travels with the turn from here on, because everything the
-	// turn writes is one person's: the conversation it appends to, the questions
-	// it files (notebook_entries carries its own owner) and the path it claims.
-	// A turn started with no account is a turn whose work belongs to nobody, and
-	// nobody is the administrator — which is what a connection that was never
-	// signed in on gets, and what the ws boundary must therefore always fill in.
-	account := authz.Caller{UserID: request.OwnerID}
-	// A selection is checked before the turn exists, because what can be wrong
-	// with one is wrong with the request: a coordinate that cannot be a span of
-	// any text is the client's to fix, and a turn that starts and then reports it
-	// is a user waiting on an answer that was never going to come.
-	if request.Selection != nil {
-		if err := request.Selection.Validate(); err != nil {
-			return Started{}, err
-		}
-	}
-	// What runs is decided here, before the turn row exists, which is the whole
-	// point of the position: a turn is created already knowing its capability, so
-	// nothing downstream has to ask again, and a routed turn is stored as one
-	// (TOOL-08). An explicit capability is never rewritten — pre-routing fills a
-	// blank and does not overrule an answer.
-	capabilityName := strings.TrimSpace(request.Capability)
-	var routed *Routing
-	if capabilityName == "" {
-		capabilityName = r.fallback
-		if decision, matched := r.route(ctx, content); matched {
-			routed, capabilityName = &decision, decision.Capability
-		}
-	}
-
-	conversation, err := r.conversation(ctx, request.SessionID, account)
-	if err != nil {
-		return Started{}, err
-	}
-	if _, err := r.sessions.AppendMessage(ctx, session.NewMessage{
-		SessionID:  conversation.ID,
-		Role:       session.RoleUser,
-		Content:    content,
-		Capability: capabilityName,
-	}, account); err != nil {
-		return Started{}, err
-	}
-
-	turnID, err := newID(turnIDPrefix)
-	if err != nil {
-		return Started{}, fmt.Errorf("generate turn id: %w", err)
-	}
-	record := Turn{
-		ID:         turnID,
-		SessionID:  conversation.ID,
-		Status:     StatusQueued,
-		Capability: capabilityName,
-		// The insert is the first write to the turn, so this is where the
-		// version count starts. Leaving it at the zero value would store a turn
-		// below the first version the column accepts, and every turn would fail
-		// to start.
-		StateVersion: InitialStateVersion,
-		CreatedAt:    r.now(),
-		UpdatedAt:    r.now(),
-	}
-
-	// From here the turn has a context of its own, derived from the runner's
-	// rather than from the request's, so that a client that goes away does not
-	// take the turn with it.
-	runCtx, cancel := context.WithCancel(r.rootCtx)
-	// The emitter keeps a context that reaches past the turn being cancelled:
-	// it is what its background flush writes on, and a cancel racing that flush
-	// would look like a storage failure rather than the turn ending normally.
-	emitter, err := NewEmitter(context.WithoutCancel(runCtx), turnID, r.repository, r.hub)
-	if err != nil {
-		cancel()
-		return Started{}, err
-	}
-	if err := r.repository.Start(ctx, record); err != nil {
-		cancel()
-		return Started{}, err
-	}
-
-	r.launch(r.newTurnRun(runCtx, cancel, record, conversation, account, content,
-		declarationOf(request.Attachments, request.KnowledgeBases, request.Selection), emitter, routed))
-	return Started{Session: conversation, Turn: record}, nil
-}
-
-// route asks the router where this turn should go, and checks the answer is one
-// this process can run.
-//
-// The check is here because a rule table is a property of the build while the
-// capabilities a process registers are a property of the deployment. A
-// deployment that took the question writer out would otherwise turn every
-// question-shaped request into a turn that failed with unknown_capability —
-// a mistake in the wiring, reported to the user as if the runtime could not read
-// it (AC-02). Falling back to the default is exactly what the same request would
-// have got before this version; the log is what tells an operator that the table
-// and the registration drifted apart.
-func (r *Runner) route(ctx context.Context, content string) (Routing, bool) {
-	if r.router == nil {
-		return Routing{}, false
-	}
-	decision, matched := r.router.Route(content)
-	if !matched {
-		return Routing{}, false
-	}
-	if _, registered := r.capabilities.Lookup(decision.Capability); !registered {
-		r.logger.WarnContext(ctx, "a routing rule named a capability this build does not register",
-			"capability", decision.Capability, "reason", decision.Reason, "by", decision.By)
-		return Routing{}, false
-	}
-	return decision, true
-}
-
-// conversation continues one that exists, or starts one.
-//
-// Either way the answer is one the caller may write in. Continuing somebody
-// else's conversation fails here, as a session that is not found, before the
-// turn row exists — a turn that started and then discovered it had no session
-// would be a stream the client subscribed to that could only report the problem.
-func (r *Runner) conversation(ctx context.Context, sessionID string, caller authz.Caller) (session.Session, error) {
-	if sessionID == "" {
-		return r.sessions.Create(ctx, caller)
-	}
-	return r.sessions.Get(ctx, sessionID, caller)
-}
-
-// launch puts a turn in the table and starts its goroutine.
-//
-// The table is written before the goroutine starts, so a cancel arriving the
-// moment Start returns finds something to cancel rather than concluding the
-// turn is not here.
-func (r *Runner) launch(run *turnRun) {
-	r.mu.Lock()
-	r.active[run.turn.ID] = run
-	r.runs.Add(1)
-	r.mu.Unlock()
-
-	go run.run()
-}
-
-// finished removes a turn once its goroutine has stopped.
-func (r *Runner) finished(turnID string) {
-	r.runs.Done()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.active, turnID)
 }
 
 // Cancel stops a running turn.

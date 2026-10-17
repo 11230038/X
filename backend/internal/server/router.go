@@ -5,63 +5,10 @@ import (
 	"strconv"
 
 	"backend/internal/authz"
-	"backend/internal/handler"
 	"backend/internal/limit"
 	"backend/internal/middleware"
-	"backend/internal/ws"
 	"github.com/gin-gonic/gin"
 )
-
-// Handlers groups the HTTP handlers and verifiers registered by the application router.
-type Handlers struct {
-	System           *handler.SystemHandler
-	Ops              *handler.OpsHandler
-	LibraryFiles     *handler.LibraryFilesHandler
-	LibraryReads     *handler.LibraryReadHandler
-	LibraryLifecycle *handler.LibraryLifecycleHandler
-	KnowledgeBase    *handler.KBHandler
-	Auth             *handler.AuthHandler
-	Sessions         *handler.SessionHandler
-	Questions        *handler.QuestionHandler
-	Practice         *handler.PracticeHandler
-	Mastery          *handler.MasteryHandler
-	Reading          *handler.ReadingHandler
-	Dashboard        *handler.DashboardHandler
-	Memory           *handler.MemoryHandler
-	Capabilities     *handler.CapabilityHandler
-	Permissions      *handler.PermissionsHandler
-	Admin            *handler.AdminHandler
-	Guardians        *handler.GuardianHandler
-	Audit            *handler.AuditHandler
-	Reports          *handler.ReportsHandler
-	Usage            *handler.UsageHandler
-	Workspace        *handler.WorkspaceHandler
-	WebSocket        *ws.Handler
-	TokenVerifier    middleware.TokenVerifier
-	// TicketVerifier redeems the short-lived credential a browser connects to the
-	// websocket with, since a browser has nowhere to put an Authorization header
-	// on a handshake. It is required by the websocket route and by nothing else:
-	// a router built without one refuses a browser's connection attempt with a
-	// 500 that names the missing wiring, rather than with a 401 that would blame
-	// the caller's ticket.
-	TicketVerifier middleware.TicketVerifier
-	// Authorizer answers what an account may reach. It is what the routes below
-	// are narrowed by, and it is required: a router built without one refuses
-	// every authenticated request rather than serving them unchecked.
-	Authorizer middleware.Authorizer
-	// Refusals is where a refusal is written down. It is optional, and the only
-	// place that passes one is main.go, next to the audit service it comes from:
-	// a router built without one still refuses, it just does not leave a record
-	// — which is what every test in this repository wants, since what they are
-	// about is whether a request is refused (§2.16).
-	Refusals middleware.Recorder
-	// Limiter bounds how fast one account may do the three kinds of work that
-	// cost something outside this process (§2.10). It is mounted on routes
-	// rather than on a group, so a router built without one answers those
-	// routes' callers with a 500 rather than serving them unmeasured — the same
-	// direction the authorizer's absence takes.
-	Limiter middleware.Limiter
-}
 
 // learnerInPath is the account a guardian route names in its path, for the
 // policy to decide about.
@@ -250,6 +197,17 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	chat.POST("/sessions/:sessionID/claim", handlers.Sessions.Claim)
 	chat.DELETE("/sessions/:sessionID/permanent", handlers.Sessions.DeletePermanently)
 	chat.GET("/sessions/:sessionID/messages", handlers.Sessions.Messages)
+	// A persona is a saved prompt a person runs their own turns under, so it
+	// belongs to the chat surface rather than to a surface of its own: it is the
+	// language of a conversation, not material and not authority. The five routes
+	// are the whole life of one row — the list the composer reads, one for the
+	// edit form, and the three writes. None of them touches a turn: a persona is
+	// chosen by a `start_turn` command, not attached to a session.
+	chat.GET("/personas", handlers.Personas.List)
+	chat.POST("/personas", handlers.Personas.Create)
+	chat.GET("/personas/:personaID", handlers.Personas.Get)
+	chat.PUT("/personas/:personaID", handlers.Personas.Update)
+	chat.DELETE("/personas/:personaID", handlers.Personas.Delete)
 	// The question bank and reviewing are behind the token along with everything
 	// else a person's own material goes through: what these answer is what this
 	// user has been asked, answered and got wrong.
@@ -312,6 +270,31 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// so only the run is mounted (§2.10).
 	reading.POST("/reading/materials/:materialID/extensions/:name",
 		rateLimit(limit.Model), handlers.Reading.RunExtension)
+	// A book is a source snapshotted when it is created, an outline the reader
+	// confirms, and one generated body per chapter. Two routes call a model —
+	// the outline and one chapter — and both are mounted on the model limit;
+	// everything else is the caller's own rows. Generation is synchronous and
+	// per chapter, so a client that wants the whole book asks once per chapter
+	// rather than waiting on a queue this version does not have (§2.10).
+	books := reach(authz.SurfaceBook)
+	books.GET("/books", handlers.Book.List)
+	books.POST("/books", handlers.Book.Create)
+	books.GET("/books/:bookID", handlers.Book.Get)
+	books.DELETE("/books/:bookID", handlers.Book.Delete)
+	books.POST("/books/:bookID/outline",
+		rateLimit(limit.Model), handlers.Book.GenerateOutline)
+	books.PUT("/books/:bookID/outline", handlers.Book.PutOutline)
+	books.POST("/books/:bookID/chapters/:ordinal/generate",
+		rateLimit(limit.Model), handlers.Book.GenerateChapter)
+	books.GET("/books/:bookID/chapters/:ordinal", handlers.Book.Chapter)
+	books.PUT("/books/:bookID/progress", handlers.Book.SaveProgress)
+	books.GET("/books/:bookID/export", handlers.Book.Export)
+	// Video learning asks a public video site for a keyword and embeds that
+	// site's own player; it stores nothing and downloads nothing. The route is a
+	// GET because it is a read, and it is limited because the site's tolerance
+	// is one resource every account draws on at once (§2.10).
+	watching := reach(authz.SurfaceWatching)
+	watching.GET("/video/search", rateLimit(limit.Search), handlers.Video.Search)
 	// The dashboard is the one read that spans the domains, and it sits beside
 	// the resources it reads rather than under any of them (COURSE-03).
 	dashboard := reach(authz.SurfaceDashboard)

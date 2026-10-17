@@ -15,6 +15,7 @@ import { describeFailure } from '../api/errors'
 import { isApiFailure } from '../api/client'
 import { login } from '../api/auth'
 import { startSession } from '../session'
+import { bootstrapSignedIn, safeRedirect } from '../auth/bootstrap'
 
 const router = useRouter()
 const route = useRoute()
@@ -30,10 +31,14 @@ async function submit(credentials: { username: string; password: string }): Prom
     // 功之后没有"再去换个 token"这一步。
     startSession(await login(credentials))
 
-    // 回到被挡下来的那一页。守卫把原来想去的地方塞在 `from` 里，直接落到
-    // `/chat` 会把用户刚点的那个会话丢掉。
-    const from = route.query.from
-    await router.replace(typeof from === 'string' && from !== '' ? from : { name: 'chat' })
+    // 权限与能力先取一次；失败不阻塞跳转（页面会挂部分失败条）。
+    await bootstrapSignedIn()
+
+    // 回到被挡下来的那一页。守卫把原来想去的地方塞在 `redirect` 里；`from`
+    // 是旧地址的写法，一起认，免得旧书签落到对话首页。
+    const target =
+      safeRedirect(route.query.redirect) ?? safeRedirect(route.query.from) ?? '/chat'
+    await router.replace(target)
   } catch (cause) {
     error.value = isApiFailure(cause) ? describeFailure(cause.failure) : '登录没能完成，请重试'
   } finally {

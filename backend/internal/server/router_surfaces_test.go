@@ -162,6 +162,48 @@ func TestRouterKeepsTheSocketUnderTheChatSurface(t *testing.T) {
 	})
 }
 
+// TestRouterKeepsTheVideoSearchUnderTheWatchingSurface is the case that pays for
+// the search having a surface of its own rather than sharing reading's: the
+// refusal names the group the route was mounted in, so a line that registered it
+// beside the reader would answer 403 and name the wrong area.
+func TestRouterKeepsTheVideoSearchUnderTheWatchingSurface(t *testing.T) {
+	denied := newTestRouterWithAuthorizer(t, readyChecker{}, nil, routerAuthorizerStub{deny: true})
+	const path = "/api/v1/video/search?q=algebra"
+
+	recorder := httptest.NewRecorder()
+	denied.ServeHTTP(recorder, routerRequest(http.MethodGet, path, "", true))
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if want := `"surface":"` + authz.SurfaceWatching + `"`; !strings.Contains(recorder.Body.String(), want) {
+		t.Errorf("body = %s, want it to carry %s", recorder.Body.String(), want)
+	}
+}
+
+// TestRouterKeepsBooksUnderTheBookSurface is the case that pays for the surface
+// being its own group rather than a corner of reading.
+//
+// A refusal naming "book" says the mount is there. A refusal naming "reading"
+// would say the shelf had been folded into the reader, where allowing somebody
+// to read would silently allow them to spend model calls on books.
+func TestRouterKeepsBooksUnderTheBookSurface(t *testing.T) {
+	router := newTestRouterWithAuthorizer(t, readyChecker{}, nil, routerAuthorizerStub{deny: true})
+	const path = "/api/v1/books"
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	request.Header.Set("Authorization", "Bearer "+routerAcceptedToken)
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if want := `"surface":"` + authz.SurfaceBook + `"`; !strings.Contains(recorder.Body.String(), want) {
+		t.Fatalf("body = %s, want %s", recorder.Body.String(), want)
+	}
+}
+
 // TestRouterRegistersGovernanceUnderTheAdministrativeSurface pins the routes
 // that make the authorization model reachable at all.
 //

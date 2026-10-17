@@ -156,6 +156,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		ModelPerMinute:     cfg.Limit.ModelPerMinute,
 		RetrievalPerMinute: cfg.Limit.RetrievalPerMinute,
 		UploadPerMinute:    cfg.Limit.UploadPerMinute,
+		SearchPerMinute:    cfg.Limit.SearchPerMinute,
 		Burst:              cfg.Limit.Burst,
 	})
 	if err != nil {
@@ -173,10 +174,13 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		KnowledgeBase:    handler.NewKBHandler(ai.materials, logger),
 		Auth:             handler.NewAuthHandler(authService, logger),
 		Sessions:         handler.NewSessionHandler(sessionService, logger),
+		Personas:         handler.NewPersonaHandler(ai.personas, logger),
 		Questions:        handler.NewQuestionHandler(ai.questions, logger),
 		Practice:         handler.NewPracticeHandler(ai.reviews, cfg.Practice.QueueSize, logger),
 		Mastery:          handler.NewMasteryHandler(ai.mastery, logger),
 		Reading:          handler.NewReadingHandler(ai.immersive.service, ai.immersive.extensions, logger),
+		Book:             handler.NewBookHandler(ai.books, logger),
+		Video:            handler.NewVideoHandler(ai.videoSearch, logger),
 		Dashboard:        handler.NewDashboardHandler(ai.dashboard, logger),
 		Memory:           handler.NewMemoryHandler(ai.memory, logger),
 		Capabilities:     handler.NewCapabilityHandler(ai.capabilities),

@@ -1,0 +1,86 @@
+/* ── 左栏 ─────────────────────────────────────────────────────────────── */
+
+.materials {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.materials__head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.materials__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.materials__empty,
+.materials__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.materials__hint {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.materials__list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 60vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.material {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.material:hover {
+  border-color: var(--border);
+}
+
+.material--on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.material__name {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.material__meta {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+

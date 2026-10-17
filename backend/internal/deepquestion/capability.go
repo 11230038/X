@@ -126,5 +126,6 @@ func (c *Capability) Run(ctx context.Context, rc capability.RunContext) error {
 	}
 	ctx = tool.WithQuestionSet(ctx, plan.Count)
 	return capability.Answer(ctx, rc, c.settings, StageGeneration,
-		capability.Messages(generationPrompt(plan), rc.Messages(), grounding.Message))
+		capability.Messages(generationPrompt(plan), rc.Messages(),
+			capability.PersonaMessage(rc.Persona()), grounding.Message))
 }

@@ -44,6 +44,15 @@ type RunContext interface {
 	Tools() []tool.Definition
 	// Messages is the conversation so far, oldest first.
 	Messages() []llm.Message
+	// Persona is the instruction this turn was started under, or empty when it
+	// named none.
+	//
+	// It is the account's own text, resolved by the runtime before the turn
+	// existed. What it is not is authority: a capability is given it to put in
+	// front of the model, and nothing in the runtime reads it to decide what the
+	// turn may do. A capability that used it for anything else would be making
+	// a permission decision out of a prompt.
+	Persona() string
 	// RunLoop runs one stage through the shared engine. The request's stage,
 	// messages and tools normally come from this context; the settings that vary
 	// per stage — the model and its sampling — are the capability's to supply,

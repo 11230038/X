@@ -63,6 +63,12 @@ const (
 	CodeEmptyContent               = "empty_content"
 	CodeEmptyTitle                 = "empty_title"
 	CodeNotFound                   = "not_found"
+	// CodePersonaNotFound is separate from CodeNotFound because the two mean
+	// different things to the person reading them: one is "no such capability",
+	// the other is "the persona this turn named is gone". Reusing the first
+	// would tell somebody their capability is missing when their persona was
+	// deleted in another tab.
+	CodePersonaNotFound = "persona_not_found"
 	CodeSlowConsumer               = "slow_consumer"
 	CodeInternal                   = "internal_error"
 )
@@ -153,6 +159,10 @@ type command struct {
 	TurnID     string `json:"turn_id"`
 	Capability string `json:"capability"`
 	Content    string `json:"content"`
+	// Persona is the saved prompt this turn runs under, by id. It is one turn's,
+	// like the material below: the conversation stores what was said, not the
+	// voice it was said in. An absent field is a turn with no persona.
+	Persona string `json:"persona"`
 	// Attachments are the stored files this turn carries, and KnowledgeBases the
 	// collections it may search. Both are optional, and both stay inside the
 	// start_turn command: material belongs to one turn, so it has nowhere else

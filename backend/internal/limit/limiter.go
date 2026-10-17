@@ -57,8 +57,8 @@ type key struct {
 // never heard of: the first is allowed unconditionally, the second is an error.
 func New(opts Options) (*Limiter, error) {
 	if opts.Burst < 1 {
-		// The key is named for the same reason the three rates below name theirs:
-		// the deployment reading this has four numbers in front of it, and a
+		// The key is named for the same reason the four rates below name theirs:
+		// the deployment reading this has five numbers in front of it, and a
 		// sentence about "the burst" alone leaves it to guess which line of the
 		// file the sentence is about.
 		return nil, fmt.Errorf("limit: RATE_LIMIT_BURST must be a positive number of actions")
@@ -74,6 +74,7 @@ func New(opts Options) (*Limiter, error) {
 		{Model, opts.ModelPerMinute, "RATE_LIMIT_MODEL_PER_MINUTE"},
 		{Retrieval, opts.RetrievalPerMinute, "RATE_LIMIT_RETRIEVAL_PER_MINUTE"},
 		{Upload, opts.UploadPerMinute, "RATE_LIMIT_UPLOAD_PER_MINUTE"},
+		{Search, opts.SearchPerMinute, "RATE_LIMIT_SEARCH_PER_MINUTE"},
 	}
 	l := &Limiter{
 		rules:   make(map[Action]rule, len(rates)),

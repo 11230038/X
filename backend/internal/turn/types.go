@@ -89,6 +89,11 @@ var (
 	// client that sent it can fix it, and a turn that starts and then reports it
 	// is a turn the user waited for nothing.
 	ErrInvalidSelection = errors.New("turn: the reading selection is not usable")
+	// ErrPersonaNotFound reports a turn that named a persona this account does
+	// not have. It is refused before the turn exists: a persona is a prompt the
+	// turn would run under, and a turn that started without it would be an
+	// answer to a different request.
+	ErrPersonaNotFound = errors.New("turn: the persona is not available")
 )
 
 // The failure codes a turn can end with.

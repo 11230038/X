@@ -7,6 +7,7 @@ import (
 
 	"backend/internal/audit"
 	"backend/internal/authz"
+	"backend/internal/book"
 	"backend/internal/capability"
 	"backend/internal/chat"
 	"backend/internal/config"
@@ -19,12 +20,13 @@ import (
 	"backend/internal/notebook"
 	"backend/internal/outbound"
 	"backend/internal/parse"
+	"backend/internal/persona"
 	"backend/internal/practice"
-	"backend/internal/routing"
 	"backend/internal/session"
 	"backend/internal/tool"
 	"backend/internal/turn"
 	"backend/internal/usage"
+	"backend/internal/video"
 	"backend/internal/workspace"
 	"backend/internal/ws"
 	"gorm.io/gorm"
@@ -55,6 +57,11 @@ type ai struct {
 	// the same domain the capability works in, reached by a person instead of by
 	// a model.
 	mastery *mastery.Service
+	// personas is the saved prompt store, reached two ways: the runtime resolves
+	// one turn's persona through it, and the routes beside the composer read and
+	// write the rows. It is the same domain in both cases, which is why it is
+	// built here rather than twice.
+	personas *persona.Service
 	// dashboard is the read that fans in over the domains above. It is built last
 	// because it is the one thing built from the others.
 	dashboard *dashboard.Service
@@ -67,6 +74,15 @@ type ai struct {
 	// selection through, kept here because the routes that open a material, save
 	// a position and run an extension are built beside the other handlers.
 	immersive *readingLayer
+	// books is generated books: the shelf, the outline and the chapter bodies.
+	// It reads four domains — conversations, collections, parsed documents and
+	// questions — through one loader built beside it, and calls the same provider
+	// the turns do.
+	books *book.Service
+	// videoSearch is the public video site's search. It has no store and no
+	// background work; the player belongs to the other site, so what is kept here
+	// is the client the search route calls.
+	videoSearch *video.Client
 	// authorization is the one place the four layers are combined (§2.1). It is
 	// here rather than built beside the router because the routes are not its
 	// only consumer: the audit records what it decided, and the governance
@@ -252,6 +268,24 @@ func assemble(
 	if err != nil {
 		return nil, fmt.Errorf("initialize the model client: %w", err)
 	}
+	// Video learning asks a different public service, so it has its own client,
+	// its own cache and its own dial boundary — the same external policy as the
+	// model provider, because the address is another site's rather than this
+	// deployment's. It is built here for the reason every outbound client is:
+	// where the boundary is chosen is one file, not each call site (§2.6).
+	videoDial, err := outbound.DialContext(outbound.ExternalMediaPolicy{})
+	if err != nil {
+		return nil, fmt.Errorf("initialize the video search boundary: %w", err)
+	}
+	videoSearch, err := video.NewClient(video.Options{
+		BaseURL:  cfg.Video.BaseURL,
+		Timeout:  cfg.Video.Timeout,
+		CacheTTL: cfg.Video.CacheTTL,
+		Dial:     videoDial,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize the video search client: %w", err)
+	}
 	// One ledger over this table, read by both halves: the report a client asks
 	// for, and the quota it is refused on. They are the same read on purpose
 	// (§2.9) — an account close to its limit can compare the two numbers, so
@@ -335,6 +369,27 @@ func assemble(
 	if err != nil {
 		return nil, err
 	}
+	// A persona is one account's prompt, read by its own turns and by nothing
+	// else. The service is built from the same database as the rest and handed to
+	// the runtime as the narrow interface it implements, which is what keeps the
+	// runtime from learning where a prompt is stored.
+	// A book is generated from a source snapshotted when it is created, so the
+	// loader reads the four domains once and never again: what the outline and
+	// every chapter are written from is the copy in the book's own row.
+	books, err := book.NewService(book.Options{
+		Repository: book.NewGORMRepository(db),
+		Sources:    newBookSources(sessions, materials, questions),
+		Provider:   provider,
+		Model:      cfg.LLM.Model,
+		Logger:     logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize books: %w", err)
+	}
+	personas, err := persona.NewService(persona.NewGORMRepository(db))
+	if err != nil {
+		return nil, fmt.Errorf("initialize personas: %w", err)
+	}
 	repository := turn.NewGORMRepository(db)
 	hub, err := turn.NewHub(repository)
 	if err != nil {
@@ -349,6 +404,7 @@ func assemble(
 		Router:            questionRouting(),
 		Paths:             paths,
 		Readings:          immersive.selection,
+		Personas:          personas,
 		Capabilities:      capabilities,
 		Tools:             tools,
 		Policy:            policy,
@@ -416,78 +472,10 @@ func assemble(
 		turns: runner, socket: socket, capabilities: capabilities,
 		materials: materials, indexing: worker,
 		questions: questions, reviews: reviews, mastery: paths.service,
-		dashboard: overview, immersive: immersive, memory: memories,
+		personas:  personas,
+		dashboard: overview, immersive: immersive, books: books, videoSearch: videoSearch,
+		memory:        memories,
 		authorization: authorization, auditLog: auditLog,
 		usage: usageReport, packages: packages,
 	}, nil
-}
-
-// questionRouting is the join between the rule table and the runtime.
-//
-// The two ends are kept apart on purpose — the table is a leaf that knows the
-// language of the product's users and nothing about turns, and the runtime knows
-// what runs a turn and nothing about how a sentence is read — so somebody has to
-// say that these two are the same decision, and this is that place. It is the
-// same seam as the source and question tools: what a turn calls is declared in
-// the turn package, implemented elsewhere, and joined here.
-func questionRouting() turn.RouterFunc {
-	return func(content string) (turn.Routing, bool) {
-		decision, matched := routing.Route(content)
-		if !matched {
-			return turn.Routing{}, false
-		}
-		return turn.Routing{
-			Capability: decision.Capability,
-			By:         decision.By,
-			Reason:     decision.Reason,
-			Confidence: decision.Confidence,
-		}, true
-	}
-}
-
-// turnRuntime adapts the turn runtime to what the protocol layer drives.
-//
-// The two differ in one method: a subscription is the hub's own type, and a
-// connection needs only the events, the reason they stopped and the way to stop
-// them. Narrowing it here is what keeps the protocol layer from depending on
-// how a turn is watched, and what lets its tests drive a stream by hand.
-type turnRuntime struct {
-	*turn.Runner
-}
-
-var _ ws.Turns = turnRuntime{}
-
-func (t turnRuntime) Subscribe(ctx context.Context, turnID string, afterSeq int64) (ws.Stream, error) {
-	subscription, err := t.Runner.Subscribe(ctx, turnID, afterSeq)
-	if err != nil {
-		return nil, err
-	}
-	return subscription, nil
-}
-
-// close stops the socket, then the turns, then the index worker.
-//
-// The order matters: a turn that is ending publishes its ending, and a client
-// that is still connected is told what it ended as. Closing the runtime first
-// would leave whoever is watching a stream that stops without saying why.
-//
-// The worker goes last and its wait is bounded by ctx, which is the shutdown
-// timeout: a document half embedded is one whose claim the lease will hand back
-// on the next start, so giving up on it is a delay rather than a loss.
-func (a *ai) close(ctx context.Context) error {
-	if err := a.socket.Close(ctx); err != nil {
-		return fmt.Errorf("close websocket connections: %w", err)
-	}
-	if err := a.turns.Close(ctx); err != nil {
-		return fmt.Errorf("stop running turns: %w", err)
-	}
-	if a.indexing == nil {
-		return nil
-	}
-	select {
-	case <-a.indexing:
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("stop the index worker: %w", ctx.Err())
-	}
 }

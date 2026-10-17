@@ -78,3 +78,22 @@ export function wsTicket(): Promise<SocketTicket> {
 export function logout(): Promise<void> {
   return request<void>('/auth/logout', { method: 'POST' })
 }
+
+/** 当前账号。用于设置页确认 token 对应的仍是同一个人。 */
+export function me(): Promise<Account> {
+  return request<{ user: Account }>('/auth/me').then((result) => result.user)
+}
+
+/**
+ * 改密：204，并且后端会吊销**包括当前 token 在内**的全部凭据
+ * （`backend/internal/handler/auth.go:204-222`）。
+ *
+ * 所以成功后不是"继续用"，而是按主动登出处理：清会话、回登录页、提示
+ * "密码已修改，请重新登录"。
+ */
+export function changePassword(oldPassword: string, newPassword: string): Promise<void> {
+  return request<void>('/me/password', {
+    method: 'PUT',
+    body: { old_password: oldPassword, new_password: newPassword },
+  })
+}

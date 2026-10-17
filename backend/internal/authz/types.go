@@ -130,6 +130,15 @@ const (
 	SurfaceMastery = "mastery"
 	// SurfaceReading is the reader: materials, marks and the aids over them.
 	SurfaceReading = "reading"
+	// SurfaceBook is generated books: the shelf, the outline and the chapters.
+	// It is separate from reading because a book is written by a model from a
+	// source the reader chose, and "may read" is not "may spend model calls on
+	// books".
+	SurfaceBook = "book"
+	// SurfaceWatching is video learning: the keyword search and the player.
+	// What it reaches is another site's public search, which is why it is a
+	// surface of its own rather than part of reading.
+	SurfaceWatching = "watching"
 	// SurfaceDashboard is the one read that spans the domains.
 	SurfaceDashboard = "dashboard"
 	// SurfaceMemory is what the system has been told and has admitted.
@@ -152,8 +161,8 @@ const (
 // is a name a configuration may use and a request can never reach.
 var Surfaces = []string{
 	SurfaceChat, SurfaceLibrary, SurfaceKnowledgeBase, SurfaceNotebook,
-	SurfacePractice, SurfaceMastery, SurfaceReading, SurfaceDashboard,
-	SurfaceMemory, SurfaceSystem, SurfaceAdmin, SurfaceGuardian,
+	SurfacePractice, SurfaceMastery, SurfaceReading, SurfaceBook, SurfaceWatching,
+	SurfaceDashboard, SurfaceMemory, SurfaceSystem, SurfaceAdmin, SurfaceGuardian,
 }
 
 // KnownSurface reports whether a name is a surface registered by this build.

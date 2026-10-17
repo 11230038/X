@@ -1,8 +1,8 @@
 // Package config reads the service's settings from its dotenv file. Each section
 // of settings lives in the file named after it — http.go, upload.go, auth.go,
 // database.go, llm.go, embedding.go, parse.go, kb.go, turn.go, practice.go,
-// mastery.go, dashboard.go, reading.go, memory.go, authz.go, audit.go, usage.go,
-// limit.go — holding that section's struct, the loader that fills it, and the Validate
+// mastery.go, dashboard.go, reading.go, video.go, memory.go, authz.go, audit.go,
+// usage.go, limit.go — holding that section's struct, the loader that fills it, and the Validate
 // that guards it. This file is the composition: what the whole configuration is,
 // how the file is read into it, and the order the sections are checked in.
 package config
@@ -89,6 +89,9 @@ var requiredKeys = []string{
 	"READING_UNIT_MAX_CHARS",
 	"READING_TUTOR_MAX_TOKENS",
 	"READING_EXTENSION_TIMEOUT",
+	"BILIBILI_BASE_URL",
+	"BILIBILI_TIMEOUT",
+	"BILIBILI_CACHE_TTL",
 	"MEMORY_CONFIDENCE_THRESHOLD",
 	"MEMORY_MIN_CORROBORATION",
 	"MEMORY_MIN_SURFACES",
@@ -106,6 +109,7 @@ var requiredKeys = []string{
 	"RATE_LIMIT_MODEL_PER_MINUTE",
 	"RATE_LIMIT_RETRIEVAL_PER_MINUTE",
 	"RATE_LIMIT_UPLOAD_PER_MINUTE",
+	"RATE_LIMIT_SEARCH_PER_MINUTE",
 	"RATE_LIMIT_BURST",
 	"WORKSPACE_ARCHIVE_ROOT",
 	"WORKSPACE_MAX_ARCHIVE_BYTES",
@@ -130,6 +134,7 @@ type Config struct {
 	Mastery         MasteryConfig
 	Dashboard       DashboardConfig
 	Reading         ReadingConfig
+	Video           VideoConfig
 	Memory          MemoryConfig
 	Authz           AuthzConfig
 	Audit           AuditConfig
@@ -206,6 +211,10 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	videoConfig, err := loadVideoConfig(values)
+	if err != nil {
+		return Config{}, err
+	}
 	memory, err := loadMemoryConfig(values)
 	if err != nil {
 		return Config{}, err
@@ -248,6 +257,7 @@ func Load(path string) (Config, error) {
 		Mastery:         mastery,
 		Dashboard:       dashboard,
 		Reading:         reading,
+		Video:           videoConfig,
 		Memory:          memory,
 		Authz:           authorization,
 		Audit:           audit,
@@ -311,6 +321,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.Reading.Validate(); err != nil {
+		return err
+	}
+	if err := c.Video.Validate(); err != nil {
 		return err
 	}
 	if err := c.Memory.Validate(); err != nil {

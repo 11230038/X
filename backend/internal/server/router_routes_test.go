@@ -36,6 +36,7 @@ func TestRouterRegistersTheKnowledgeBaseAndReadRoutes(t *testing.T) {
 		{"rebuild", http.MethodPost, "/api/v1/knowledge-bases/kb_1/rebuild"},
 		{"search", http.MethodPost, "/api/v1/knowledge-bases/kb_1/search"},
 		{"set default", http.MethodPost, "/api/v1/knowledge-bases/kb_1/default"},
+		{"video search", http.MethodGet, "/api/v1/video/search?q=algebra"},
 	}
 
 	for _, route := range routes {
@@ -57,6 +58,50 @@ func TestRouterRegistersTheKnowledgeBaseAndReadRoutes(t *testing.T) {
 			router.ServeHTTP(recorder, request)
 			// Anything but these two means the route is there and a handler
 			// answered it: a wrong path is 404 and a wrong method is 405.
+			if recorder.Code == http.StatusNotFound || recorder.Code == http.StatusMethodNotAllowed {
+				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
+// TestRouterRegistersTheBookRoutes pins the ten routes a book is read and
+// written through.
+//
+// The two generation routes take no request body, so the bodyless requests the
+// loop sends are exactly what a client sends. The two writes that do take one
+// answer 400 with no body, which is still the evidence this case wants: the
+// route exists, a handler answered it, and it is behind the token.
+func TestRouterRegistersTheBookRoutes(t *testing.T) {
+	router := newTestRouter(t, readyChecker{})
+
+	routes := []struct{ name, method, path string }{
+		{"list books", http.MethodGet, "/api/v1/books"},
+		{"create book", http.MethodPost, "/api/v1/books"},
+		{"get book", http.MethodGet, "/api/v1/books/bk_1"},
+		{"delete book", http.MethodDelete, "/api/v1/books/bk_1"},
+		{"generate outline", http.MethodPost, "/api/v1/books/bk_1/outline"},
+		{"save outline", http.MethodPut, "/api/v1/books/bk_1/outline"},
+		{"generate chapter", http.MethodPost, "/api/v1/books/bk_1/chapters/1/generate"},
+		{"read chapter", http.MethodGet, "/api/v1/books/bk_1/chapters/1"},
+		{"save progress", http.MethodPut, "/api/v1/books/bk_1/progress"},
+		{"export book", http.MethodGet, "/api/v1/books/bk_1/export"},
+	}
+
+	for _, route := range routes {
+		t.Run(route.name+" without a token", func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(route.method, route.path, nil))
+			if recorder.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
+			}
+		})
+
+		t.Run(route.name+" with a token", func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(route.method, route.path, nil)
+			request.Header.Set("Authorization", "Bearer "+routerAcceptedToken)
+			router.ServeHTTP(recorder, request)
 			if recorder.Code == http.StatusNotFound || recorder.Code == http.StatusMethodNotAllowed {
 				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 			}

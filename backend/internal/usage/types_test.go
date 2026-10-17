@@ -93,6 +93,7 @@ func TestTheSourcesAreDistinctAndNamed(t *testing.T) {
 		SourcePracticeJudge,
 		SourceMasteryJudge,
 		SourceReadingExtension,
+		SourceBook,
 	}
 	seen := map[string]bool{}
 	for _, source := range sources {

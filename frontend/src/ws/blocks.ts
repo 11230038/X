@@ -27,39 +27,88 @@ export const META = {
   RETRYABLE: 'retryable',
   /** `done` 上的落点：completed / cancelled / failed 之类。 */
   STATUS: 'status',
+  /** `done` 上「已经有回答文字产出过」。 */
+  PARTIAL_RESPONSE: 'partial_response',
+  /** `sources` 事件上的来源数组。 */
+  SOURCES: 'sources',
+  /** `result` 上对不上的引用编号。 */
+  UNRESOLVED_CITATIONS: 'unresolved_citations',
+  /** `progress` 的三个键。 */
+  STEP: 'step',
+  TOTAL: 'total',
+  LABEL: 'label',
+  /** 额度耗尽时是哪一项、什么时候恢复。 */
+  QUOTA_ITEM: 'quota_item',
+  QUOTA_RESETS_AT: 'quota_resets_at',
 } as const
+
+/** 一条引用来源。字段与后端 `event.Source` 一致，不做裁剪。 */
+export interface SourceItem {
+  index: number
+  document_id: string
+  file_id: string
+  title: string
+  engine?: string
+  locator: {
+    kind: string
+    chunk_id?: string
+    ordinal?: number
+    char_start: number
+    char_end: number
+    page?: number | null
+  }
+  snippet: string
+  score?: number
+  revision: number
+}
 
 /** 会话流里的一块。每一种消息类型是它自己的一个变体。 */
 export type Block =
-  | { kind: 'user'; text: string }
+  | { kind: 'user'; text: string; unconfirmed?: boolean }
   /** 回答。`text` 是 `content` 事件累加出来的增量。 */
   | { kind: 'answer'; text: string; complete: boolean }
   /** 阶段开始 / 结束。名字与总数都来自能力，不是写死的。 */
   | { kind: 'stage'; name: string; index: number; total: number; done: boolean }
   /** 工具调用。参数与结果都可能还没有。 */
   | { kind: 'tool'; name: string; callId: string; args?: string; result?: string; ok?: boolean }
+  /** 模型在思考。`content` 是推理增量，不是回答。 */
+  | { kind: 'thinking'; text: string }
+  /** 模型对材料/环境的观察，通常是完整的一段。 */
+  | { kind: 'observation'; text: string }
+  /** 阶段内部的多步进度，与“第几个阶段”是两件事。 */
+  | { kind: 'progress'; step: number; total: number; label: string }
+  /** 这一轮拿到的来源。引用编号只在其中才可点。 */
+  | { kind: 'sources'; sources: SourceItem[] }
   /** 模型中途停下来等回答，整轮暂停。 */
   | { kind: 'question'; text: string }
-  | { kind: 'error'; text: string; code: string; retryable: boolean }
+  | {
+      kind: 'error'
+      text: string
+      code: string
+      retryable: boolean
+      /** 额度类失败时，是哪一项、什么时候恢复。 */
+      quotaItem?: string
+      quotaResetsAt?: string
+    }
   | { kind: 'done'; status: string; partial: boolean }
 
 /**
- * 连接的状态。`refused` 与 `lost` 是**两种不同的失败**，不要折叠
- * （`设计说明书.md` §4.2）：
+ * 连接的状态。**每一种都有各自的出路**：
  *
- * - `lost`：连上了又断。
- * - `refused`：连接**根本没建起来**。服务端可能是在让你等几秒，不是网络不通。
- *
- * 这一版不做重连，所以两者都只是给界面的一句话；区分它们的意义在于**把这
- * 个区分先立在那儿**，stage 1 加重连时不必回头拆一个已经折叠了的判断。
+ * - `connecting`：首次连接；
+ * - `open`：可用；
+ * - `reconnecting`：连过又断，或第一次没连上，正在按退避重试；已收到的文字留在
+ *   屏幕上，不把这一轮判失败；
+ * - `rate_limited`：握手被限流，正在等 `Retry-After`（或退避），永不登出；
+ * - `refused`：第一次就没建起来且不重试（只在停止重连后出现）；
+ * - `credential_lost`：票都签不出来，落点只有登录页。
  */
 export type ConnectionStatus =
   | 'idle'
   | 'connecting'
   | 'open'
-  | 'lost'
+  | 'reconnecting'
   | 'refused'
-  /** 票都签不出来：凭据被撤回了。落点只有登录页。 */
   | 'credential_lost'
   | 'rate_limited'
 

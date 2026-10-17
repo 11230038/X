@@ -2,14 +2,14 @@
 /**
  * 一级导航。`设计说明书.md` §2.2 的九个分组，§3.1 的两条形态要求。
  *
- * **stage 0 只有「对话」是活的。** 其余八个分组渲染出来但不可点 —— 骨架要能
- * 看出整张导航的形状，而"点进去是空白"比"点不动"更难判断是没做还是坏了
- * （同 `router.ts` 的注释）。分组内的二级页面同理：只列真的注册了路由的那几
- * 条，其余不列。
+ * 九个分组现在都有落点：有后端的落到真页面，没有后端的落到各自的占位页
+ * （写作 / 扩展 / 伙伴）。**不按权限隐藏分组** —— 进得去却看到"没有权限"比
+ * 导航里少一项更容易理解，而且权限快照可能还没到。
  *
- * 图标是内联 SVG，没有引图标库：整个前端的依赖只有 `vue` 与 `vue-router`，
- * 为九个图标多一个包不划算。§2.2 要求**图标必须配文字**，所以图标是辅助，
- * 文字才是主体 —— 收合态才只剩图标，且悬停出名称（§3.1）。
+ * 管理台不进九组：它不是日常入口，放在头像菜单里，且只有管理员看得到。
+ *
+ * 图标是内联 SVG，没有引图标库。§2.2 要求**图标必须配文字**，所以图标是
+ * 辅助，文字才是主体 —— 收合态才只剩图标，且悬停出名称（§3.1）。
  */
 
 import { computed, ref } from 'vue'
@@ -17,25 +17,26 @@ import { useRouter } from 'vue-router'
 
 import { currentAccount, clearSession } from '../../session'
 import { logout } from '../../api/auth'
+import { canSurface, isAdmin, resetPermissions } from '../../auth/permissions'
+import { resetCapabilities } from '../../shared/capabilities'
 
 interface NavEntry {
   key: string
   label: string
-  /** 有路由的才可点；没有的是骨架里先占着的位置。 */
-  to?: string
+  to: string
 }
 
 /** §2.2 的九个分组，顺序照那张表。 */
 const entries: readonly NavEntry[] = [
   { key: 'chat', label: '对话', to: '/chat' },
-  { key: 'learning', label: '学习' },
-  { key: 'materials', label: '材料' },
-  { key: 'memory', label: '记忆' },
-  { key: 'writing', label: '写作' },
-  { key: 'questions', label: '题库' },
-  { key: 'extensions', label: '扩展' },
-  { key: 'companions', label: '伙伴' },
-  { key: 'settings', label: '设置' },
+  { key: 'learning', label: '学习', to: '/learning' },
+  { key: 'materials', label: '材料', to: '/knowledge-bases' },
+  { key: 'memory', label: '记忆', to: '/memory' },
+  { key: 'writing', label: '写作', to: '/co-writer' },
+  { key: 'questions', label: '题库', to: '/questions' },
+  { key: 'extensions', label: '扩展', to: '/skills' },
+  { key: 'companions', label: '伙伴', to: '/partners' },
+  { key: 'settings', label: '设置', to: '/settings/account' },
 ]
 
 /**
@@ -70,6 +71,13 @@ const signingOut = ref(false)
 const username = computed(() => currentAccount.value?.username ?? '')
 
 /**
+ * 管理台入口只在"角色是管理员"且权限快照没有明确拒绝 `admin` 面时出现。
+ * 快照未到时按可见处理 —— 点进去会被 `SurfaceGate` 挡住，这比让管理员在
+ * 网络慢的时候找不到入口好。
+ */
+const showAdmin = computed(() => isAdmin.value && canSurface('admin') !== false)
+
+/**
  * 登出。**不是一个本地清理**：它会把账号的所有设备一起下线，服务端不补发
  * token（`设计说明书.md` §4.1）。所以顺序是先请求、后清本地 —— 反过来的话
  * 请求会因为已经没有 token 而拿到 401，服务端那边什么也没发生。
@@ -89,6 +97,9 @@ async function signOut(): Promise<void> {
     signingOut.value = false
     menuOpen.value = false
     clearSession()
+    // 权限与能力都按人算，下一个人不能看到上一个人的。
+    resetPermissions()
+    resetCapabilities()
     void router.push({ name: 'login' })
   }
 }
@@ -104,27 +115,17 @@ async function signOut(): Promise<void> {
     <ul class="nav__list">
       <li v-for="entry in entries" :key="entry.key">
         <RouterLink
-          v-if="entry.to"
           class="nav__item"
           active-class="nav__item--active"
           :to="entry.to"
+          :title="props.collapsed ? entry.label : undefined"
         >
           <svg class="nav__icon" viewBox="0 0 24 24" aria-hidden="true">
             <path :d="ICON_PATHS[entry.key]" />
           </svg>
           <span v-if="!props.collapsed" class="nav__label">{{ entry.label }}</span>
-        </RouterLink>
-        <!--
-          没有路由的分组：渲染成 `<span>` 而不是 `<a aria-disabled>`。一个假的
-          链接会被读屏软件念成链接、被键盘停住，这两样都比"点不动"更糟。
-        -->
-        <span v-else class="nav__item nav__item--inert">
-          <svg class="nav__icon" viewBox="0 0 24 24" aria-hidden="true">
-            <path :d="ICON_PATHS[entry.key]" />
-          </svg>
-          <span v-if="!props.collapsed" class="nav__label">{{ entry.label }}</span>
           <span v-else class="nav__sr">{{ entry.label }}</span>
-        </span>
+        </RouterLink>
       </li>
     </ul>
 
@@ -140,8 +141,18 @@ async function signOut(): Promise<void> {
       </button>
 
       <div v-if="menuOpen" class="nav__menu" role="menu">
-        <!-- 个人资料与用户管理这一版没有页面，不列出来。§7.1 也不许给它们配
-            一句解释。 -->
+        <!-- 个人资料没有页面；设置与（管理员可见的）管理台都是真路由。 -->
+        <RouterLink class="nav__menu-item" to="/settings/account" @click="menuOpen = false">
+          设置
+        </RouterLink>
+        <RouterLink
+          v-if="showAdmin"
+          class="nav__menu-item"
+          to="/admin/users"
+          @click="menuOpen = false"
+        >
+          管理台
+        </RouterLink>
         <button type="button" class="nav__menu-item" :disabled="signingOut" @click="signOut">
           {{ signingOut ? '正在退出…' : '退出登录' }}
         </button>
@@ -223,7 +234,7 @@ async function signOut(): Promise<void> {
   cursor: pointer;
 }
 
-.nav__item:hover:not(.nav__item--inert) {
+.nav__item:hover {
   background: var(--surface-sunken);
   color: var(--text);
 }
@@ -246,11 +257,6 @@ async function signOut(): Promise<void> {
   border-radius: 0 2px 2px 0;
   background: var(--accent);
   content: '';
-}
-
-.nav__item--inert {
-  color: var(--text-faint);
-  cursor: default;
 }
 
 .nav__item--button {
@@ -315,12 +321,15 @@ async function signOut(): Promise<void> {
 }
 
 .nav__menu-item {
+  display: block;
   width: 100%;
   padding: 7px 8px;
   border: 0;
   border-radius: var(--radius-sm);
   background: none;
+  color: var(--text);
   text-align: left;
+  text-decoration: none;
   cursor: pointer;
 }
 

@@ -1,0 +1,13 @@
+.marks,
+.candidates,
+.extensions,
+.timeline,
+.filelist {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+

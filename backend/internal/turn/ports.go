@@ -89,6 +89,7 @@ type runContext struct {
 	emitter  event.Emitter
 	tools    []tool.Definition
 	messages []llm.Message
+	persona  string
 	loop     *agentloop.Loop
 	// run is the turn this context belongs to. It is the one field that is not
 	// already a plain value, and it is here for the one method whose answer is
@@ -101,6 +102,7 @@ var _ capability.RunContext = runContext{}
 func (c runContext) Emitter() event.Emitter   { return c.emitter }
 func (c runContext) Tools() []tool.Definition { return c.tools }
 func (c runContext) Messages() []llm.Message  { return c.messages }
+func (c runContext) Persona() string          { return c.persona }
 
 func (c runContext) RunLoop(ctx context.Context, req agentloop.Request) (agentloop.Result, error) {
 	return c.loop.Run(ctx, req)
@@ -227,6 +229,23 @@ type Readings interface {
 	// reader's question is still a question, and losing the passage it was about
 	// costs the answer its grounding and not its existence (§2.3).
 	Passage(ctx context.Context, selection Selection, caller authz.Caller) (event.Source, error)
+}
+
+// Personas is the saved prompts an account may run a turn under.
+//
+// It is one method over one id, and it is declared here rather than in the
+// package that stores personas for the same reason Readings is: the runtime
+// knows that a turn may carry a prompt and nothing about what a persona is,
+// where it is stored, or who may edit it. The join is in assemble.
+//
+// It is optional in the way Paths and Readings are: a nil one is a build with
+// no persona store, where a turn that named one is refused rather than run
+// without it.
+type Personas interface {
+	// Instruction returns the text of one persona, and whether this account has
+	// it. A persona belonging to somebody else is not found, because there is no
+	// operation in the product for which it would be visible.
+	Instruction(ctx context.Context, personaID string, caller authz.Caller) (string, bool, error)
 }
 
 // Selection is a passage a client said the reader had chosen, in the vocabulary

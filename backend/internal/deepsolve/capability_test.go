@@ -24,6 +24,7 @@ type fakeRunContext struct {
 	emitter  *recordingEmitter
 	tools    []tool.Definition
 	messages []llm.Message
+	persona  string
 	requests []agentloop.Request
 	result   agentloop.Result
 	err      error
@@ -36,6 +37,7 @@ type fakeRunContext struct {
 func (f *fakeRunContext) Emitter() event.Emitter   { return f.emitter }
 func (f *fakeRunContext) Tools() []tool.Definition { return f.tools }
 func (f *fakeRunContext) Messages() []llm.Message  { return f.messages }
+func (f *fakeRunContext) Persona() string          { return f.persona }
 
 func (f *fakeRunContext) RunLoop(ctx context.Context, req agentloop.Request) (agentloop.Result, error) {
 	f.requests = append(f.requests, req)

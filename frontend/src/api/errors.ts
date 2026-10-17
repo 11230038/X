@@ -56,6 +56,9 @@ const COMMAND_MESSAGES: Record<string, { text: string; retryable: boolean }> = {
   // `check_active_turn` 说"没有正在跑的一轮"时走的是 `active_turn` 帧，不是错误；
   // 这一个码只在订阅时点了一个没有活跃轮的会话才会出现。
   'no_active_turn': { text: '这个会话现在没有在跑的一轮', retryable: false },
+  // 人格与能力各有一个缺口的码：`not_found` 说的是"能力不认识"，人格不能
+  // 复用它，否则用户会读到一句关于能力的错话。
+  'persona_not_found': { text: '这个人格已经不在了，换一个或不指定', retryable: false },
   'not_found': { text: '服务端没有这个能力', retryable: false },
   'malformed_command': { text: '这条命令没能被服务端接受', retryable: false },
   'unsupported_command': { text: '这一版还不支持这个操作', retryable: false },
@@ -84,6 +87,9 @@ export function describeFailure(failure: ApiFailure): string {
     return failure.retryAfterSeconds
       ? `请求太频繁，请 ${failure.retryAfterSeconds} 秒后再试`
       : '请求太频繁，请稍后再试'
+  }
+  if (failure.kind === 'quota') {
+    return '本期可用额度已经用完，等额度重置后再试'
   }
   if (failure.kind === 'unauthorized') {
     return '登录状态已失效，请重新登录'

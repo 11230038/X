@@ -83,5 +83,6 @@ func (c *Capability) Manifest() capability.Manifest { return Manifest() }
 func (c *Capability) Run(ctx context.Context, rc capability.RunContext) error {
 	ctx = tool.WithSolver(ctx, newTracker(rc.Emitter(), StageResponding))
 	return capability.Answer(ctx, rc, c.settings, StageResponding,
-		capability.Messages(systemPrompt, rc.Messages()))
+		capability.Messages(systemPrompt, rc.Messages(),
+			capability.PersonaMessage(rc.Persona())))
 }

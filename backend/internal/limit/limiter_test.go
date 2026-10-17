@@ -61,7 +61,7 @@ func takeRefused(t *testing.T, limiter *Limiter, account int64, action Action) t
 }
 
 func TestTheLimiterRefusesNumbersItCouldNotBound(t *testing.T) {
-	// Every message names the key it is about, so that a deployment with four
+	// Every message names the key it is about, so that a deployment with five
 	// numbers in front of it is told which line of the file to look at rather
 	// than left to work out which number "the burst" was.
 	tests := []struct {
@@ -75,6 +75,8 @@ func TestTheLimiterRefusesNumbersItCouldNotBound(t *testing.T) {
 			names: "RATE_LIMIT_RETRIEVAL_PER_MINUTE"},
 		{name: "a negative upload rate", opts: Options{UploadPerMinute: -1, Burst: 1},
 			names: "RATE_LIMIT_UPLOAD_PER_MINUTE"},
+		{name: "a negative search rate", opts: Options{SearchPerMinute: -1, Burst: 1},
+			names: "RATE_LIMIT_SEARCH_PER_MINUTE"},
 		{name: "no burst at all", opts: Options{ModelPerMinute: 60}, names: "RATE_LIMIT_BURST"},
 		{name: "a negative burst", opts: Options{Burst: -3}, names: "RATE_LIMIT_BURST"},
 	}
@@ -192,11 +194,17 @@ func TestOneAccountIsNotAnother(t *testing.T) {
 // TestOneActionIsNotAnother is why the buckets are per action: an account that
 // has been uploading files all afternoon can still ask a question.
 func TestOneActionIsNotAnother(t *testing.T) {
-	limiter, _ := newLimiter(t, Options{ModelPerMinute: 1, RetrievalPerMinute: 1, UploadPerMinute: 1, Burst: 1})
+	limiter, _ := newLimiter(t, Options{
+		ModelPerMinute: 1, RetrievalPerMinute: 1, UploadPerMinute: 1,
+		SearchPerMinute: 1, Burst: 1,
+	})
 	takeAll(t, limiter, 1, Model)
 	takeRefused(t, limiter, 1, Model)
 	takeAll(t, limiter, 1, Retrieval)
 	takeAll(t, limiter, 1, Upload)
+	// Search spends somebody else's quota and has a bucket of its own: an
+	// account that has exhausted its model calls can still look a video up.
+	takeAll(t, limiter, 1, Search)
 }
 
 // TestAnActionThisLimiterDoesNotKnowIsAnError is the loud failure that replaces

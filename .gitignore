@@ -5,6 +5,9 @@ bin/
 # Local uploaded content and staging files
 /data/upload/
 
+# Local tooling shortcuts
+redis-server.exe.lnk
+
 # Agent skills and installer metadata
 .agents/skills/
 agent/skills/

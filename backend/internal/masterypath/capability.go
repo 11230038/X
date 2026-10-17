@@ -112,5 +112,6 @@ func (c *Capability) Manifest() capability.Manifest { return Manifest() }
 // mastery turn's material is the path, and the path is reached through tools.
 func (c *Capability) Run(ctx context.Context, rc capability.RunContext) error {
 	return capability.Answer(ctx, rc, c.settings, StageResponding,
-		capability.Messages(systemPrompt, rc.Messages()))
+		capability.Messages(systemPrompt, rc.Messages(),
+			capability.PersonaMessage(rc.Persona())))
 }

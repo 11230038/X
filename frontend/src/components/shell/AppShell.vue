@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 四段式骨架。`设计说明书.md` §2.1 的那张图，除登录/注册外所有页面共用。
+ * 四段式骨架。`设计说明书.md` §2.1 的那张图。
  *
  * ```
  * ┌──────────┬───────────┬──────────────────────┬──────────┐
@@ -8,15 +8,18 @@
  * └──────────┴───────────┴──────────────────────┴──────────┘
  * ```
  *
+ * 不是每一页都需要列表栏与侧面板：只有对话、文件库这类"选了左边看右边"的
+ * 页面有列表，只有对话有侧面板。**没有对应 slot 时那一列不占宽度**，而不是
+ * 留一条空栅格 —— 否则一个纯阅读页会凭空少掉 600px。
+ *
  * 收合状态放在这一层，不放在 `PrimaryNav` / `SidePanel` 里：**谁决定宽度谁持
- * 有状态**。两个子组件只发出"我要切换"的意图 —— 它们不知道自己的宽度，也不
- * 该知道，那是栅格的事。
+ * 有状态**。两个子组件只发出"我要切换"的意图。
  *
  * 基准画布 1440 × 900，内容区最小 1280（§2.1）。窗口更窄时由 `body` 上的
  * `min-width` 出横向滚动条，不在这里把四段挤变形。
  */
 
-import { ref } from 'vue'
+import { computed, ref, useSlots } from 'vue'
 
 import PrimaryNav from './PrimaryNav.vue'
 
@@ -27,18 +30,28 @@ defineProps<{
   panelStatus?: string
 }>()
 
+const slots = useSlots()
 const navCollapsed = ref(false)
 const panelCollapsed = ref(false)
+
+const hasList = computed(() => Boolean(slots.list))
+const hasPanel = computed(() => Boolean(slots.panel))
+
+const columns = computed(() => {
+  const nav = navCollapsed.value ? 'var(--nav-width-collapsed)' : 'var(--nav-width)'
+  const list = hasList.value ? ' var(--list-width)' : ''
+  const main = ' minmax(0, 1fr)'
+  const panel = hasPanel.value
+    ? panelCollapsed.value
+      ? ' 40px'
+      : ' var(--panel-width)'
+    : ''
+  return `${nav}${list}${main}${panel}`
+})
 </script>
 
 <template>
-  <div
-    class="shell"
-    :class="{
-      'shell--nav-collapsed': navCollapsed,
-      'shell--panel-collapsed': panelCollapsed,
-    }"
-  >
+  <div class="shell" :style="{ gridTemplateColumns: columns }">
     <PrimaryNav :collapsed="navCollapsed" @toggle="navCollapsed = !navCollapsed" />
 
     <slot name="list" />
@@ -47,7 +60,7 @@ const panelCollapsed = ref(false)
       <slot />
     </main>
 
-    <div class="shell__panel-wrap">
+    <div v-if="hasPanel" class="shell__panel-wrap">
       <slot
         name="panel"
         :collapsed="panelCollapsed"
@@ -60,37 +73,8 @@ const panelCollapsed = ref(false)
 <style scoped>
 .shell {
   display: grid;
-  grid-template-columns:
-    var(--nav-width)
-    var(--list-width)
-    minmax(0, 1fr)
-    var(--panel-width);
   height: 100vh;
   overflow: hidden;
-}
-
-.shell--nav-collapsed {
-  grid-template-columns:
-    var(--nav-width-collapsed)
-    var(--list-width)
-    minmax(0, 1fr)
-    var(--panel-width);
-}
-
-.shell--panel-collapsed {
-  grid-template-columns:
-    var(--nav-width)
-    var(--list-width)
-    minmax(0, 1fr)
-    40px;
-}
-
-.shell--nav-collapsed.shell--panel-collapsed {
-  grid-template-columns:
-    var(--nav-width-collapsed)
-    var(--list-width)
-    minmax(0, 1fr)
-    40px;
 }
 
 .shell__main {

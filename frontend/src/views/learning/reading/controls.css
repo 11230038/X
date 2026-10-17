@@ -1,0 +1,59 @@
+/* ── 通用 ─────────────────────────────────────────────────────────────── */
+
+.link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ghost {
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ghost:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.primary {
+  padding: 6px 13px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.primary:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.inline-warn,
+.inline-error {
+  margin: 7px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.inline-error {
+  color: var(--danger);
+}
+
+.req {
+  margin-left: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+

@@ -30,10 +30,18 @@ const (
 	// The largest knowledge base body carries a query, and this is far more
 	// than a query needs.
 	maxKBRequestBytes int64 = 8 << 10
+	// The largest persona body is an instruction somebody wrote for a model.
+	// The domain caps it by characters; this cap is the wire's, and it is
+	// generous enough that the character rule is the one a caller meets.
+	maxPersonaRequestBytes int64 = 32 << 10
 	// The largest reading body carries a coordinate and the note written beside
 	// one. A note is a sentence or two, so this is generous; what it must not be
 	// is unbounded, because a note is stored.
 	maxReadingRequestBytes int64 = 8 << 10
+	// The largest book body is an outline the reader edited: up to twelve
+	// chapters, each with a title and a one-sentence summary. The two generation
+	// endpoints take no body at all.
+	maxBookRequestBytes int64 = 32 << 10
 	// The largest memory body carries a fact's statement and the scope it belongs
 	// to, or a cleanup's cutoff and the filters narrowing it. A fact is a sentence
 	// somebody wrote about themselves, so this is generous for the same reason a

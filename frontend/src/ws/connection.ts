@@ -23,8 +23,13 @@ export interface LinkHandlers {
    * 结掉之前。
    */
   onRefused(): void
-  /** 连上了之后断了。只可能跟在 `onOpen` 后面。 */
-  onLost(): void
+  /**
+   * 连上了之后断了。只可能跟在 `onOpen` 后面。
+   *
+   * 关闭码照实传出来：1001 是服务端关机，1008 是慢消费者，1006 是浏览器自己
+   * 报的（没有关闭帧）。重连策略对所有码相同，但界面要说得出是哪一种。
+   */
+  onLost(closeCode: number, reason: string): void
 }
 
 export interface Link {
@@ -109,14 +114,14 @@ export function openLink(ticket: string, handlers: LinkHandlers): PendingLink {
     }
   }
 
-  socket.onclose = () => {
+  socket.onclose = (event) => {
     if (!opened) {
       // 没连上就关了。`onerror` 通常先到，但只靠它不可靠——这里也结一次，否则
       // 调用方的 `await` 会永远挂着。
       refuse()
       return
     }
-    handlers.onLost()
+    handlers.onLost(event.code, event.reason)
   }
 
   return {
@@ -132,5 +137,31 @@ export function openLink(ticket: string, handlers: LinkHandlers): PendingLink {
       },
     },
     settled: settledPromise,
+  }
+}
+
+/**
+ * 握手失败之后，用一次普通 HTTP 请求补看服务端到底说了什么。
+ *
+ * 浏览器在握手被拒时只给 `onerror` + 1006，**看不到 429 与 `Retry-After`**。
+ * 但同一个地址、同一张票走一次普通 `fetch`，限流中间件会在升级之前回 429，
+ * 于是那个响应头就看得见了。只用来分辨「是不是被限流」，其他状态一律当作
+ * 「没建起来」，不猜原因。
+ *
+ * 票可能已经随着失败的握手过期，所以读不到也不影响结论：调用方退回退避。
+ */
+export async function probeHandshakeRetry(ticket: string): Promise<number | null> {
+  try {
+    const response = await fetch(socketURL(ticket), {
+      method: 'GET',
+      headers: { Accept: 'text/plain' },
+      credentials: 'same-origin',
+    })
+    // 不读 body：升级端点回什么正文都不影响这里。
+    if (response.status !== 429) return null
+    const seconds = Number.parseInt(response.headers.get('Retry-After') ?? '', 10)
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : null
+  } catch {
+    return null
   }
 }

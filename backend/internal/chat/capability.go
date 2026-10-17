@@ -80,7 +80,8 @@ func (c *Capability) Run(ctx context.Context, rc capability.RunContext) error {
 		return err
 	}
 	return capability.Answer(ctx, rc, c.settings, StageResponding,
-		capability.Messages(systemPrompt, rc.Messages(), grounding.Message))
+		capability.Messages(systemPrompt, rc.Messages(),
+			capability.PersonaMessage(rc.Persona()), grounding.Message))
 }
 
 // emit publishes a stage boundary of this capability's own.

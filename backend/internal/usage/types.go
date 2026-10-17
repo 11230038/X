@@ -40,6 +40,7 @@ const (
 	SourcePracticeJudge    = "practice.judge"
 	SourceMasteryJudge     = "mastery.judge"
 	SourceReadingExtension = "reading.extension"
+	SourceBook             = "book.generation"
 )
 
 // Call is one model call as the code making it knows it: on whose behalf, in

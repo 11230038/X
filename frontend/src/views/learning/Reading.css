@@ -1,0 +1,60 @@
+.workspace {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr) 290px;
+  gap: 18px;
+  align-items: start;
+  margin-top: 18px;
+}
+
+/* ── 中栏 ─────────────────────────────────────────────────────────────── */
+
+.reader {
+  min-width: 0;
+}
+
+.meta {
+  margin-top: 10px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.position {
+  margin-top: 14px;
+}
+
+/* ── 右栏 ─────────────────────────────────────────────────────────────── */
+
+.panel {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
+.panel__section {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+@media (max-width: 1100px) {
+  .workspace {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+
+  .panel {
+    position: static;
+    grid-column: 1 / -1;
+    max-height: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .panel__section {
+    flex: 1 1 260px;
+  }
+}

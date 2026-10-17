@@ -18,6 +18,7 @@ import { describeFailure } from '../api/errors'
 import { isApiFailure } from '../api/client'
 import { register } from '../api/auth'
 import { startSession } from '../session'
+import { bootstrapSignedIn } from '../auth/bootstrap'
 
 const router = useRouter()
 
@@ -29,6 +30,7 @@ async function submit(credentials: { username: string; password: string }): Prom
   error.value = null
   try {
     startSession(await register(credentials))
+    await bootstrapSignedIn()
     await router.replace({ name: 'chat' })
   } catch (cause) {
     error.value = isApiFailure(cause) ? describeFailure(cause.failure) : '注册没能完成，请重试'

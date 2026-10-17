@@ -1,21 +1,19 @@
 /**
- * 会话。路径是 `/api/v1/sessions` —— **没有 `chat` 那一段**（路由分组变量
- * 叫 `chat`，但挂载的路径不是它）。
+ * 会话与消息。
+ *
+ * 会话列表是 `limit` / `offset`；消息列表是**一次性完整数组**，没有服务端
+ * 分页（`backend/internal/handler/session.go`）。前端按 50 条分块渲染"加载
+ * 更早"，不假装有游标。
  */
 
 import { request } from './client'
 
 export interface SessionSummary {
   session_id: string
-  /**
-   * **新建的会话在最初几秒是没有标题的。** 标题由服务端在第一轮回答结束之
-   * 后才生成，所以这里会是空串。列表行要有这个形态，标题到了之后就地更新
-   * ——不要整行重新加载（`设计说明书.md` §3.2）。
-   */
   title: string
   created_at: string
   updated_at: string
-  /** 只有回收站里的会话才有；用来区分"在列表里"和"在回收站里"。 */
+  /** 只有回收站里的会话才有这个字段；活跃会话不带（不是 null）。 */
   deleted_at?: string
 }
 
@@ -30,24 +28,70 @@ export interface MessageSummary {
   session_id: string
   role: string
   content: string
+  /** 用户消息没有这个字段。 */
   capability?: string
   created_at: string
 }
 
-/** 开一个新会话。返回的标题是空的，原因见 `SessionSummary.title`。 */
+export interface ListSessionsOptions {
+  deleted?: boolean
+  limit?: number
+  offset?: number
+}
+
 export function createSession(): Promise<SessionSummary> {
   return request<SessionSummary>('/sessions', { method: 'POST' })
 }
 
-export function listSessions(query?: {
-  limit?: number
-  offset?: number
-  deleted?: boolean
-}): Promise<SessionList> {
-  return request<SessionList>('/sessions', { query })
+export function listSessions(options: ListSessionsOptions = {}): Promise<SessionList> {
+  return request<SessionList>('/sessions', {
+    query: {
+      deleted: options.deleted,
+      limit: options.limit,
+      offset: options.offset,
+    },
+  })
 }
 
-/** 一个会话的**已落库**消息。正在生成的那一轮不在这里 —— 它在事件里。 */
+export function getSession(sessionId: string): Promise<SessionSummary> {
+  return request<SessionSummary>(`/sessions/${encodeURIComponent(sessionId)}`)
+}
+
+export function renameSession(sessionId: string, title: string): Promise<SessionSummary> {
+  return request<SessionSummary>(`/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'PATCH',
+    body: { title },
+  })
+}
+
+/** 软删：进回收站，可恢复。204。 */
+export function deleteSession(sessionId: string): Promise<void> {
+  return request<void>(`/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
+}
+
+export function restoreSession(sessionId: string): Promise<SessionSummary> {
+  return request<SessionSummary>(`/sessions/${encodeURIComponent(sessionId)}/restore`, {
+    method: 'POST',
+  })
+}
+
+/** 永久删除：会话与消息都不可恢复。204。 */
+export function purgeSession(sessionId: string): Promise<void> {
+  return request<void>(`/sessions/${encodeURIComponent(sessionId)}/permanent`, {
+    method: 'DELETE',
+  })
+}
+
+/**
+ * 认领会话。后端有这个接口，但列表不返回"无主"标记，界面认不出哪一行可
+ * 认领 —— 所以这个函数目前没有调用方，留给以后后端补字段时用。
+ */
+export function claimSession(sessionId: string): Promise<SessionSummary> {
+  return request<SessionSummary>(`/sessions/${encodeURIComponent(sessionId)}/claim`, {
+    method: 'POST',
+  })
+}
+
 export function listMessages(sessionId: string): Promise<{ messages: MessageSummary[] }> {
   return request<{ messages: MessageSummary[] }>(
     `/sessions/${encodeURIComponent(sessionId)}/messages`,

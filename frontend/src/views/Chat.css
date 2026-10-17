@@ -1,0 +1,76 @@
+.main {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.main__head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.main__title {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 650;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.main__capability {
+  flex: none;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.main__body {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.earlier {
+  padding: 8px 24px 0;
+}
+
+.earlier__button {
+  width: 100%;
+  padding: 5px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.notices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 24px;
+}
+
+.banner {
+  margin: 0 0 2px;
+  padding: 7px 11px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.banner--pending {
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+}
+
+.banner--error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}

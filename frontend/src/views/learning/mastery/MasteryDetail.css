@@ -1,0 +1,93 @@
+/* 知识点详情 */
+
+.point-detail {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.point-detail__description {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.point-detail__subtitle {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.evidence-item {
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.evidence-item__head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.evidence-item__time {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.result--correct {
+  background: var(--success-soft, var(--surface-sunken));
+  color: var(--success);
+}
+
+.result--incorrect {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.result--partial {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.evidence-item__meta {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.evidence-item__detail {
+  margin: 6px 0 0;
+  padding: 7px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

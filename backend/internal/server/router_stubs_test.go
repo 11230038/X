@@ -21,12 +21,14 @@ import (
 	"backend/internal/audit"
 	"backend/internal/auth"
 	"backend/internal/authz"
+	"backend/internal/book"
 	"backend/internal/dashboard"
 	"backend/internal/handler"
 	"backend/internal/kb"
 	"backend/internal/library"
 	"backend/internal/middleware"
 	"backend/internal/usage"
+	"backend/internal/video"
 	"github.com/gin-gonic/gin"
 )
 
@@ -99,6 +101,7 @@ func newTestRouterWithGates(
 		LibraryLifecycle: handler.NewLibraryLifecycleHandler(
 			routerLibraryLifecycleStub{}, routerOpenerStub{}, logger),
 		Auth:        handler.NewAuthHandler(authenticator, logger),
+		Book:        handler.NewBookHandler(routerBookStub{}, logger),
 		Questions:   handler.NewQuestionHandler(routerQuestionsStub{}, logger),
 		Practice:    handler.NewPracticeHandler(routerPracticeStub{err: practiceErr}, routerQueueSize, logger),
 		Permissions: handler.NewPermissionsHandler(routerPermissionsStub{}, logger),
@@ -108,6 +111,7 @@ func newTestRouterWithGates(
 		Audit:     handler.NewAuditHandler(routerAuditStub{}, logger),
 		Reports:   handler.NewReportsHandler(routerDashboardStub{}, routerAuditWriterStub{}, logger),
 		Usage:     handler.NewUsageHandler(routerUsageStub{}, logger),
+		Video:     handler.NewVideoHandler(routerVideoStub{}, logger),
 		// The package routes are the one group here mounted with no surface, and
 		// the stub beside them is what lets router_workspace_test.go say so: a
 		// policy that refuses everything refuses the library and not these.
@@ -162,6 +166,49 @@ func (routerMaterialStub) ReadWindow(context.Context, string, int64, int64, auth
 
 func (routerMaterialStub) ChunkSpans(context.Context, string, authz.Caller) ([]kb.ChunkSpan, error) {
 	return nil, nil
+}
+
+// routerBookStub answers the book routes with shapes a client would recognise.
+// The values carry the book surface's own names, so a route mounted against
+// another handler's stub is a failing assertion rather than a plausible body.
+type routerBookStub struct{}
+
+func (routerBookStub) List(context.Context, authz.Caller) ([]book.Summary, error) {
+	return []book.Summary{{BookID: "bk_1", Title: "保修手册"}}, nil
+}
+
+func (routerBookStub) Get(context.Context, authz.Caller, string) (book.Detail, error) {
+	return book.Detail{Book: book.Summary{BookID: "bk_1", Title: "保修手册"}}, nil
+}
+
+func (routerBookStub) Create(context.Context, authz.Caller, book.CreateInput) (book.Detail, error) {
+	return book.Detail{Book: book.Summary{BookID: "bk_1", Title: "保修手册"}}, nil
+}
+
+func (routerBookStub) Delete(context.Context, authz.Caller, string) error { return nil }
+
+func (routerBookStub) GenerateOutline(context.Context, authz.Caller, string) (book.Detail, error) {
+	return book.Detail{Book: book.Summary{BookID: "bk_1", Title: "保修手册"}}, nil
+}
+
+func (routerBookStub) PutOutline(context.Context, authz.Caller, string, book.OutlineInput) (book.Detail, error) {
+	return book.Detail{Book: book.Summary{BookID: "bk_1", Title: "保修手册"}}, nil
+}
+
+func (routerBookStub) GenerateChapter(context.Context, authz.Caller, string, int) (book.Chapter, error) {
+	return book.Chapter{ChapterID: "bc_1", BookID: "bk_1", Ordinal: 1, Title: "第一章", Status: book.StatusReady}, nil
+}
+
+func (routerBookStub) Chapter(context.Context, authz.Caller, string, int) (book.Chapter, error) {
+	return book.Chapter{ChapterID: "bc_1", BookID: "bk_1", Ordinal: 1, Title: "第一章", Status: book.StatusReady}, nil
+}
+
+func (routerBookStub) SaveProgress(context.Context, authz.Caller, string, int) (book.Summary, error) {
+	return book.Summary{BookID: "bk_1", Title: "保修手册"}, nil
+}
+
+func (routerBookStub) Export(context.Context, authz.Caller, string) (book.Export, error) {
+	return book.Export{Filename: "保修手册.md", Content: "# 保修手册"}, nil
 }
 
 type routerUploaderStub struct{}
@@ -307,6 +354,22 @@ type routerUsageStub struct{}
 
 func (routerUsageStub) Read(context.Context, usage.Query) (usage.Report, error) {
 	return usage.Report{Groups: []usage.Group{}}, nil
+}
+
+// routerVideoStub answers the video search with one recognisable result, so that
+// a route wired to the wrong handler is a failing assertion rather than a
+// plausible empty page. What a result *says* is handler/video_test.go's business.
+type routerVideoStub struct{}
+
+func (routerVideoStub) Search(_ context.Context, query video.Query) (video.SearchResult, error) {
+	return video.SearchResult{
+		Query: query.Text,
+		Page:  query.Page,
+		Items: []video.Result{{
+			VideoID: "BV1xx411c7mD", Title: "线性代数 第一讲", Author: "教师",
+			EmbedURL: "https://player.bilibili.com/player.html?bvid=BV1xx411c7mD&page=1&autoplay=0",
+		}},
+	}, nil
 }
 
 // routerSchemaVersion is the schema the test router's binary claims to require.

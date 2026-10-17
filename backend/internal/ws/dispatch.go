@@ -98,6 +98,7 @@ func (c *conn) startTurn(ctx context.Context, cmd command) (any, func() error, e
 		OwnerID:        c.caller.UserID,
 		SessionID:      cmd.SessionID,
 		Capability:     cmd.Capability,
+		PersonaID:      cmd.Persona,
 		Content:        cmd.Content,
 		Attachments:    cmd.Attachments,
 		KnowledgeBases: cmd.KnowledgeBases,
@@ -337,6 +338,8 @@ func describe(err error) (code, message string) {
 		return CodeEmptyContent, "the reply is empty"
 	case errors.Is(err, session.ErrInvalidTitle):
 		return CodeEmptyTitle, "the title is empty"
+	case errors.Is(err, turn.ErrPersonaNotFound):
+		return CodePersonaNotFound, "no such persona"
 	case errors.Is(err, capability.ErrUnknownCapability):
 		return CodeNotFound, "no such capability"
 	default:

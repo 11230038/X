@@ -1,13 +1,13 @@
 # X
 
-X 是一个前后端分离项目。`backend/` 是完整的 Go/Gin 服务（V1–V6 已交付）；`frontend/` 目前是一条能跑通的纵切面——登录/注册、四段式骨架、一个会话、发一句、经 WebSocket 收流式回答。除对话以外的一级导航分组渲染出来但不可点。
+X 是一个前后端分离项目。`backend/` 是完整的 Go/Gin 服务（V1–V6 已交付）；`frontend/` 覆盖了后端 121 条路由对应的全部页面——对话、人格、伙伴、协同写作、材料、知识库、题库与练习、掌握路径、学习地图、沉浸阅读、活书、视频学习、记忆、设置与管理台。后端没有路由的占位页已经全部移除；技能与工具共用一页只读能力目录。
 
 ## 项目结构
 
 ```text
 X/
 ├── backend/       # Go + Gin HTTP 服务
-├── frontend/      # Vue 3 + Vite，对话那条纵切面
+├── frontend/      # Vue 3 + Vite，覆盖全部有后端的页面
 ├── data/upload/   # 本地上传运行数据（由应用创建，Git 忽略）
 ├── Agent.md       # 项目开发约定
 └── .gitignore
@@ -85,20 +85,23 @@ docker start seekdb
 - 出题与练习（V3）：`QUESTION_DEFAULT_COUNT`、`QUESTION_MAX_COUNT`、`PRACTICE_QUEUE_SIZE`、`PRACTICE_JUDGE_MAX_TOKENS`
 - 掌握路径（V4）：`MASTERY_LEASE_TTL`、`MASTERY_GATE_CONSECUTIVE`、`MASTERY_GATE_MIN_EVIDENCE`
 - 沉浸阅读（V4）：`READING_UNIT_MAX_CHARS`、`READING_TUTOR_MAX_TOKENS`、`READING_EXTENSION_TIMEOUT`
+- 视频学习：`BILIBILI_BASE_URL`、`BILIBILI_TIMEOUT`、`BILIBILI_CACHE_TTL`
 - Memory（V4）：`MEMORY_CONFIDENCE_THRESHOLD`、`MEMORY_MIN_CORROBORATION`、`MEMORY_MIN_SURFACES`、`MEMORY_SENSITIVE_KINDS`、`MEMORY_SYNTHESIS_WINDOW_DAYS`、`MEMORY_MAX_FACTS_PER_SURFACE`
 - 继续学习（V4）：`DASHBOARD_RECENT_LIMIT`
 - 授权（V5）：`AUTHZ_DEFAULT_PRESET`、`AUTHZ_LEARNER_CAPABILITIES`、`AUTHZ_LEARNER_SURFACES`
 - LLM key 池（V5）：`LLM_KEY_FAILURE_THRESHOLD`、`LLM_KEY_COOLDOWN`（`LLM_API_KEYS` 是第二版那个键改的名，已列在上一行的对话模型里）
 - 审计（V5）：`AUDIT_RETENTION_DAYS`、`AUDIT_MAX_PAGE_SIZE`
 - 用量（V5）：`USAGE_RETENTION_DAYS`、`USAGE_DAILY_CALLS_PER_ACCOUNT`、`USAGE_MONTHLY_TOKENS_PER_ACCOUNT`
-- 限速（V5）：`RATE_LIMIT_MODEL_PER_MINUTE`、`RATE_LIMIT_RETRIEVAL_PER_MINUTE`、`RATE_LIMIT_UPLOAD_PER_MINUTE`、`RATE_LIMIT_BURST`
+- 限速（V5）：`RATE_LIMIT_MODEL_PER_MINUTE`、`RATE_LIMIT_RETRIEVAL_PER_MINUTE`、`RATE_LIMIT_UPLOAD_PER_MINUTE`、`RATE_LIMIT_SEARCH_PER_MINUTE`、`RATE_LIMIT_BURST`
 - 导入导出（V5）：`WORKSPACE_ARCHIVE_ROOT`、`WORKSPACE_MAX_ARCHIVE_BYTES`、`WORKSPACE_JOB_TIMEOUT`
 
 `QUESTION_MAX_COUNT` 必须**不小于** `QUESTION_DEFAULT_COUNT`——默认值大于上限时，一句没说几道的出题请求会每次都拒绝自己。`QUESTION_DEFAULT_COUNT` / `QUESTION_MAX_COUNT` 是"一次出几道题"，`PRACTICE_QUEUE_SIZE` 是"练习队列一次取几道"，`PRACTICE_JUDGE_MAX_TOKENS` 是主观题判分那一次调用的输出预算。`LLM_CAPABILITY_CONFIG_JSON` 里 `deep_question` 的条目是**必需**的：它声明的阶段名（`ideation` / `generation`）与 `chat` 的（`exploring` / `responding`）不同，按阶段名取 `max_tokens` 的查找在继承来的配置里查不到，服务会带着"缺哪几个阶段、该写哪个键"的信息拒绝启动。
 
 V4 的两个新能力（`mastery_path` / `immersive_reading`）**都只走 `responding` 这一个阶段**，它们在 `LLM_CAPABILITY_CONFIG_JSON` 里各有一条自己的条目，而这两条只声明 `responding`——与 `chat` 同名，所以按阶段名取 `max_tokens` 的查找命中；`immersive_reading` 的 `context_budget_tokens` 比其他能力大一档（48000），因为一轮阅读动辄带进一整段材料。四个 `MASTERY_*` 与一个 `DASHBOARD_RECENT_LIMIT` 是产品参数（同时推进几条路径、连对几次升档、一次取多少条），另外九个是阅读与 Memory 的规模与阈值。`MEMORY_SENSITIVE_KINDS` 是**唯一一个逗号分隔的集合**：它点的是部署**不信任**的 kind（默认 `preference,health,relationship,credential`），列进去的观察永不自动成为事实，但用户自己写下的事实不受它影响。`MEMORY_MAX_FACTS_PER_SURFACE` 截的是整份综合而不是四个列表各自（见 `V4设计方案.md` §0.3 第 4 条）。
 
-V5 的十七个新键同样没有代码默认值——**缺键是启动失败，不是程序替部署编一个数**（`LLM_API_KEYS` 是第二版改名的那个旧键，不重复计）。它们分成六组：两个 `LLM_KEY_*` 是 key 池的两个阈值——连续失败几次把一把 key 打进冷却、冷却多久（冷却以 429 为准：500 是上游不舒服、401 是键配错了，都不该用一次 60 秒的冷却把配置错误伪装成暂时故障）；三个 `AUTHZ_*` 说的不是规则而是**基线**（规则在 `internal/authz` 里：`AUTHZ_DEFAULT_PRESET` 只决定新账号落在哪个 preset 上，两个 `AUTHZ_LEARNER_*` 只能在 Learner 的地板之上**往上加**，写错只会让它够得着更多、不会让它够不着）；两个 `AUDIT_*` 与三个 `USAGE_*` 各含一个保留期，而**保留期只被一条按窗口删的语句读到，不起定时作业**（清理由调用方触发，与"租约过期是一次比较"同一条；**V6 给了那个调用方**——`go run ./cmd/cleanup`，见下）；四个 `RATE_LIMIT_*` 里三个是每账号每类动作的令牌桶速率、`BURST` 是三个桶共用的容量（速率写 `0` 表示这一类不限，而 `BURST` 不能是 `0`——那是三个桶一个令牌都装不下）；三个 `WORKSPACE_*` 里的 `WORKSPACE_ARCHIVE_ROOT` 与 `UPLOAD_ROOT` 是**两个目录而不是一个的两种叫法**，`MAX_ARCHIVE_BYTES` 同时管读和写，`JOB_TIMEOUT` 是作业的墙钟上限。每一个键的取值理由都写在 [backend/.env.example](backend/.env.example) 那一行上面。
+V5 的十七个新键同样没有代码默认值——**缺键是启动失败，不是程序替部署编一个数**（`LLM_API_KEYS` 是第二版改名的那个旧键，不重复计）。它们分成六组：两个 `LLM_KEY_*` 是 key 池的两个阈值——连续失败几次把一把 key 打进冷却、冷却多久（冷却以 429 为准：500 是上游不舒服、401 是键配错了，都不该用一次 60 秒的冷却把配置错误伪装成暂时故障）；三个 `AUTHZ_*` 说的不是规则而是**基线**（规则在 `internal/authz` 里：`AUTHZ_DEFAULT_PRESET` 只决定新账号落在哪个 preset 上，两个 `AUTHZ_LEARNER_*` 只能在 Learner 的地板之上**往上加**，写错只会让它够得着更多、不会让它够不着）；两个 `AUDIT_*` 与三个 `USAGE_*` 各含一个保留期，而**保留期只被一条按窗口删的语句读到，不起定时作业**（清理由调用方触发，与"租约过期是一次比较"同一条；**V6 给了那个调用方**——`go run ./cmd/cleanup`，见下）；`RATE_LIMIT_*` 里四个是每账号每类动作的令牌桶速率、`BURST` 是四个桶共用的容量（速率写 `0` 表示这一类不限，而 `BURST` 不能是 `0`——那是四个桶一个令牌都装不下）；三个 `WORKSPACE_*` 里的 `WORKSPACE_ARCHIVE_ROOT` 与 `UPLOAD_ROOT` 是**两个目录而不是一个的两种叫法**，`MAX_ARCHIVE_BYTES` 同时管读和写，`JOB_TIMEOUT` 是作业的墙钟上限。每一个键的取值理由都写在 [backend/.env.example](backend/.env.example) 那一行上面。
+
+视频学习的三个 `BILIBILI_*` 与 `RATE_LIMIT_SEARCH_PER_MINUTE` 也照同一口径：没有代码默认值，缺一个就启动失败。`BILIBILI_BASE_URL` 只填前缀（客户端自己接 `/x/web-interface/...`），`BILIBILI_TIMEOUT` 是上游超时，`BILIBILI_CACHE_TTL` 是同一个关键词同一页的缓存时长——缓存按 `关键词|页码` 存，最多 256 条，不跨进程。
 
 V6 只加了三个键，都在认证那一组：`AUTH_LOCKOUT_THRESHOLD` / `AUTH_LOCKOUT_WINDOW` / `AUTH_LOCKOUT_DURATION`——**窗口内错够几次就锁、窗口多长、锁多久**，是三个可以被分别质疑的量，所以是三个键而不是一个。它们与其余键同级：没有代码默认值，缺一个就是启动失败。**阈值必须是正整数**：写成 `0` 会让第一次密码错误就锁定，没有哪种读法是一个部署想要的，所以 `Validate` 直接拒它（`internal/config/auth.go:48`）。三个键与 `.env.example` 里的注释都写明了一件事：**锁定只挡登录，不挡已经拿到的 token**——要踢掉已登录的会话得走 `POST /auth/logout` 或管理员那条吊销。
 
@@ -156,6 +159,11 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `POST` | `/api/v1/sessions/{id}/claim` | **认领**一条没有主人的会话（V5 的存量数据，见下节） |
 | `GET` | `/api/v1/sessions/{id}/messages` | 会话的消息，按时间由早到晚 |
 | `GET` | `/api/v1/capabilities` | 这个 build 注册的能力：名字、说明、阶段名、工具名 |
+| `GET` | `/api/v1/personas` | 我的人格列表，按名字排序，返回 `{personas:[…]}` |
+| `POST` | `/api/v1/personas` | 建人格，body `{"name","description","content"}`，成功返回 201 与人格对象 |
+| `GET` | `/api/v1/personas/{personaID}` | 单个人格 |
+| `PUT` | `/api/v1/personas/{personaID}` | 整体替换名字、说明与提示词；同名 409 `name_taken` |
+| `DELETE` | `/api/v1/personas/{personaID}` | 删人格，成功返回 204 |
 | `GET` | `/api/v1/me/permissions` | 我这一份**生效权限**——四层合成的结果，界面不必自己拼 |
 | `GET` | `/api/v1/usage` | 用量聚合；`?since=&until=`（RFC3339）、`?model=&provider=&source=&session_id=` 逐条收窄、`?group_by=`（`model` / `provider` / `source` / `session` / `day`） |
 | `GET` | `/api/v1/system/version` | 版本、构建时间、Go 版本、migration 版本 |
@@ -205,6 +213,17 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `DELETE` | `/api/v1/reading/pairings/{pairingID}` | 取消配对，成功返回 204 |
 | `GET` | `/api/v1/reading/materials/{materialID}/extensions` | 扩展清单与各自的可用性（含禁用原因） |
 | `POST` | `/api/v1/reading/materials/{materialID}/extensions/{name}` | 跑一个扩展，带 locator 或带选区 |
+| `GET` | `/api/v1/books` | 我的书架，按最近更新排 |
+| `POST` | `/api/v1/books` | 建一本活书，body `{"title"?,"source_kind","source_id"}`；`source_kind` 是 `session` / `knowledge_base` / `file` / `question_bank`。**来源在这一刻快照**，成功返回 201 |
+| `GET` | `/api/v1/books/{bookID}` | 一本书：摘要 + 大纲（含每章状态）。**来源正文不出现在任何响应里** |
+| `DELETE` | `/api/v1/books/{bookID}` | 删书，大纲与章节一起删，204 |
+| `POST` | `/api/v1/books/{bookID}/outline` | 让模型生成大纲（**无请求体**，最长约 2 分钟）；已有已生成章节时 409 `outline_locked` |
+| `PUT` | `/api/v1/books/{bookID}/outline` | 保存编辑后的大纲，body `{"chapters":[{"title","summary"}],"confirmed"}`；数组顺序就是章节顺序 |
+| `POST` | `/api/v1/books/{bookID}/chapters/{ordinal}/generate` | 生成或重新生成一章（**无请求体**）；确认大纲前 409 `outline_not_confirmed` |
+| `GET` | `/api/v1/books/{bookID}/chapters/{ordinal}` | 一章正文（纯 Markdown） |
+| `PUT` | `/api/v1/books/{bookID}/progress` | 保存"读到第几章"，body `{"ordinal"}`（0 = 未开始，超出大纲 400） |
+| `GET` | `/api/v1/books/{bookID}/export` | 导出为 `{filename, content}`，只含已生成章节；一章都没有 409 `no_ready_chapters` |
+| `GET` | `/api/v1/video/search` | 按关键词搜 B 站视频；`?q=`（必填，≤100 字符）、`?page=`（1–50，默认 1）。返回 `query` / `page` / `has_more` / `items`（`video_id`、`title`、`author`、`cover_url`、`duration_seconds`、`play_count`、`published_at`、`watch_url`、`embed_url`）。上游任何失败都是 503 `video_search_unavailable`，不降级成空列表 |
 | `GET` | `/api/v1/dashboard` | **COURSE-03** 的"继续学习"：最近会话、材料、阅读、掌握、练习各取 `DASHBOARD_RECENT_LIMIT` 条 |
 | `GET` | `/api/v1/memory/traces` | L1 观察，可按 surface / kind / 时间收窄 |
 | `GET` | `/api/v1/memory/facts` | L2 事实，含 `status` / `confidence` / `is_sensitive` |
@@ -350,7 +369,11 @@ migration v18（V6）第一次改 `users` 的列（00001 建好之后只被 0001
 
 migration v19（V6）把"一个掌握路径最多一个活跃交互"交给 schema，形状与 00009 同源：生成列 `open_scope = IF(result_json IS NULL, path_id, NULL)` + 唯一键 `mastery_interactions_one_open`。前面有一段 repair-first 的删除（**预料删 0 行**：正确的写入路径产不出重复，这些行只可能是两个调用者在旧代码下赛出来的），子查询要包一层派生表——从子查询读的那张表里删会被引擎拒（ERROR 1093），而多表 DELETE 那种写法这个引擎不认。Down 是两条语句而不是一条，因为它拒绝在同一条语句里改表又删索引。
 
-当前后端已交付的垂直切片：用户认证、文件上传与读取、会话与消息，经 WebSocket 驱动的对话回合（含工具调用、能力切换与多步进度），知识库的解析与检索，题库与练习，掌握路径，沉浸阅读，账号级的 Memory，V5 的归属、四层授权、Guardian、审计、用量与配额、限速、key 池、文件库回收站、导入导出与两条只读的运行状态，以及 V6 的 token 生命周期（登出 / 改密 / 吊销）、账号锁定与出站边界的接线。现阶段没有 CORS、指标、Tracing、Swagger 或消息队列。`users.password` 只允许保存密码哈希，GORM 模型不得直接作为 API 响应。
+migration v20（前端全量实现）建 `personas`：一个账号保存的提示词，有名字、一句说明和正文。**它不是角色、不携带权限**——授权层从不读这张表，命名了人格的一轮仍然按发起它的账号检查；人格改变的只是模型被告知什么，而且只对命名它的那一轮生效。因此**没有任何会话表外键指向它**：对话存的是"说过什么"，不是"用谁的口气说的"，中途换人格不会把两个人格写进同一段历史。三条约束：`owner_id` 外键指向 `users` 且 `ON DELETE CASCADE`；名字与正文的 `TRIM(...) <> ''`；`(owner_id, name)` 唯一，因为输入区按名字列人格，两行同名就没人分得清。`persona_id` 是应用层 id（`pers_` 前缀），与其它领域一致。
+
+migration v21（活书）建 `books` 与 `book_chapters`。书在创建时把来源正文**快照**进 `books.source_text`（`MEDIUMTEXT`，按 rune 截到 32,000 字，并记 `source_chars` / `source_truncated`），此后大纲与每一章都从这一份快照生成——来源被删改不会让半本书前后不一致；代价是复制一份内容且不追踪漂移，且 `source_text` 永不进任何 API 响应（书架查询显式不选它）。`book_chapters` 的 `(book_id, ordinal)` 唯一，`content` 为 NULL 表示未生成、空正文不是一个状态；`status` 只有 `pending` / `ready` / `failed` 三值。**大纲版本用 `outline_revision` 做写时 CAS**：每次替换大纲加一，章节写入必须匹配生成开始时的那一版，否则 409 `outline_changed`——不然一次慢生成会把正文落到另一个标题下。章节随书级联删除。进度（`last_ordinal`）放在 `books` 上而不是单开一张读者表：v1 只有所有者一个读者，将来共享书再加表并迁移这一列。
+
+当前后端已交付的垂直切片：用户认证、文件上传与读取、会话与消息，经 WebSocket 驱动的对话回合（含工具调用、能力切换与多步进度），知识库的解析与检索，题库与练习，掌握路径，沉浸阅读，活书（四种来源 → 大纲 → 逐章生成 → 阅读与导出），B 站视频搜索，账号级的 Memory，V5 的归属、四层授权、Guardian、审计、用量与配额、限速、key 池、文件库回收站、导入导出与两条只读的运行状态，以及 V6 的 token 生命周期（登出 / 改密 / 吊销）、账号锁定与出站边界的接线。现阶段没有 CORS、指标、Tracing、Swagger 或消息队列。`users.password` 只允许保存密码哈希，GORM 模型不得直接作为 API 响应。
 
 ### 对话回合与 WebSocket
 
@@ -538,7 +561,7 @@ V5 加的不是"能做什么"，是**"不能做什么"**和**"做过的每一件
 
 **配额 = 一次聚合查询**（`llm_calls` 上 `owner_id` + 时间窗），不另建表——累计量已经在库里，抄一份就会漂，而且被拒的那个数与用量屏上读到的那个数必须是同一次读。`0` 表示不限，**也是默认**（阈值未定，"默认把所有人限死"比"默认不限"坏得多）。超限是**结构化的拒绝**：429 `quota_exceeded` + `details{item, limit, used, resets_at}`，**不给 `Retry-After`**——那是要向用户解释的事，不是要睡过去的事。窗口是 **UTC 自然日 / 自然月**，不是"最近 24 小时"：滚动窗口没有清零的那一刻。日额度数"发起"、月额度数"花掉"：没回来的调用照样是一次被发出去的调用，否则一个挂起 20 次调用的账号还能再被放行 20 次。**被拒的调用不花一个 id、不写一行、不发一次请求**。
 
-**限速与配额是两个问题**：限速问"你多快"（秒/分钟，**进程内存**，重启从头开始是正确行为），配额问"你多少"（天/月，**在库里**，必须活过重启）。限速是按账号 + 动作的令牌桶，**只挂三类路由**：模型调用（`/ws`、`POST /practice/reviews`、`POST /reading/materials/{id}/extensions/{name}`）、外部检索（`POST /knowledge-bases/{id}/search`）、文件上传（`POST /library/files`）。429 `rate_limited` + `details{action, retry_after}` + 标准 `Retry-After` 头；这个数字**向上取整且最小是 1 秒**（一个被告知"0 秒后重试"的客户端会立刻重试然后再次被拒）。挂哪几条路由**由一条遍历路由表的用例钉住**，以后有人加一条昂贵路由而没读设计，报的是"未被限流的路由"而不是让它悄悄溜过。**多实例会静默变成每实例限速**（实际额度是 N 倍），本仓库单实例部署。
+**限速与配额是两个问题**：限速问"你多快"（秒/分钟，**进程内存**，重启从头开始是正确行为），配额问"你多少"（天/月，**在库里**，必须活过重启）。限速是按账号 + 动作的令牌桶，**只挂四类路由**：模型调用（`/ws`、`POST /practice/reviews`、`POST /reading/materials/{id}/extensions/{name}`）、外部检索（`POST /knowledge-bases/{id}/search`）、文件上传（`POST /library/files`）、外部视频搜索（`GET /video/search`）。429 `rate_limited` + `details{action, retry_after}` + 标准 `Retry-After` 头；这个数字**向上取整且最小是 1 秒**（一个被告知"0 秒后重试"的客户端会立刻重试然后再次被拒）。挂哪几条路由**由一条遍历路由表的用例钉住**，以后有人加一条昂贵路由而没读设计，报的是"未被限流的路由"而不是让它悄悄溜过。**多实例会静默变成每实例限速**（实际额度是 N 倍），本仓库单实例部署。
 
 **key 池**：`LLM_API_KEYS` 是逗号分隔的列表（一把也行，行为与从前一样），轮换 + 每把的连续失败计数 + 冷却。**只有 429 算在一把 key 头上**（500 是上游不舒服、401 是键配错了，都不该用一次 60 秒的冷却把配置错误伪装成暂时故障）；一次成功清零计数；全部在冷却时仍然发**冷得最久**的那把（"没有 key"会把上游的背压变成我们这边的一次故障）。冷却是每把 key 一个"到什么时候为止"，判断它就是一次时间比较——**没有后台协程去解除冷却**。错误信息里只有序号，没有 key 的值。`LLM_API_KEY` → `LLM_API_KEYS` 是唯一一次改已有的键名，**不做兼容**：升级前先改 `.env`。
 
@@ -599,7 +622,9 @@ V6 加的不是功能，是**让已经有的东西有客人**：两条 migration
 
 ## 前端
 
-`frontend/` 是一条能跑通的纵切面：**登录（含注册）→ 四段式骨架 → 一个会话 → 发一句 → 经 WebSocket 收到流式回答并渲染**。依赖只有 `vue` 与 `vue-router`（没有 pinia、没有 axios、没有 eslint/prettier/vitest）。
+`frontend/` 覆盖后端现有的全部页面：对话（断线重连、续传、心跳、引用与来源、工具卡、附件与知识库选择、人格选择、回收站）、人格管理、伙伴、协同写作、学习首页、练习、掌握路径、学习地图（按模块展示知识点四态与下一步）、沉浸阅读、活书（书架、大纲编辑、逐章生成、阅读进度与 Markdown 导出）、视频学习（手动搜索 B 站视频并用官方播放器内嵌播放）、文件库、知识库、题库、记忆（L1 / L2 / L3 / 归属分组图 / 去重与清理）、设置七个分区，以及管理台（用户、授权、监护关系、审计）。后端没有路由的占位页已经全部移除（最后一块 `/visualizations` 落到 404）；技能与工具共用一页只读能力目录（数据来自 `/capabilities`，不能启停）。**伙伴与协同写作没有自己的数据表**：两者都读同一份人格——伙伴是"选一个人格开始对话"的入口，协同写作是"选人格 + 选写作步骤 + 写一句主题"之后把开场白带进普通对话；写作本身仍然是一来一回的消息，不另存文档。
+
+运行时依赖是 `vue`、`vue-router`、`markdown-it`、`highlight.js`、`katex` 与 `dompurify`；没有 pinia、没有 axios、没有 eslint/prettier/vitest。模型输出统一经 `markdown-it`（`html: false`）→ DOMPurify 后才进 `v-html`，全应用只有 `src/markdown/render.ts` 产出 HTML。
 
 ```bash
 cd frontend
@@ -613,14 +638,18 @@ npm run build        # 门禁之二
 
 | 目录 | 职责 |
 |---|---|
-| `src/api/` | `client.ts` 是全应用**唯一的 `fetch` 出口**；`errors.ts` 把后端的 `error.code` 映成界面上那一句 |
-| `src/ws/` | `protocol.ts` 是 `backend/internal/ws/protocol.go` 与 `internal/event/types.go` 的**逐字镜像**，改后端那两个文件时要同步改它 |
+| `src/api/` | 按后端领域拆分的请求模块；`client.ts` 是全应用**唯一的 `fetch` 出口**（上传进度用 `XMLHttpRequest`，下载走带认证的 blob）；`errors.ts` 把 `error.code` 映成界面上那一句 |
+| `src/auth/` | 权限快照（`can` / `canSurface` / `surfaceDecision`）、401 统一处理、`policy-mirror.ts`（管理台预锁的地板与 learner-never 镜像） |
+| `src/copy/` | 全部界面文案；只做中文，但页面里不写死句子，将来接 i18n 不用重写 |
+| `src/markdown/` | 唯一的 HTML 产出点（Markdown + 高亮 + KaTeX + DOMPurify） |
+| `src/shared/` | 资源状态约定、确认框、toast、格式化、能力缓存 |
+| `src/ws/` | `protocol.ts` / `socket.ts` / `connection.ts` / `blocks.ts`：协议 v2.0 的逐字镜像、重连退避、心跳、按 `seq` 幂等续传 |
 | `src/session.ts` | 登录态（token 存 `localStorage`）。**唯一写 token 的地方** |
-| `src/router.ts` | `/login`、`/register`、`/chat`、`/chat/:sessionId` + 一条"未登录去 `/login`"的守卫 |
+| `src/router.ts` | 全部页面路由 + "未登录去 `/login`"与权限守卫；未知路径落到 404 |
 | `src/components/shell/` | 四段式骨架（导航 / 列表栏 / 主内容 / 右侧面板），两个侧栏可收合 |
-| `src/views/` | `Login.vue`、`Register.vue`、`Chat.vue` |
+| `src/views/` | 按领域分组：`Chat.vue`、`learning/`、`memory/`、`settings/`、`admin/`、`Files.vue`、`KnowledgeBases.vue`、`Questions/` |
 
-**这一版明确没有做的**（不是漏了）：断线重连与续传、生产部署（Go 服务不伺服前端产物）、除对话外的任何页面、Markdown/公式/代码高亮的渲染、界面中英双语、附件与知识库选择、前端 lint/format/单元测试工具链。逐条理由见 `frontend/` 里各文件顶部的注释。
+**这一版明确没有做的**（不是漏了）：分支、重新生成、编辑后重发、删除单条消息（后端没有承接，`regenerate` 会被拒）；模型/供应商/密钥配置、忘记密码、一键升级；深色模式、中英双语、移动端；Mermaid、图片渲染管线、多媒体；前端 lint/format/单元测试工具链。协同写作没有文档存储、版本对比与导出，伙伴没有 IM 渠道、详情页、群组、语音与智能体接入——这些都需要后端先有对应接口。生产部署仍不在这一版里——Go 服务不伺服 `dist/`。
 
 ## 开发约定
 

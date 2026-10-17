@@ -9,20 +9,27 @@
  *
  * §3.5 特别提醒"走到几步之几"有**两种来源，不要混**：一种是阶段（能力的阶段
  * 表，数量与名字随能力变），一种是同一阶段内部的多步进度（`progress` 事件）。
- * 这一版只画前者 —— `progress` 在 `socket.ts` 里被收下但不建块，所以这里没有
- * 第二条进度线，也就不会把两者画成一样。
+ * 两者在这里是两种不同的行：阶段是一枚实心点，进度带自己的 `步/总`。
  */
 
 import { computed } from 'vue'
 
 import type { Block } from '../../ws/blocks'
+import { CHAT } from '../../copy/chat'
 
 const props = defineProps<{ blocks: readonly Block[] }>()
 
 /** 只有这几类进得了时间线。回答与用户消息是"内容"，不是"动作"。 */
 const entries = computed(() =>
   props.blocks.filter(
-    (block) => block.kind === 'stage' || block.kind === 'tool' || block.kind === 'error',
+    (block) =>
+      block.kind === 'stage' ||
+      block.kind === 'tool' ||
+      block.kind === 'error' ||
+      block.kind === 'thinking' ||
+      block.kind === 'observation' ||
+      block.kind === 'progress' ||
+      block.kind === 'sources',
   ),
 )
 </script>
@@ -51,6 +58,33 @@ const entries = computed(() =>
         <span class="timeline__label">
           <span class="timeline__tool">{{ entry.name }}</span>
           <span v-if="entry.ok === false" class="timeline__fail">失败</span>
+        </span>
+      </template>
+
+      <template v-else-if="entry.kind === 'thinking'">
+        <span class="timeline__dot timeline__dot--quiet" aria-hidden="true" />
+        <span class="timeline__label timeline__label--quiet">{{ CHAT.thinking }}</span>
+      </template>
+
+      <template v-else-if="entry.kind === 'observation'">
+        <span class="timeline__dot timeline__dot--quiet" aria-hidden="true" />
+        <span class="timeline__label">{{ CHAT.observation }} · {{ entry.text }}</span>
+      </template>
+
+      <template v-else-if="entry.kind === 'progress'">
+        <span class="timeline__dot timeline__dot--progress" aria-hidden="true" />
+        <span class="timeline__label">
+          {{ entry.label || CHAT.progress }}
+          <span v-if="entry.total > 0" class="timeline__count">
+            {{ entry.step }}/{{ entry.total }}
+          </span>
+        </span>
+      </template>
+
+      <template v-else-if="entry.kind === 'sources'">
+        <span class="timeline__dot timeline__dot--quiet" aria-hidden="true" />
+        <span class="timeline__label">
+          {{ CHAT.sourceTitle }} · {{ entry.sources.length }}
         </span>
       </template>
 
@@ -103,6 +137,19 @@ const entries = computed(() =>
 .timeline__dot--error {
   border-color: var(--danger);
   background: var(--danger);
+}
+
+.timeline__dot--quiet {
+  border-color: var(--border);
+}
+
+.timeline__dot--progress {
+  border-color: var(--warning);
+  background: var(--warning);
+}
+
+.timeline__label--quiet {
+  color: var(--text-faint);
 }
 
 .timeline__label {

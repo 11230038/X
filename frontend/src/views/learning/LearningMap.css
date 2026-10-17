@@ -1,0 +1,426 @@
+/*
+ * 学习地图。
+ *
+ * 四态颜色与 `Mastery.css` 的 `.chip--*` 同源；那边是 scoped 的 400+ 行工作
+ * 台布局，不能直接复用，所以这里只重复四组颜色，不复制布局。
+ */
+
+/* ── 路径选择 ─────────────────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.toolbar__label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.toolbar__select {
+  padding: 5px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.toolbar__goal {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ── 摘要与图例 ───────────────────────────────────────────────────────── */
+
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.summary__counts {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.summary__next {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.summary__kind {
+  flex: none;
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.summary__reason {
+  min-width: 0;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.legend__label {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.legend__item {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.legend__swatch {
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+}
+
+.legend__swatch--unknown {
+  border-style: dashed;
+  background: var(--surface-sunken);
+}
+
+.legend__swatch--weak {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.legend__swatch--learning {
+  border-color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.legend__swatch--mastered {
+  border-color: var(--success);
+  background: var(--success-soft);
+}
+
+/* ── 地图 ─────────────────────────────────────────────────────────────── */
+
+.board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 18px;
+  align-items: start;
+}
+
+.map {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.region {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.region__head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.region__name {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.region__count {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.region__description {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.nodes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 7px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.node {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-start;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+}
+
+.node:hover {
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+.node__name {
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.node__badge {
+  padding: 0 5px;
+  border-radius: 7px;
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.node--unknown {
+  border-style: dashed;
+  border-color: var(--border-strong);
+  background: var(--surface-sunken);
+}
+
+.node--unknown .node__badge {
+  background: var(--surface);
+  color: var(--text-faint);
+}
+
+.node--weak {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.node--weak .node__badge {
+  background: var(--surface);
+  color: var(--danger);
+}
+
+.node--learning {
+  border-color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.node--learning .node__badge {
+  background: var(--surface);
+  color: var(--warning);
+}
+
+.node--mastered {
+  border-color: var(--success);
+  background: var(--success-soft);
+}
+
+.node--mastered .node__badge {
+  background: var(--surface);
+  color: var(--success);
+}
+
+.node--on {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── 选中知识点 ───────────────────────────────────────────────────────── */
+
+.detail {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.detail__head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.detail__title {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.detail__module {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.detail__description {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.detail__level {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+}
+
+.detail__level-label {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.detail__badge {
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 17px;
+}
+
+.detail__badge--unknown {
+  background: var(--surface-sunken);
+  color: var(--text-faint);
+}
+
+.detail__badge--weak {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.detail__badge--learning {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.detail__badge--mastered {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.detail__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.detail__meta {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.detail__empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.detail__next {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.detail__next-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.detail__next-kind {
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.detail__next-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.detail__next-reason {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.detail__next-meta {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.detail__next-go {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 4px 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}

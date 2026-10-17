@@ -1,5 +1,5 @@
-// Package limit is the token bucket the three expensive kinds of route are
-// answered through (§2.10).
+// Package limit is the token bucket the expensive kinds of route are answered
+// through (§2.10).
 //
 // Rate limiting and the quota answer two different questions, and §2.10 keeps
 // them apart because each is the wrong answer to the other: "how fast" is about
@@ -23,9 +23,9 @@ import (
 // An Action is one class of work that costs something outside this process, and
 // is therefore worth bounding per account.
 //
-// The three are closed rather than open: what may be limited is a decision about
+// The four are closed rather than open: what may be limited is a decision about
 // the product (a route that reaches an upstream provider, or fills the disk),
-// and a deployment chooses numbers for these three rather than inventing
+// and a deployment chooses numbers for these four rather than inventing
 // classes. A limiter built without one of them is refused.
 type Action string
 
@@ -40,6 +40,10 @@ const (
 	// call, and what it bounds is the one resource an account can exhaust for
 	// everybody on the machine.
 	Upload Action = "upload"
+	// Search is a keyword sent to a public video site. It spends no key of ours,
+	// but it does spend somebody else's quota — which is the resource that, once
+	// exhausted, takes the feature away from every account at once.
+	Search Action = "search"
 )
 
 // Options is what one deployment allows one account to do, per minute.
@@ -52,9 +56,10 @@ type Options struct {
 	ModelPerMinute     int
 	RetrievalPerMinute int
 	UploadPerMinute    int
+	SearchPerMinute    int
 	// Burst is the shared size of every bucket: how many actions one account
 	// may do back to back before the rate applies. It is shared because it
-	// answers the same question for all three — "how fast can a person click" —
+	// answers the same question for all four — "how fast can a person click" —
 	// while the rate answers how much of each the instance will carry.
 	Burst int
 }

@@ -1,3 +1,11 @@
+<script lang="ts">
+/**
+ * 标签页的值由使用方持有：对话页点一条引用时要能把面板切到「预览」，而那个
+ * 动作发生在面板外面。
+ */
+export type PanelTab = 'activity' | 'sources' | 'preview'
+</script>
+
 <script setup lang="ts">
 /**
  * 右侧面板。`设计说明书.md` §3.5：**同一个面板，三种内容，用标签页切换** ——
@@ -11,10 +19,6 @@
  * 完了"，所以那个细条上带着一个状态点，不是一个纯粹的展开箭头。
  */
 
-import { ref } from 'vue'
-
-export type PanelTab = 'activity' | 'sources' | 'preview'
-
 const props = defineProps<{
   collapsed: boolean
   /** 这一轮是不是还在跑。收合时那个状态点靠它 —— 它就是 §3.5 要的那个信号。 */
@@ -25,7 +29,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ (event: 'toggle'): void }>()
 
-const tab = ref<PanelTab>('activity')
+const tab = defineModel<PanelTab>('tab', { default: 'activity' })
 
 const TABS: readonly { key: PanelTab; label: string }[] = [
   { key: 'activity', label: '活动' },

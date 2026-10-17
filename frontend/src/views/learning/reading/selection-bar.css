@@ -1,0 +1,39 @@
+.selectionbar {
+  position: sticky;
+  top: 8px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding: 8px 11px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
+}
+
+.selectionbar__meta {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.selectionbar__snippet {
+  overflow: hidden;
+  max-width: 360px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selectionbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+

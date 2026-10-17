@@ -41,6 +41,11 @@ type turnRun struct {
 	caller authz.Caller
 	// question is what the user asked, kept for naming the session afterwards.
 	question string
+	// persona is the resolved prompt this turn runs under, and it is empty for a
+	// turn that named none. It is set before the goroutine starts and read only
+	// by that goroutine; the capability receives it, and nothing in the runtime
+	// consults it for a permission decision.
+	persona string
 	// titleNeeded is whether this turn is the one that names the session: the
 	// first turn of an untitled one.
 	titleNeeded bool
@@ -100,6 +105,7 @@ func (r *Runner) newTurnRun(
 	conversation session.Session,
 	caller authz.Caller,
 	question string,
+	persona string,
 	declared Declaration,
 	emitter *Emitter,
 	routed *Routing,
@@ -110,6 +116,7 @@ func (r *Runner) newTurnRun(
 		session:     conversation,
 		caller:      caller,
 		question:    question,
+		persona:     persona,
 		titleNeeded: conversation.Title == "",
 		declared:    declared,
 		routing:     routed,
@@ -274,6 +281,7 @@ func (r *turnRun) runCapability() error {
 		emitter:  &r.published,
 		tools:    definitions,
 		messages: messages,
+		persona:  r.persona,
 		loop:     loop,
 		run:      r,
 	})

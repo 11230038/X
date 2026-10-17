@@ -52,31 +52,36 @@ func (s *routerLimiterStub) askedAbout() []limit.Action {
 	return actions
 }
 
-// TestRouterMountsTheLimiterOnTheThreeClassesAndNowhereElse is §2.10's "只挂三类
-// 路由，而不是全局" checked over the router's own route table rather than over a
-// list kept beside it: every route the router registers is requested once, and
-// the classes it consulted the limiter about are compared with what the design
-// names. A route added later by somebody who has not read that sentence is
-// therefore a route this case reports as unlimited, instead of one that quietly
-// joins a list nobody maintains.
+// TestRouterMountsTheLimiterOnTheFourClassesAndNowhereElse checks §2.10's rule
+// — limits are mounted on named classes of route, not globally — over the
+// router's own route table rather than over a list kept beside it: every route
+// the router registers is requested once, and the classes it consulted the
+// limiter about are compared with the four this build names. A route added later
+// by somebody who has not read that sentence is therefore a route this case
+// reports as unlimited, instead of one that quietly joins a list nobody
+// maintains.
 //
 // It also pins how many classes are *one* route: a route mounted with the
 // limiter twice would count the same request against two buckets, and this is
 // the only place that would be visible.
-func TestRouterMountsTheLimiterOnTheThreeClassesAndNowhereElse(t *testing.T) {
+func TestRouterMountsTheLimiterOnTheFourClassesAndNowhereElse(t *testing.T) {
 	limiter := &routerLimiterStub{}
 	router := newTestRouterWithGates(t, readyChecker{}, nil, routerAuthorizerStub{}, limiter)
 
 	// What leaves this process: a call to the chat provider, a call to the
-	// embedding provider, and bytes written to disk. The socket is the model
-	// class because every conversational turn's calls happen inside it, and
-	// nothing between the upgrade and the provider can count them.
+	// embedding provider, bytes written to disk, and a keyword sent to a public
+	// video site. The socket is the model class because every conversational
+	// turn's calls happen inside it, and nothing between the upgrade and the
+	// provider can count them.
 	want := map[string]limit.Action{
 		"GET /api/v1/ws":                                              limit.Model,
 		"POST /api/v1/library/files":                                  limit.Upload,
 		"POST /api/v1/knowledge-bases/:kbID/search":                   limit.Retrieval,
 		"POST /api/v1/practice/reviews":                               limit.Model,
 		"POST /api/v1/reading/materials/:materialID/extensions/:name": limit.Model,
+		"POST /api/v1/books/:bookID/outline":                          limit.Model,
+		"POST /api/v1/books/:bookID/chapters/:ordinal/generate":       limit.Model,
+		"GET /api/v1/video/search":                                    limit.Search,
 	}
 
 	got := map[string]limit.Action{}

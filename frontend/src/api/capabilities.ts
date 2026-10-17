@@ -20,8 +20,9 @@ export interface CapabilityManifest {
    * stage 都在这里"**：一个能力的阶段表是它打算走的，`stage_start` 是它真走
    * 到的。两张表不一致时以事件为准，界面照事件画。
    */
-  stages: string[]
-  tools: string[]
+  /** 空切片在 Go 侧可能序列化成 null，消费方一律先归一成数组。 */
+  stages: string[] | null
+  tools: string[] | null
 }
 
 export function listCapabilities(): Promise<{ capabilities: CapabilityManifest[] }> {

@@ -20,8 +20,10 @@ import (
 // survey it asked for, the model calls it ran — because the things this package
 // has to get right are all about which of them happened and in what order.
 type fakeRun struct {
-	// visible is the conversation the runtime hands over.
+	// visible is the conversation the runtime hands over, and persona is the
+	// instruction the turn was started under.
 	visible []llm.Message
+	persona string
 	// grounding is what the survey returns; groundErr is what it fails with.
 	grounding capability.Grounding
 	groundErr error
@@ -42,6 +44,7 @@ func (f *fakeRun) Emit(_ context.Context, record event.Event) error {
 }
 func (f *fakeRun) Tools() []tool.Definition { return nil }
 func (f *fakeRun) Messages() []llm.Message  { return f.visible }
+func (f *fakeRun) Persona() string          { return f.persona }
 
 func (f *fakeRun) RunLoop(_ context.Context, request agentloop.Request) (agentloop.Result, error) {
 	f.requests = append(f.requests, request)

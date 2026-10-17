@@ -1,0 +1,73 @@
+.panel__head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.panel__title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.panel__empty,
+.panel__hint {
+  margin: 6px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.panel__hint {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.marks,
+.candidates,
+.extensions,
+.timeline,
+.filelist {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mark {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mark:hover {
+  border-color: var(--border);
+  background: var(--surface-sunken);
+}
+
+.mark__kind {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.mark__body {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mark__time {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
