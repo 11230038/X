@@ -23,7 +23,7 @@ func main() {
 
 	cfg, err := config.Load(".env")
 	if err != nil {
-		log.Fatal("load configuration")
+		log.Fatalf("load configuration: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
