@@ -93,6 +93,74 @@ func TestDBTheListingIsByActivityThenID(t *testing.T) {
 	}
 }
 
+func TestDBTheListingIsPartitionedByKind(t *testing.T) {
+	repo, resource := newDBRepository(t)
+	// The ordinary helper writes no kind at all: that is both the state of every
+	// row from before migration 22 and the state workspace import can produce,
+	// because it calls storage directly instead of the service.
+	storeSession(t, repo, "s_chat", atSecond(1))
+	storeSessionOfKind(t, repo, "s_writing", KindWriting, atSecond(2))
+	storeSessionOfKind(t, repo, "s_mastery", KindMastery, atSecond(3))
+	storeSessionOfKind(t, repo, "s_question_bank", KindQuestionBank, atSecond(4))
+
+	chat, err := repo.Session(context.Background(), "s_chat", testCaller())
+	if err != nil {
+		t.Fatalf("read the chat session back: %v", err)
+	}
+	if chat.Kind != KindChat {
+		t.Errorf("a session stored without a kind reads as %q, want chat", chat.Kind)
+	}
+	writing, err := repo.Session(context.Background(), "s_writing", testCaller())
+	if err != nil {
+		t.Fatalf("read the writing session back: %v", err)
+	}
+	if writing.Kind != KindWriting {
+		t.Errorf("Kind = %q, want writing", writing.Kind)
+	}
+	mastery, err := repo.Session(context.Background(), "s_mastery", testCaller())
+	if err != nil {
+		t.Fatalf("read the mastery session back: %v", err)
+	}
+	if mastery.Kind != KindMastery {
+		t.Errorf("Kind = %q, want mastery", mastery.Kind)
+	}
+	questionBank, err := repo.Session(context.Background(), "s_question_bank", testCaller())
+	if err != nil {
+		t.Fatalf("read the question-bank session back: %v", err)
+	}
+	if questionBank.Kind != KindQuestionBank {
+		t.Errorf("Kind = %q, want question_bank", questionBank.Kind)
+	}
+
+	// A zero ListOptions is chat, so every caller written before kinds existed
+	// keeps the meaning it had.
+	if got := listSessions(t, repo, ListOptions{}); !slices.Equal(got, []string{"s_chat"}) {
+		t.Errorf("the default listing is %v, want only the chat session", got)
+	}
+	if got := listSessions(t, repo, ListOptions{Kind: KindWriting}); !slices.Equal(got, []string{"s_writing"}) {
+		t.Errorf("the writing listing is %v, want only the writing session", got)
+	}
+	if got := listSessions(t, repo, ListOptions{Kind: KindMastery}); !slices.Equal(got, []string{"s_mastery"}) {
+		t.Errorf("the mastery listing is %v, want only the mastery session", got)
+	}
+	if got := listSessions(t, repo, ListOptions{Kind: KindQuestionBank}); !slices.Equal(got, []string{"s_question_bank"}) {
+		t.Errorf("the question-bank listing is %v, want only the question-bank session", got)
+	}
+	// "Every kind" is explicit: it cannot be reached by forgetting to pass a kind.
+	if got := listSessions(t, repo, ListOptions{AllKinds: true}); !slices.Equal(got, []string{"s_question_bank", "s_mastery", "s_writing", "s_chat"}) {
+		t.Errorf("the combined listing is %v, want every partition by activity", got)
+	}
+
+	// A row written by an older process has no kind in the INSERT. The column
+	// default is the only thing that makes it a conversation.
+	testdb.Exec(t, resource, "INSERT INTO sessions "+
+		"(session_id, title, creat_time, update_time, owner_id) VALUES (?, ?, ?, ?, ?)",
+		"s_legacy", "旧会话", atSecond(3), atSecond(3), testOwnerID)
+	if got := listSessions(t, repo, ListOptions{}); !slices.Equal(got, []string{"s_legacy", "s_chat"}) {
+		t.Errorf("the default listing is %v, want the legacy row among the conversations", got)
+	}
+}
+
 func TestDBMessagesAreOldestFirstThenByID(t *testing.T) {
 	repo, resource := newDBRepository(t)
 	storeSession(t, repo, "s_1", atSecond(1))

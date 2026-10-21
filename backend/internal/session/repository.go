@@ -34,6 +34,7 @@ func (r *GORMRepository) Create(ctx context.Context, record Session) error {
 	model := models.Session{
 		SessionID: record.ID,
 		Title:     titlePointer(record.Title),
+		Kind:      string(normalizeKind(record.Kind)),
 		OwnerID:   data.OwnerPointer(record.OwnerID),
 		CreatedAt: record.CreatedAt,
 		UpdatedAt: record.UpdatedAt,
@@ -108,12 +109,18 @@ func (r *GORMRepository) List(ctx context.Context, options ListOptions) ([]Sessi
 	var records []models.Session
 	query := r.db.WithContext(ctx).
 		Where("is_deleted = ?", options.Deleted).
-		Order("update_time DESC, session_id ASC").
 		Scopes(func(query *gorm.DB) *gorm.DB {
 			return data.OwnerScope(query, options.Caller.UserID, options.Caller.IsAdmin(), "owner_id")
 		}).
+		Order("update_time DESC, session_id ASC").
 		Limit(clampLimit(options.Limit)).
 		Offset(max(options.Offset, 0))
+	if !options.AllKinds {
+		// The repository repeats the zero-value rule the service documents: a
+		// listing built by hand means chat, not everything. Reading the rule
+		// in two places is cheaper than a row appearing in the wrong list.
+		query = query.Where("kind = ?", string(normalizeKind(options.Kind)))
+	}
 	if err := query.Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -298,6 +305,7 @@ func (r *GORMRepository) ready() error {
 func toSession(model models.Session) Session {
 	converted := Session{
 		ID:        model.SessionID,
+		Kind:      normalizeKind(Kind(model.Kind)),
 		CreatedAt: model.CreatedAt,
 		UpdatedAt: model.UpdatedAt,
 	}

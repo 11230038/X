@@ -64,14 +64,20 @@ type questionView struct {
 	// QuestionType is named after the filter that selects on it rather than
 	// after the column it is stored in, because the API is what the client
 	// writes.
-	QuestionType    string       `json:"question_type"`
-	Options         []optionView `json:"options"`
-	CorrectAnswer   string       `json:"correct_answer,omitempty"`
-	Explanation     string       `json:"explanation,omitempty"`
-	Difficulty      string       `json:"difficulty,omitempty"`
-	Source          string       `json:"source,omitempty"`
-	MaterialID      string       `json:"material_id,omitempty"`
-	KnowledgePoints []string     `json:"knowledge_points,omitempty"`
+	QuestionType  string       `json:"question_type"`
+	Options       []optionView `json:"options"`
+	CorrectAnswer string       `json:"correct_answer,omitempty"`
+	Explanation   string       `json:"explanation,omitempty"`
+	Difficulty    string       `json:"difficulty,omitempty"`
+	Source        string       `json:"source,omitempty"`
+	MaterialID    string       `json:"material_id,omitempty"`
+	// MasteryPathID is the path a mastery-path turn generated this question on.
+	// It is absent for a question that came from anywhere else, which is most of
+	// them; the client groups the bank by it.
+	MasteryPathID string `json:"mastery_path_id,omitempty"`
+	// KnowledgePointID belongs with MasteryPathID and never travels alone.
+	KnowledgePointID string   `json:"knowledge_point_id,omitempty"`
+	KnowledgePoints  []string `json:"knowledge_points,omitempty"`
 	// Categories are the labels the question is filed under. The list is empty
 	// rather than absent for an unfiled question: "not filed" is an answer, and
 	// a client should not have to tell a missing field from an empty one.
@@ -278,6 +284,7 @@ func (h *QuestionHandler) filter(c *gin.Context, account authz.Caller) (notebook
 	filter := notebook.Filter{Caller: account}
 	filter.Source = strings.TrimSpace(c.Query("source"))
 	filter.MaterialID = strings.TrimSpace(c.Query("material_id"))
+	filter.MasteryPathID = strings.TrimSpace(c.Query("mastery_path_id"))
 	filter.Difficulty = strings.TrimSpace(c.Query("difficulty"))
 	filter.Category = strings.TrimSpace(c.Query("category"))
 	filter.Query = strings.TrimSpace(c.Query("q"))
@@ -364,17 +371,19 @@ func toQuestionView(question notebook.Question, categories []string) questionVie
 	filed := make([]string, 0, len(categories))
 	filed = append(filed, categories...)
 	return questionView{
-		QuestionID:      question.QuestionID,
-		Text:            question.Text,
-		QuestionType:    string(question.Type),
-		Options:         options,
-		CorrectAnswer:   question.CorrectAnswer,
-		Explanation:     question.Explanation,
-		Difficulty:      question.Difficulty,
-		Source:          question.Source,
-		MaterialID:      question.MaterialID,
-		KnowledgePoints: question.KnowledgePoints,
-		Categories:      filed,
+		QuestionID:       question.QuestionID,
+		Text:             question.Text,
+		QuestionType:     string(question.Type),
+		Options:          options,
+		CorrectAnswer:    question.CorrectAnswer,
+		Explanation:      question.Explanation,
+		Difficulty:       question.Difficulty,
+		Source:           question.Source,
+		MaterialID:       question.MaterialID,
+		MasteryPathID:    question.MasteryPathID,
+		KnowledgePointID: question.KnowledgePointID,
+		KnowledgePoints:  question.KnowledgePoints,
+		Categories:       filed,
 	}
 }
 

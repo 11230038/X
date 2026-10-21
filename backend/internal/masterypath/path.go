@@ -54,8 +54,9 @@ type TurnPath struct {
 	version int64
 	// held reports whether this turn's arrival took the lease, and holder is who
 	// has it when it did not. Together they are §2.3's first mechanism: a turn
-	// that did not get the lease still reads, still asks and still judges, and
-	// every write it attempts says who is writing instead.
+	// that did not get the lease still runs and still reads, and every write it
+	// attempts — asking and judging included, because both open or close an
+	// interaction on the path — says who is writing instead.
 	//
 	// It is the arrival's answer and not a question asked again at each call, and
 	// that is deliberate: what happens when the lease moves *during* a turn is the
@@ -79,8 +80,8 @@ func (t *TurnPath) writable() error {
 		return nil
 	}
 	return &tool.Refusal{Note: fmt.Sprintf(
-		"这条路径现在由另一个 turn（%s，会话 %s）在写，你改不动它。"+
-			"可以照常读、出题、判卷；要改的话先问用户是等它写完，还是用 mastery_switch 换一条路径。",
+		"这条路径现在由另一个 turn（%s，会话 %s）在写，你改不动它：读可以照常，出题与判卷也要等它写完。"+
+			"要接着推进的话，先问用户是等它写完，还是用 mastery_switch 换一条路径。",
 		t.holder.TurnID, t.holder.SessionID)}
 }
 
@@ -449,25 +450,47 @@ func (t *TurnPath) refuse(err error) error {
 		var held *mastery.HeldError
 		if errors.As(err, &held) {
 			return &tool.Refusal{Note: fmt.Sprintf(
-				"这条路径现在由另一个 turn（%s，会话 %s）在写，你改不动它。"+
-					"可以照常读、出题、判卷；要改的话先问用户是等它写完，还是用 mastery_switch 换一条路径。",
+				"这条路径现在由另一个 turn（%s，会话 %s）在写，你改不动它：读可以照常，出题与判卷也要等它写完。"+
+					"要接着推进的话，先问用户是等它写完，还是用 mastery_switch 换一条路径。",
 				held.Lease.TurnID, held.Lease.SessionID)}
 		}
 		return &tool.Refusal{Note: "这条路径现在由另一个 turn 在写，你改不动它。"}
 	case errors.Is(err, mastery.ErrOpenInteraction):
+		// The question id leads the sentence, and it is the point of it: it is
+		// the only id mastery_grade accepts, and a model handed the interaction
+		// id instead has nothing to call that tool with — it guesses, the guess
+		// is refused, and the path stays blocked while it apologises to the
+		// user.
 		var open *mastery.OpenInteractionError
 		if errors.As(err, &open) {
 			return &tool.Refusal{Note: fmt.Sprintf(
-				"这条路径上已经有一道题在等作答（%s，知识点 %s）：先把用户对它的回答交给 mastery_grade，"+
-					"或者跟用户说清楚这道题还开着，不要另出一题。",
-				open.Interaction.ID, open.Interaction.KnowledgePointID)}
+				"这条路径上已经有一道题在等作答（题目 %s，知识点 %s）：先把用户对它的回答交给 mastery_grade，"+
+					"question_id 就写 %s；或者跟用户说清楚这道题还开着，不要另出一题。",
+				open.Interaction.QuestionID, open.Interaction.KnowledgePointID,
+				open.Interaction.QuestionID)}
 		}
 		return &tool.Refusal{Note: "这条路径上已经有一道题在等作答：先把它判掉，再出下一题。"}
 	case errors.Is(err, mastery.ErrStaleState):
 		return &tool.Refusal{Note: "这条路径在你读之后被改过了。先调一次 mastery_state 读回现在的树和版本，再照着重来一遍。"}
+	// A question that closed unanswered is the ordinary reason a verdict finds
+	// nothing. It is not the model's mistake and not a broken tool: the path
+	// simply stopped waiting, and the next thing to do is ask again.
+	case errors.Is(err, mastery.ErrNoOpenQuestion):
+		return &tool.Refusal{Note: "这条路径现在没有等着判的题：之前那道题没人作答，已经超时自动关掉了，没有记证据。" +
+			"这次作答不算数，也不用再补判；直接出下一题就好。"}
 	case errors.Is(err, mastery.ErrNotFound):
 		return &tool.Refusal{Note: "没找到：" + err.Error() + "。" +
 			"知识点要用 mastery_state 里那条知识点的 id（kp_ 开头），路径要用 mp_ 开头的 id。"}
+	// The bank's "not there" is its own sentinel, and it reaches this switch from
+	// Grade's read of the question. Left to the default it would be reported as a
+	// fault and the model would be told the tool could not run, which is true of
+	// no id it could have written: what it needs to hear is which kind of id
+	// mastery_grade takes, because the one thing it has been shown nearby is the
+	// interaction id — and that is not a question.
+	case errors.Is(err, notebook.ErrNotFound):
+		return &tool.Refusal{Note: "题库里没有这道题：" + err.Error() + "。" +
+			"判卷的 question_id 要用题目的 id（qn_ 开头）：mastery_state 会列出正在等作答的那一道。" +
+			"min_ 开头的是交互 id，不能拿来判卷。"}
 	case errors.Is(err, mastery.ErrDuplicate):
 		return &tool.Refusal{Note: "这条记录已经写过了，不用再写一遍。"}
 	case errors.Is(err, mastery.ErrInvalidRequest):

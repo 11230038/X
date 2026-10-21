@@ -24,6 +24,8 @@ type kbStub struct {
 	bases     []kb.KnowledgeBase
 	documents []kb.Document
 	document  kb.Document
+	window    kb.Window
+	spans     []kb.ChunkSpan
 	retrieval kb.Retrieval
 	err       error
 
@@ -31,6 +33,9 @@ type kbStub struct {
 	createdDescription string
 	askedKBID          string
 	askedFileID        string
+	askedDocumentID    string
+	askedOffset        int64
+	askedLimit         int64
 	removed            string
 	rebuilt            string
 	searched           kb.RetrieveInput
@@ -69,6 +74,16 @@ func (s *kbStub) Document(_ context.Context, documentID string, caller authz.Cal
 	return s.document, s.err
 }
 
+func (s *kbStub) ReadWindow(_ context.Context, documentID string, offset, limit int64, caller authz.Caller) (kb.Window, error) {
+	s.askedDocumentID, s.askedOffset, s.askedLimit = documentID, offset, limit
+	return s.window, s.err
+}
+
+func (s *kbStub) ChunkSpans(_ context.Context, documentID string, caller authz.Caller) ([]kb.ChunkSpan, error) {
+	s.askedDocumentID = documentID
+	return s.spans, s.err
+}
+
 func (s *kbStub) AddDocument(_ context.Context, fileID, kbID string, caller authz.Caller) (kb.Document, error) {
 	s.askedFileID, s.askedKBID = fileID, kbID
 	return s.document, s.err
@@ -105,6 +120,7 @@ func newKBTestRouter(handler *KBHandler) *gin.Engine {
 	router.GET("/api/v1/knowledge-bases/:kbID", guarded, handler.Get)
 	router.DELETE("/api/v1/knowledge-bases/:kbID", guarded, handler.Delete)
 	router.POST("/api/v1/knowledge-bases/:kbID/documents", guarded, handler.AddDocument)
+	router.GET("/api/v1/knowledge-bases/:kbID/documents/:documentID/text", guarded, handler.DocumentText)
 	router.DELETE("/api/v1/knowledge-bases/:kbID/documents/:documentID", guarded, handler.RemoveDocument)
 	router.POST("/api/v1/knowledge-bases/:kbID/rebuild", guarded, handler.Rebuild)
 	router.POST("/api/v1/knowledge-bases/:kbID/search", guarded, handler.Search)

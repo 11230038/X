@@ -49,6 +49,43 @@
   white-space: pre-wrap;
 }
 
+/* 题目旁边的那一行：按钮靠右，失败说明贴着它，不往别处跑。 */
+.card__ask {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: -6px;
+}
+
+.card__ask-button {
+  font-size: 12px;
+}
+
+.card__ask-error {
+  flex: 1 1 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.card__ask-retry {
+  margin-left: 6px;
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 .card__prior {
   margin: 0;
   color: var(--text-faint);

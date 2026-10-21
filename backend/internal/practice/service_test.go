@@ -397,3 +397,51 @@ func TestTheAnswerIsWhatTheEventStores(t *testing.T) {
 	}
 	sameResponse(t, fromRecord, first)
 }
+
+// "I do not know" is a declaration rather than an answer, and it is recorded as
+// one: the question is marked wrong and scheduled like a wrong answer, with no
+// judging behind it. The model is what must not be asked — a subjective question
+// would otherwise spend a call to learn what the user just said, and the button
+// would stop working whenever the provider was down.
+func TestSayingIDoNotKnowIsRecordedAsWrongWithoutJudging(t *testing.T) {
+	harness := newHarness(t)
+	question := storeQuestion(t, harness.resource, "nbe_1", shortAnswerQuestion())
+
+	result := harness.submit(t, Review{RequestID: "rev_1", QuestionID: question.QuestionID,
+		Marker: MarkerNeedsReview})
+
+	if harness.provider.calls != 0 {
+		t.Fatalf("the model was asked %d times about an answer that was not given", harness.provider.calls)
+	}
+	if result.Judgment == nil {
+		t.Fatal("the submission was answered without a judgement, which is what a skip is")
+	}
+	if result.Judgment.Kind != KindSelfReport || result.Judgment.IsCorrect {
+		t.Errorf("the judgement is %q / correct = %v, want a self report of wrong",
+			result.Judgment.Kind, result.Judgment.IsCorrect)
+	}
+	if result.Entry.IsCorrect == nil || *result.Entry.IsCorrect {
+		t.Errorf("the answer face is correct = %v, want a recorded wrong answer", result.Entry.IsCorrect)
+	}
+	if result.Entry.Result != string(MarkerNeedsReview) {
+		t.Errorf("the answer face says %q, want the marker that was sent", result.Entry.Result)
+	}
+	if result.Entry.AttemptCount != 1 {
+		t.Errorf("the attempt count is %d, want this submission counted once", result.Entry.AttemptCount)
+	}
+	if !result.State.IsMistake || result.State.Lapses != 1 || result.State.ReviewCount != 1 {
+		t.Errorf("the state is mistake=%v lapses=%d reviews=%d, want a wrong answer's state",
+			result.State.IsMistake, result.State.Lapses, result.State.ReviewCount)
+	}
+
+	face := harness.faceOf(t, question.QuestionID)
+	if face.Result == nil || *face.Result != string(MarkerNeedsReview) {
+		t.Errorf("the stored face says %v, want the marker", face.Result)
+	}
+	if face.IsCorrect == nil || *face.IsCorrect {
+		t.Errorf("the stored face is correct = %v, want wrong", face.IsCorrect)
+	}
+	if face.AttemptCount == nil || *face.AttemptCount != 1 {
+		t.Errorf("the stored attempt count is %v, want 1", face.AttemptCount)
+	}
+}

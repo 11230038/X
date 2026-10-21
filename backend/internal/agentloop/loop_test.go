@@ -186,6 +186,100 @@ func TestRunAnswersWithoutTools(t *testing.T) {
 	}
 }
 
+// TestAnAnswerThatCallsNoToolIsHeldBackAndAskedAgain is the mastery failure this
+// option was added for: a model that narrates a tool call it never made. The
+// first answer is not streamed and not kept — the reader would take it as the
+// turn's result — and the model is told, at the end of the conversation, that it
+// must call something.
+func TestAnAnswerThatCallsNoToolIsHeldBackAndAskedAgain(t *testing.T) {
+	const nudge = "这一轮没有调用工具，重新回答。"
+	provider := &scriptedProvider{steps: []step{
+		{
+			deltas:   []llm.Delta{{Content: "题目已经存进题库了"}},
+			response: answer("题目已经存进题库了"),
+		},
+		{
+			deltas: []llm.Delta{{Content: "先读状态"}},
+			response: llm.Response{
+				Content:      "先读状态",
+				ToolCalls:    []llm.ToolCall{{ID: "call_1", Name: "state", Arguments: "{}"}},
+				FinishReason: "tool_calls",
+				Usage:        llm.Usage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12},
+			},
+		},
+		{
+			deltas:   []llm.Delta{{Content: "好了"}},
+			response: answer("好了"),
+		},
+	}}
+	tool := &stubTool{name: "state", result: tool.Result{Success: true, Content: "ok"}}
+	emitter := &recordingEmitter{}
+	logger := slog.New(slog.NewTextHandler(&strings.Builder{}, nil))
+	loop := New(provider, emitter, newPlane(tool), logger, "mastery_path")
+
+	request := basicRequest()
+	request.NudgeWithoutToolCall = nudge
+	result, err := loop.Run(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if len(provider.requests) != 3 {
+		t.Fatalf("the model was called %d times, want the discarded answer plus two rounds", len(provider.requests))
+	}
+	// The note is the last thing the model reads, which is where a model follows
+	// instructions from.
+	second := provider.requests[1].Messages
+	if last := second[len(second)-1]; last.Role != llm.RoleSystem || last.Content != nudge {
+		t.Errorf("the second call ends with %+v, want the nudge", last)
+	}
+	// The discarded attempt leaves no trace in the answer or in the stream.
+	if result.Content != "先读状态好了" {
+		t.Errorf("Content = %q, want the answer after the nudge", result.Content)
+	}
+	contents := emitter.ofType(event.TypeContent)
+	if len(contents) != 2 || contents[0].Content != "先读状态" || contents[1].Content != "好了" {
+		t.Errorf("published content = %v, want only what came after the nudge", contents)
+	}
+	if tool.calls != 1 {
+		t.Errorf("the tool ran %d times, want once", tool.calls)
+	}
+	// The discarded call's tokens were still spent, so they are still counted.
+	if result.Rounds != 3 || result.Usage.TotalTokens != 36 {
+		t.Errorf("Rounds = %d, Usage = %+v, want three calls and their full cost", result.Rounds, result.Usage)
+	}
+}
+
+// TestTheNudgeIsGivenOnlyOnce keeps the guard from becoming a loop: a model that
+// answers without tools twice is allowed to finish, because asking a third time
+// cannot make it act.
+func TestTheNudgeIsGivenOnlyOnce(t *testing.T) {
+	provider := &scriptedProvider{steps: []step{
+		{deltas: []llm.Delta{{Content: "第一次"}}, response: answer("第一次")},
+		{deltas: []llm.Delta{{Content: "第二次"}}, response: answer("第二次")},
+	}}
+	emitter := &recordingEmitter{}
+	logger := slog.New(slog.NewTextHandler(&strings.Builder{}, nil))
+	loop := New(provider, emitter, newPlane(), logger, "mastery_path")
+
+	request := basicRequest()
+	request.NudgeWithoutToolCall = "这一轮没有调用工具，重新回答。"
+	result, err := loop.Run(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(provider.requests) != 2 {
+		t.Errorf("the model was called %d times, want exactly one nudge", len(provider.requests))
+	}
+	if result.Content != "第二次" {
+		t.Errorf("Content = %q", result.Content)
+	}
+	contents := emitter.ofType(event.TypeContent)
+	if len(contents) != 1 || contents[0].Content != "第二次" {
+		t.Errorf("published content = %v, want only the answer after the nudge", contents)
+	}
+}
+
 func TestRunReportsReasoningAsThinking(t *testing.T) {
 	provider := &scriptedProvider{steps: []step{{
 		deltas:   []llm.Delta{{Reasoning: "先想一想"}, {Content: "答案"}},

@@ -190,7 +190,7 @@ function canCreate(): boolean {
 }
 
 function goChat(): void {
-  void router.push({ name: 'chat' })
+  void router.push({ name: 'mastery-chat' })
 }
 
 function goPractice(): void {

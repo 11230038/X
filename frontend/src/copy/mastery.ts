@@ -10,9 +10,44 @@ export const MASTERY = {
   pathsFailed: '路径列表没能读出来',
   noPath: '选一条路径',
   noPathHint: '左边选一条路径，这里会显示知识点、证据与下一步。',
-  goChat: '去对话新建',
-  goChatHint: '在对话里说明想学什么，使用 mastery_path 能力生成一条路径。',
-  capabilityMissing: '当前能力清单里没有 mastery_path，暂时不能在对话里生成新路径。',
+  goChat: '去路径对话新建',
+  goChatHint: '在路径对话里说明想学什么，使用 mastery_path 能力生成一条路径。',
+  capabilityMissing: '当前能力清单里没有 mastery_path，暂时不能在路径对话里生成新路径。',
+
+  /** 路径对话页（挂在掌握路径下）。 */
+  chatTitle: '掌握路径对话',
+  chatLead: '说说你想学什么。这一页只跑掌握路径：把内容拆成知识点，出题判卷，按证据推进。',
+  chatPrompts: [
+    '我想系统学离散数学',
+    '帮我梳理线性代数的知识地图',
+    '沿着上次的掌握路径继续',
+  ],
+  chatHint: '第一次发送会新建一条路径对话；想接着上次的路径，直接说「继续」。',
+  chatPlaceholder: '说说想学什么，或者接着当前路径继续…',
+  chatListTitle: '路径对话',
+  chatListEmptyAction: '开始一段路径对话',
+  chatNewLabel: '新建对话',
+  chatEmptySession: '这段路径对话还没有消息',
+  chatEmptySessionHint: '说明想学什么，或者接着当前路径继续。',
+  chatEmptySessionAction: '回到首页',
+
+  /** 出题弹窗。模型用 mastery_question 出题后，题目抬到眼前作答。 */
+  questionTitle: '做一道题',
+  questionChoiceHint: '选好后提交；题目要求多选时，可以选多个。',
+  questionInputPlaceholder: '写下你的答案',
+  questionShortPlaceholder: '写下你的作答，可以分几行',
+  questionOffline: '连接没就绪，暂时不能提交；连上之后再作答。',
+  questionSubmit: '提交答案',
+  questionLater: '稍后作答',
+  questionReopen: '继续作答',
+  /** 出题调用成功，题目刚落进题库。 */
+  questionBankSaved: '这道题已存进题库。',
+  /** 调用失败，但按题干在题库里核对到了同一道题。 */
+  questionBankFound: '题库里已有这道题。',
+  /** 调用失败，题库里也找不到；题面仍可作答。 */
+  questionBankMissing: '这道题没能存进题库，暂时没有可判卷的记录；你仍然可以作答。',
+  /** 核对请求本身失败，不对题库下结论。 */
+  questionBankUnknown: '没能确认题库里是否已有这道题；你仍然可以作答。',
 
   goal: '目标',
   status: '状态',
@@ -55,7 +90,7 @@ export const MASTERY = {
   nextEvidenceMissing: (id: string) => `证据 ${id}（未随这次结果返回）`,
   nextNoEvidence: '这一步没有附证据。',
   nextGoPractice: '去练习',
-  nextGoChat: '去对话',
+  nextGoChat: '去路径对话',
 
   evidenceTitle: '证据',
   evidenceEmpty: '这条路径还没有证据',

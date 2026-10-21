@@ -85,9 +85,9 @@ func TestSaveQuestionArgumentsThatAreNotAQuestionAreMalformedCalls(t *testing.T)
 	// answer a missing label: an error, which the loop reports as a failed call.
 	for _, arguments := range []string{
 		`[]`,
-		`{"question": 1, "question_type": "short_answer", "correct_answer": "不减。", "explanation": "按定义。"}`,
-		`{"question": "什么是单调函数？", "question_type": "short_answer", "correct_answer": {"text": "不减。"}, "explanation": "按定义。"}`,
-		`{"question": "什么是单调函数？", "question_type": "short_answer", "correct_answer": "不减。", "explanation": "按定义。", "options": ["A", "B"]}`,
+		`{"question": 1, "question_type": "fill_blank", "correct_answer": "不减。", "explanation": "按定义。"}`,
+		`{"question": "什么是单调函数？", "question_type": "fill_blank", "correct_answer": {"text": "不减。"}, "explanation": "按定义。"}`,
+		`{"question": "什么是单调函数？", "question_type": "fill_blank", "correct_answer": "不减。", "explanation": "按定义。", "options": ["A", "B"]}`,
 	} {
 		if _, err := NewSaveQuestionTool(&stubQuestionBank{}).Invoke(context.Background(), call(t, arguments)); err == nil {
 			t.Errorf("Invoke(%s) error = nil, want a malformed-call error", arguments)
@@ -97,7 +97,7 @@ func TestSaveQuestionArgumentsThatAreNotAQuestionAreMalformedCalls(t *testing.T)
 
 func TestASaveFailureThatIsNotARefusalStaysAFailure(t *testing.T) {
 	broken := &stubQuestionBank{err: errors.New("the database stopped answering")}
-	result, err := NewSaveQuestionTool(broken).Invoke(context.Background(), call(t, `{"question": "什么是单调函数？", "question_type": "short_answer", "correct_answer": "不减。", "explanation": "按定义。"}`))
+	result, err := NewSaveQuestionTool(broken).Invoke(context.Background(), call(t, `{"question": "什么是单调函数？", "question_type": "fill_blank", "correct_answer": "不减。", "explanation": "按定义。"}`))
 	if err == nil {
 		t.Fatalf("Invoke() = %+v, want the failure to stay one", result)
 	}
@@ -145,10 +145,15 @@ func TestTheDefinitionIsTheOnlyPlaceTheStorageConventionsAreTold(t *testing.T) {
 	if len(schema.Properties) != 9 {
 		t.Errorf("the schema declares %d properties, want the 9 the tool reads", len(schema.Properties))
 	}
-	for _, want := range []string{"choice", "fill_blank", "short_answer"} {
+	for _, want := range []string{"choice", "fill_blank"} {
 		if !contains(schema.Properties["question_type"].Enum, want) {
 			t.Errorf("question_type does not offer %q: %v", want, schema.Properties["question_type"].Enum)
 		}
+	}
+	// 主观题 is paused (product decision, 2026-10-20): the bank still stores and
+	// judges those rows, but the schema must not invite a model to write one.
+	if contains(schema.Properties["question_type"].Enum, "short_answer") {
+		t.Errorf("question_type still offers short_answer: %v", schema.Properties["question_type"].Enum)
 	}
 	for _, want := range []string{"easy", "medium", "hard"} {
 		if !contains(schema.Properties["difficulty"].Enum, want) {

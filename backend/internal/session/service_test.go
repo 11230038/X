@@ -21,7 +21,7 @@ func TestNewServiceNeedsARepository(t *testing.T) {
 func TestCreateStartsAnUntitledSession(t *testing.T) {
 	service, repository := newTestService(t)
 
-	created, err := service.Create(context.Background(), testCaller())
+	created, err := service.Create(context.Background(), testCaller(), KindChat)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -40,19 +40,104 @@ func TestCreateStartsAnUntitledSession(t *testing.T) {
 	if created.Deleted() {
 		t.Error("a new session is already in the recycle bin")
 	}
+	if created.Kind != KindChat {
+		t.Errorf("Kind = %q, want chat", created.Kind)
+	}
 	if _, stored := repository.sessions[created.ID]; !stored {
 		t.Error("the session was returned without being stored")
+	}
+}
+
+func TestCreateNormalizesAnUnnamedKindToChat(t *testing.T) {
+	service, repository := newTestService(t)
+
+	created, err := service.Create(context.Background(), testCaller(), "")
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if created.Kind != KindChat {
+		t.Errorf("Kind = %q, want chat", created.Kind)
+	}
+	// The repository sees the normalized value, not the empty string: workspace
+	// import calls storage directly and cannot rely on the column default.
+	if stored := repository.sessions[created.ID]; stored.Kind != KindChat {
+		t.Errorf("stored Kind = %q, want chat", stored.Kind)
+	}
+}
+
+func TestCreateKeepsTheWritingPartition(t *testing.T) {
+	service, repository := newTestService(t)
+
+	created, err := service.Create(context.Background(), testCaller(), KindWriting)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if created.Kind != KindWriting {
+		t.Errorf("Kind = %q, want writing", created.Kind)
+	}
+	if stored := repository.sessions[created.ID]; stored.Kind != KindWriting {
+		t.Errorf("stored Kind = %q, want writing", stored.Kind)
+	}
+}
+
+func TestCreateKeepsTheMasteryPartition(t *testing.T) {
+	service, repository := newTestService(t)
+
+	created, err := service.Create(context.Background(), testCaller(), KindMastery)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if created.Kind != KindMastery {
+		t.Errorf("Kind = %q, want mastery", created.Kind)
+	}
+	if stored := repository.sessions[created.ID]; stored.Kind != KindMastery {
+		t.Errorf("stored Kind = %q, want mastery", stored.Kind)
+	}
+}
+
+func TestCreateKeepsTheQuestionBankPartition(t *testing.T) {
+	service, repository := newTestService(t)
+
+	created, err := service.Create(context.Background(), testCaller(), KindQuestionBank)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if created.Kind != KindQuestionBank {
+		t.Errorf("Kind = %q, want question_bank", created.Kind)
+	}
+	if stored := repository.sessions[created.ID]; stored.Kind != KindQuestionBank {
+		t.Errorf("stored Kind = %q, want question_bank", stored.Kind)
+	}
+}
+
+func TestCreateRefusesAKindItDoesNotKnow(t *testing.T) {
+	service, repository := newTestService(t)
+
+	if _, err := service.Create(context.Background(), testCaller(), Kind("diary")); !errors.Is(err, ErrInvalidKind) {
+		t.Fatalf("Create(diary) error = %v, want ErrInvalidKind", err)
+	}
+	if len(repository.sessions) != 0 {
+		t.Errorf("a session was stored for an unknown kind: %+v", repository.sessions)
+	}
+}
+
+func TestListRefusesAKindItDoesNotKnow(t *testing.T) {
+	service, _ := newTestService(t)
+
+	_, err := service.List(context.Background(), ListOptions{Caller: testCaller(), Kind: Kind("diary")})
+	if !errors.Is(err, ErrInvalidKind) {
+		t.Errorf("List(diary) error = %v, want ErrInvalidKind", err)
 	}
 }
 
 func TestCreateGivesEachSessionItsOwnID(t *testing.T) {
 	service, _ := newTestService(t)
 
-	first, err := service.Create(context.Background(), testCaller())
+	first, err := service.Create(context.Background(), testCaller(), KindChat)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	second, err := service.Create(context.Background(), testCaller())
+	second, err := service.Create(context.Background(), testCaller(), KindChat)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -322,7 +407,7 @@ func TestStorageFailuresReachTheCaller(t *testing.T) {
 	}
 
 	calls := map[string]func() error{
-		"Create": func() error { _, err := service.Create(context.Background(), testCaller()); return err },
+		"Create": func() error { _, err := service.Create(context.Background(), testCaller(), KindChat); return err },
 		"List": func() error {
 			_, err := service.List(context.Background(), ListOptions{Caller: testCaller()})
 			return err

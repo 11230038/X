@@ -29,6 +29,10 @@ type sessionStub struct {
 	touched  []string
 	claims   []string
 	callName string
+	// createdKinds records the partition the handler asked for. The zero value of
+	// session.ListOptions is chat, but a create always names its kind explicitly,
+	// so the handler cannot silently create the wrong one.
+	createdKinds []session.Kind
 	// account is the account the last call was made for. Every method here takes
 	// one, and the point of recording it is that the handler has to have taken it
 	// from the token rather than from anything in the request.
@@ -40,8 +44,9 @@ type renameCall struct {
 	title     string
 }
 
-func (s *sessionStub) Create(_ context.Context, caller authz.Caller) (session.Session, error) {
+func (s *sessionStub) Create(_ context.Context, caller authz.Caller, kind session.Kind) (session.Session, error) {
 	s.account = caller
+	s.createdKinds = append(s.createdKinds, kind)
 	return s.record, s.err
 }
 
@@ -89,6 +94,7 @@ func sampleSession() session.Session {
 	return session.Session{
 		ID:        "sess_1",
 		Title:     "闭包是什么",
+		Kind:      session.KindChat,
 		CreatedAt: handlerSessionTime,
 		UpdatedAt: handlerSessionTime,
 	}

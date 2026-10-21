@@ -22,6 +22,7 @@ import {
 } from '../../../api/workspace'
 import PartialBanner from '../../../components/common/PartialBanner.vue'
 import SkeletonBlock from '../../../components/common/SkeletonBlock.vue'
+import { CHAT } from '../../../copy/chat'
 import { SETTINGS } from '../../../copy/settings'
 import { formatDateTime, truncate } from '../../../shared/format'
 import { toFailure } from '../../../shared/resource'
@@ -70,11 +71,23 @@ async function loadSessions(): Promise<void> {
   sessionsState.value = 'loading'
   sessionsFailure.value = null
   try {
-    const result = await listSessions({ limit: 50 })
+    // 导出要的是全部会话：缺省的 `chat` 会把写作和路径会话漏掉。
+    const result = await listSessions({ kind: 'all', limit: 50 })
     sessions.value = result.sessions.map((session) => ({
       ref: { kind: 'session', id: session.session_id },
       label: session.title || session.session_id,
-      meta: session.updated_at ? formatDateTime(session.updated_at) : '',
+      meta: [
+        session.kind === 'writing'
+          ? CHAT.kindWriting
+          : session.kind === 'mastery'
+            ? CHAT.kindMastery
+            : session.kind === 'question_bank'
+              ? CHAT.kindQuestionBank
+              : '',
+        session.updated_at ? formatDateTime(session.updated_at) : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
     }))
     sessionsState.value = 'ready'
   } catch (cause) {

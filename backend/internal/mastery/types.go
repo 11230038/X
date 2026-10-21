@@ -141,6 +141,10 @@ const (
 	EventInteractionAnswered EventType = "interaction.answered"
 	// EventInteractionSkipped is the learner declining it.
 	EventInteractionSkipped EventType = "interaction.skipped"
+	// EventInteractionExpired is the question closing unanswered after its ttl.
+	// It is not a verdict: no evidence is written, and the log says only that
+	// the path stopped waiting.
+	EventInteractionExpired EventType = "interaction.expired"
 	// EventPathSwitched is a turn moving to a different path.
 	EventPathSwitched EventType = "path.switched"
 )

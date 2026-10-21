@@ -56,6 +56,20 @@ type Request struct {
 	MaxRounds int
 	// ContextBudgetTokens bounds the conversation sent in one call.
 	ContextBudgetTokens int
+	// NudgeWithoutToolCall, when set, is what the run says to a model that tries
+	// to finish before calling any tool.
+	//
+	// It is for capabilities whose actions only exist as tool calls: a mastery
+	// turn that "stores a question" in prose has stored nothing, and the learner
+	// is left waiting for a popup that can never come. Such an answer is held
+	// back — neither published nor counted as the run's content — and the model
+	// is given one more round with this note. The note is sent at the end of the
+	// conversation, where the most recent instruction is the one a model follows.
+	//
+	// One nudge, not a loop: a model that ignores it twice is allowed to finish,
+	// because repeating the call cannot make it obey and would spend the turn's
+	// remaining rounds on nothing.
+	NudgeWithoutToolCall string
 }
 
 // Result is what a run produced.
@@ -103,6 +117,8 @@ func (l *Loop) Run(ctx context.Context, req Request) (Result, error) {
 
 	messages := req.Messages
 	var result Result
+	calls := 0
+	nudged := false
 	for round := 1; round <= req.MaxRounds; round++ {
 		// Cancellation is checked before every model call and every dispatch, so
 		// a cancelled turn stops calling out even if it was already mid-loop.
@@ -110,19 +126,55 @@ func (l *Loop) Run(ctx context.Context, req Request) (Result, error) {
 			return Result{}, err
 		}
 
+		// Until the run has called a tool, a run with a nudge holds its deltas:
+		// if the model answers without acting, that answer is discarded rather
+		// than streamed to a reader who would take it as the turn's result.
+		holding := req.NudgeWithoutToolCall != "" && !nudged && calls == 0
+		var held []llm.Delta
+		stream := l.onDelta(ctx, req)
+		if holding {
+			stream = func(delta llm.Delta) error {
+				held = append(held, delta)
+				return nil
+			}
+		}
+
 		messages = Trim(messages, req.ContextBudgetTokens)
-		response, err := l.provider.Stream(ctx, l.modelRequest(req, messages), l.onDelta(ctx, req))
+		response, err := l.provider.Stream(ctx, l.modelRequest(req, messages), stream)
 		if err != nil {
 			return Result{}, err
 		}
 
 		result.Usage = addUsage(result.Usage, response.Usage)
-		result.Content += response.Content
 		result.Rounds = round
+
+		if holding && len(response.ToolCalls) == 0 && round < req.MaxRounds {
+			// The model tried to end the turn without touching anything. Its
+			// prose is not the run's answer and is not kept in the conversation:
+			// showing it its own speculation is what would make the next attempt
+			// a rewrite of that speculation rather than new work.
+			nudged = true
+			messages = append(messages, llm.Message{
+				Role:    llm.RoleSystem,
+				Content: req.NudgeWithoutToolCall,
+			})
+			continue
+		}
+
+		result.Content += response.Content
+		if holding {
+			// Either a tool call followed the preamble, or this was the last
+			// round and the held answer is all there is. Publish it now, in the
+			// order it arrived, so the stream still reads as the model wrote it.
+			if err := l.publishHeld(ctx, req, held); err != nil {
+				return Result{}, err
+			}
+		}
 
 		if len(response.ToolCalls) == 0 {
 			return result, nil
 		}
+		calls++
 
 		messages = append(messages, assistantMessage(response))
 		for _, call := range response.ToolCalls {
@@ -137,6 +189,33 @@ func (l *Loop) Run(ctx context.Context, req Request) (Result, error) {
 		}
 	}
 	return Result{}, ErrRoundsExhausted
+}
+
+// publishHeld sends buffered deltas in the order they arrived, with the same
+// mapping onDelta uses.
+func (l *Loop) publishHeld(ctx context.Context, req Request, held []llm.Delta) error {
+	for _, delta := range held {
+		if delta.Reasoning != "" {
+			if err := l.publish(ctx, event.Event{
+				Stage:   req.Stage,
+				Type:    event.TypeThinking,
+				Content: delta.Reasoning,
+			}); err != nil {
+				return err
+			}
+		}
+		if delta.Content == "" {
+			continue
+		}
+		if err := l.publish(ctx, event.Event{
+			Stage:   req.Stage,
+			Type:    event.TypeContent,
+			Content: delta.Content,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (l *Loop) modelRequest(req Request, messages []llm.Message) llm.Request {

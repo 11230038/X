@@ -5,11 +5,11 @@ import (
 	"time"
 )
 
-// MasteryConfig holds the three knobs a mastery path has, and there are three
+// MasteryConfig holds the four knobs a mastery path has, and there are four
 // because everything else about a path is an algorithm rather than a setting
 // (§5, V3 §5's rule): how many right answers promote a point, what a level means
-// with little evidence, and how long a claim stands are the questions whose
-// answers are genuinely choices.
+// with little evidence, how long a claim stands, and how long a question may
+// wait are the questions whose answers are genuinely choices.
 //
 // How many paths a person may hold at once used to be a fourth. It is gone
 // rather than answered: the key was required, validated and wired, and it
@@ -29,6 +29,11 @@ type MasteryConfig struct {
 	// still working on, too long and a turn that died holds it while a user
 	// waits.
 	LeaseTTL time.Duration
+	// QuestionTTL is how long one question may stay open on a path. A path
+	// allows one open question, so an abandoned one blocks every question after
+	// it until this runs out; it is the bound that keeps a learner walking away
+	// from costing the rest of the path.
+	QuestionTTL time.Duration
 	// GateConsecutive is how many right answers in a row promote a knowledge
 	// point to mastered.
 	GateConsecutive int
@@ -47,6 +52,9 @@ type MasteryConfig struct {
 func (c MasteryConfig) Validate() error {
 	if c.LeaseTTL <= 0 {
 		return fmt.Errorf("MASTERY_LEASE_TTL must be a positive duration")
+	}
+	if c.QuestionTTL <= 0 {
+		return fmt.Errorf("MASTERY_QUESTION_TTL must be a positive duration")
 	}
 	for _, field := range []struct {
 		key   string
@@ -67,6 +75,10 @@ func loadMasteryConfig(values map[string]string) (MasteryConfig, error) {
 	if err != nil {
 		return MasteryConfig{}, err
 	}
+	questionTTL, err := parsePositiveDuration(values, "MASTERY_QUESTION_TTL")
+	if err != nil {
+		return MasteryConfig{}, err
+	}
 	gateConsecutive, err := parsePositiveInt(values, "MASTERY_GATE_CONSECUTIVE")
 	if err != nil {
 		return MasteryConfig{}, err
@@ -77,6 +89,7 @@ func loadMasteryConfig(values map[string]string) (MasteryConfig, error) {
 	}
 	return MasteryConfig{
 		LeaseTTL:        leaseTTL,
+		QuestionTTL:     questionTTL,
 		GateConsecutive: gateConsecutive,
 		GateMinEvidence: gateMinEvidence,
 	}, nil

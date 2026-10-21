@@ -232,7 +232,10 @@ func (r *Runner) route(ctx context.Context, content string) (Routing, bool) {
 // would be a stream the client subscribed to that could only report the problem.
 func (r *Runner) conversation(ctx context.Context, sessionID string, caller authz.Caller) (session.Session, error) {
 	if sessionID == "" {
-		return r.sessions.Create(ctx, caller)
+		// An implicit session is a chat session: the writing page creates its
+		// session explicitly so it can name the kind, and a client that sends
+		// no id at all is the old chat protocol.
+		return r.sessions.Create(ctx, caller, session.KindChat)
 	}
 	return r.sessions.Get(ctx, sessionID, caller)
 }

@@ -1,9 +1,10 @@
 /**
  * 练习与复习。
  *
- * 判分有**两种性质**，界面必须分开说：`objective` 是判定结果，
- * `model_judgment` 是"AI 的判断"，带置信度、评分标准与边界。把后者画成客观
- * 对错是在制造一个不存在的权威。
+ * 判分有**三种性质**，界面必须分开说：`objective` 是判定结果，
+ * `model_judgment` 是"AI 的判断"，带置信度、评分标准与边界；`self_report`
+ * 是作答者自己声明不会——没有比对、也没有模型，把它画成前两者中的任何一个
+ * 都是在替它说话。把 AI 判断画成客观对错同样是在制造一个不存在的权威。
  *
  * 判分失败（503 `judge_unavailable` / 422 `question_not_judgeable`）不是判分
  * 结果：作答要保留，`request_id` 要保留，重试原样复用。
@@ -43,7 +44,8 @@ export interface ReviewState {
 }
 
 export interface Judgment {
-  kind: 'objective' | 'model_judgment'
+  /** `self_report` 是作答者说"我不会"，没有比对也没有模型。 */
+  kind: 'objective' | 'model_judgment' | 'self_report'
   is_correct: boolean
   reason: string
   rubric: string[]

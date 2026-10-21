@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestDBAPathCarriesOneOpenQuestionAtATime(t *testing.T) {
@@ -226,11 +227,14 @@ func TestDBAVerdictThatLosesTheCloseRaceIsNotASecondObservation(t *testing.T) {
 	}
 
 	// The same refusal one level up: with nothing open, a verdict has no question to
-	// attach to and says so rather than inventing one.
+	// attach to and says so rather than inventing one. It is the "no question
+	// waiting" sentence rather than "not found", because the ordinary cause is a
+	// question that closed when its time ran out, and the caller's next move is to
+	// ask again.
 	if _, err := h.service.Grade(ctx, GradeRequest{
 		PathID: "mp_1", Actor: actor, QuestionID: "qn_1", Result: ResultCorrect,
-	}, h.caller); !errors.Is(err, ErrNotFound) {
-		t.Errorf("grading with nothing open: %v, want %v", err, ErrNotFound)
+	}, h.caller); !errors.Is(err, ErrNoOpenQuestion) {
+		t.Errorf("grading with nothing open: %v, want %v", err, ErrNoOpenQuestion)
 	}
 }
 
@@ -445,5 +449,190 @@ func TestDBAQuestionRowThatSaysNothingAboutWhatWasAskedIsRefused(t *testing.T) {
 	}
 	if _, err := h.repository.ActiveInteraction(context.Background(), "mp_1", h.caller); !errors.Is(err, ErrNotFound) {
 		t.Errorf("reading the open question of a path that has none: %v, want %v", err, ErrNotFound)
+	}
+}
+
+// TestDBTheStateReadCarriesTheQuestionThatIsWaiting is the read a model makes
+// before it does anything else on a path.
+//
+// While a question is open, every new one is refused and mastery_grade is the
+// only way forward — keyed by the question id, which is nowhere in the tree. So
+// the state has to carry it: without it the model is told a question waits and
+// given no way to answer it, and the path stays blocked until the learner
+// abandons the conversation.
+func TestDBTheStateReadCarriesTheQuestionThatIsWaiting(t *testing.T) {
+	h := newHarness(t)
+	actor := h.conversation(t, "s_1", "t_1")
+	h.create(t, "mp_1", "学会闭包", actor)
+	ctx := context.Background()
+
+	view, err := h.service.Load(ctx, "mp_1", h.caller)
+	if err != nil {
+		t.Fatalf("load a path with nothing waiting: %v", err)
+	}
+	if view.Open != nil {
+		t.Errorf("a path nobody is being asked about reports %+v open", view.Open)
+	}
+
+	asked, err := h.service.Ask(ctx, AskRequest{
+		PathID: "mp_1", Actor: actor, KnowledgePointID: "kp_capture", QuestionID: "qn_1",
+	}, h.caller)
+	if err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	view, err = h.service.Load(ctx, "mp_1", h.caller)
+	if err != nil {
+		t.Fatalf("load a path with a question waiting: %v", err)
+	}
+	if view.Open == nil {
+		t.Fatal("the state does not carry the open question")
+	}
+	if view.Open.ID != asked.ID || view.Open.QuestionID != "qn_1" ||
+		view.Open.KnowledgePointID != "kp_capture" {
+		t.Errorf("the state carries %+v, want the question that was asked", view.Open)
+	}
+
+	// Closed by a verdict, and the state stops reporting it. A read that kept
+	// showing it would send the next turn to grade a question that is answered.
+	if _, err := h.service.Grade(ctx, GradeRequest{
+		PathID: "mp_1", Actor: actor, QuestionID: "qn_1", UserAnswer: "变量",
+		Result: ResultCorrect, AssessmentType: "comparison", Detail: []byte(`{"matched":"变量"}`),
+	}, h.caller); err != nil {
+		t.Fatalf("grade: %v", err)
+	}
+	view, err = h.service.Load(ctx, "mp_1", h.caller)
+	if err != nil {
+		t.Fatalf("load after the answer: %v", err)
+	}
+	if view.Open != nil {
+		t.Errorf("an answered question is still reported as waiting: %+v", view.Open)
+	}
+}
+
+// TestDBAnAbandonedQuestionClosesWhenItsTimeIsUp is the bound on "one open
+// question per path". Without it a learner who walks away leaves a question that
+// refuses every question after it, for as long as the path exists — the state
+// the product actually reached, where the only way out was to answer a question
+// the learner was no longer looking at.
+//
+// The close is lazy, like the lease's expiry: nothing runs on a timer, and the
+// question ends the next time something needs the path. It is a real close and
+// not a row a reader skips, because "one open question" is a unique key over the
+// open rows — an expired row that was merely ignored would still refuse the
+// next insert.
+func TestDBAnAbandonedQuestionClosesWhenItsTimeIsUp(t *testing.T) {
+	h := newHarness(t)
+	actor := h.conversation(t, "s_1", "t_1")
+	h.create(t, "mp_1", "学会闭包", actor)
+	ctx := context.Background()
+
+	abandoned, err := h.service.Ask(ctx, AskRequest{
+		PathID: "mp_1", Actor: actor, KnowledgePointID: "kp_capture", QuestionID: "qn_1",
+	}, h.caller)
+	if err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+
+	// The harness's question ttl is one hour, and the clock is the only thing
+	// this case has to move.
+	h.clock.advance(time.Hour + time.Second)
+
+	// The state stops reporting it, because no verdict will be accepted on it.
+	view, err := h.service.Load(ctx, "mp_1", h.caller)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if view.Open != nil {
+		t.Errorf("a question past its ttl is still reported as waiting: %+v", view.Open)
+	}
+
+	// And the next question is accepted, which is the point of the change: the
+	// path must not be blocked by a question nobody is going to answer.
+	next, err := h.service.Ask(ctx, AskRequest{
+		PathID: "mp_1", Actor: actor, KnowledgePointID: "kp_loop", QuestionID: "qn_2",
+	}, h.caller)
+	if err != nil {
+		t.Fatalf("the path is still blocked by the abandoned question: %v", err)
+	}
+	if next.QuestionID != "qn_2" {
+		t.Errorf("the open question is %+v, want the one just asked", next)
+	}
+
+	// How the abandoned one ended is written where the endings go, and it is not
+	// a verdict: the learner never answered, and the row says so instead of
+	// carrying an empty result that would read as a wrong answer.
+	var closed struct {
+		Result     *string `gorm:"column:result_json"`
+		UserAnswer *string `gorm:"column:user_answer"`
+	}
+	if err := h.resource.GORM().Raw("SELECT result_json, user_answer FROM mastery_interactions "+
+		"WHERE interaction_id = ?", abandoned.ID).Scan(&closed).Error; err != nil {
+		t.Fatalf("read the closed interaction: %v", err)
+	}
+	var outcome struct {
+		Expired bool `json:"expired"`
+	}
+	if closed.Result == nil {
+		t.Fatal("the abandoned question is still open")
+	}
+	if err := json.Unmarshal([]byte(*closed.Result), &outcome); err != nil || !outcome.Expired {
+		t.Errorf("the abandoned question closed as %s, want an expiry", *closed.Result)
+	}
+	if closed.UserAnswer != nil {
+		t.Errorf("the abandoned question holds the answer %q", *closed.UserAnswer)
+	}
+
+	// The history has its own kind of ending for it, so that "closed unanswered"
+	// is a fact in the log and not only in the outcome column.
+	var expired int64
+	if err := h.resource.GORM().Raw("SELECT COUNT(*) FROM mastery_events WHERE event_type = ?",
+		string(EventInteractionExpired)).Scan(&expired).Error; err != nil {
+		t.Fatalf("count the expiry events: %v", err)
+	}
+	if expired != 1 {
+		t.Errorf("%d expiry events are stored, want one", expired)
+	}
+}
+
+// TestDBAnAnswerAfterTheQuestionClosedIsRefusedAsClosed is the late answer: the
+// learner comes back after the ttl and writes what they would have written.
+//
+// It closes the question and records nothing. Evidence is about what the learner
+// knows, and an answer nobody asked for and nobody waited for is not an
+// observation of that — marking it right or wrong would move a level on the
+// strength of a question that was already over. What the caller gets back is a
+// sentence saying the question closed, because the model's next move is to ask
+// again.
+func TestDBAnAnswerAfterTheQuestionClosedIsRefusedAsClosed(t *testing.T) {
+	h := newHarness(t)
+	actor := h.conversation(t, "s_1", "t_1")
+	h.create(t, "mp_1", "学会闭包", actor)
+	ctx := context.Background()
+
+	if _, err := h.service.Ask(ctx, AskRequest{
+		PathID: "mp_1", Actor: actor, KnowledgePointID: "kp_capture", QuestionID: "qn_1",
+	}, h.caller); err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	h.clock.advance(time.Hour + time.Second)
+
+	_, err := h.service.Grade(ctx, GradeRequest{
+		PathID: "mp_1", Actor: actor, QuestionID: "qn_1", UserAnswer: "变量",
+		Result: ResultCorrect, AssessmentType: "comparison", Detail: []byte(`{"matched":"变量"}`),
+	}, h.caller)
+	if !errors.Is(err, ErrNoOpenQuestion) {
+		t.Fatalf("grading a closed question: %v, want %v", err, ErrNoOpenQuestion)
+	}
+	if got := h.countRows(t, "mastery_learning_evidences"); got != 0 {
+		t.Errorf("%d evidence rows were written for an answer nobody waited for", got)
+	}
+
+	// The refusal still settles the path: the close happened before the verdict
+	// was refused, so the next question is allowed rather than refused by a row
+	// that had already timed out.
+	if _, err := h.service.Ask(ctx, AskRequest{
+		PathID: "mp_1", Actor: actor, KnowledgePointID: "kp_loop", QuestionID: "qn_2",
+	}, h.caller); err != nil {
+		t.Errorf("the path is still blocked after a late answer: %v", err)
 	}
 }

@@ -16,17 +16,33 @@ import { CHAT } from '../../copy/chat'
 import ListPane from '../shell/ListPane.vue'
 import { sessionLabel } from './session-label'
 
-const props = defineProps<{
-  sessions: readonly SessionSummary[]
-  loading: boolean
-  /** 列表本身没载进来时的那句话。整栏的错误，不是某一行的。 */
-  error: string | null
-  /** 当前打开的那个会话。 */
-  activeId?: string | null
-  /** 还有下一页。 */
-  hasMore?: boolean
-  loadingMore?: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    sessions: readonly SessionSummary[]
+    loading: boolean
+    /** 列表本身没载进来时的那句话。整栏的错误，不是某一行的。 */
+    error: string | null
+    /** 当前打开的那个会话。 */
+    activeId?: string | null
+    /** 还有下一页。 */
+    hasMore?: boolean
+    loadingMore?: boolean
+    /** 列表栏标题。写作页要的是「写作」，不是「对话」。 */
+    title?: string
+    /** 空态那个动作的文案。 */
+    emptyAction?: string
+    /** 新建按钮的可访问名。 */
+    newLabel?: string
+    /** 点开一行时用的路由名。写作页的行属于 `co-writer`。 */
+    rowRouteName?: string
+  }>(),
+  {
+    title: '对话',
+    emptyAction: '开始一段对话',
+    newLabel: '新建会话',
+    rowRouteName: 'conversation',
+  },
+)
 
 const emit = defineEmits<{
   (event: 'new-session'): void
@@ -73,9 +89,9 @@ function commitRename(): void {
 
 <template>
   <ListPane
-    title="对话"
+    :title="title"
     v-model:query="query"
-    empty-action="开始一段对话"
+    :empty-action="emptyAction"
     :loading="loading"
     :empty="filtered.length === 0"
     @empty-action="emit('new-session')"
@@ -84,7 +100,7 @@ function commitRename(): void {
       <RouterLink class="icon-button" to="/chat/recycle-bin" :title="CHAT.recycleBin">
         {{ CHAT.recycleBin }}
       </RouterLink>
-      <button type="button" class="icon-button" aria-label="新建会话" @click="emit('new-session')">
+      <button type="button" class="icon-button" :aria-label="newLabel" @click="emit('new-session')">
         ＋
       </button>
     </template>
@@ -111,7 +127,7 @@ function commitRename(): void {
         <template v-else>
           <RouterLink
             class="session__link"
-            :to="{ name: 'conversation', params: { sessionId: session.session_id } }"
+            :to="{ name: rowRouteName, params: { sessionId: session.session_id } }"
           >
             <span class="session__title" :class="{ 'session__title--untitled': session.title === '' }">
               {{ sessionLabel(session) }}

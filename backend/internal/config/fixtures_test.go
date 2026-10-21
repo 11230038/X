@@ -93,6 +93,7 @@ func validValues() map[string]string {
 		"PRACTICE_QUEUE_SIZE":          "20",
 		"PRACTICE_JUDGE_MAX_TOKENS":    "1024",
 		"MASTERY_LEASE_TTL":            "2m",
+		"MASTERY_QUESTION_TTL":         "30m",
 		"MASTERY_GATE_CONSECUTIVE":     "3",
 		"MASTERY_GATE_MIN_EVIDENCE":    "2",
 		"DASHBOARD_RECENT_LIMIT":       "10",
@@ -114,9 +115,9 @@ func validValues() map[string]string {
 		// Empty is the ordinary deployment: no account may create, delete,
 		// disable or reset another. A case that needs one fills it in.
 		"SUPER_ADMIN_USER_IDS": "",
-		"AUDIT_RETENTION_DAYS":         "180",
-		"AUDIT_MAX_PAGE_SIZE":          "200",
-		"USAGE_RETENTION_DAYS":         "365",
+		"AUDIT_RETENTION_DAYS": "180",
+		"AUDIT_MAX_PAGE_SIZE":  "200",
+		"USAGE_RETENTION_DAYS": "365",
 		// The two quota keys at zero, which is the shape .env.example ships: a
 		// deployment that bounds nothing starts, and the keys are required all
 		// the same (§2.9, and see the case in usage_test.go that pins the two).

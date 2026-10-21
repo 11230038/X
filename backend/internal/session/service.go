@@ -36,17 +36,28 @@ func NewService(repository Repository) (*Service, error) {
 // to be generated from what the conversation turns out to be about, so a session
 // that no one ever writes in stays untitled rather than misnamed.
 //
+// The kind is which list the session will appear in. It is a parameter rather
+// than a default at this layer because every caller that creates sessions knows
+// which surface it is starting from: the chat client asks for chat, the writing
+// page for writing, the mastery conversation page for mastery and the question
+// bank's page for question_bank. An empty kind means chat for the benefit of
+// older call sites and older imports.
+//
 // The new row is owned by the caller. A session written without an owner is not
 // a session the creator can find again — the read that follows would filter it
 // out — so this is the one place where forgetting the owner breaks the write
 // rather than the read.
-func (s *Service) Create(ctx context.Context, caller authz.Caller) (Session, error) {
+func (s *Service) Create(ctx context.Context, caller authz.Caller, kind Kind) (Session, error) {
+	kind = normalizeKind(kind)
+	if !kind.Valid() {
+		return Session{}, fmt.Errorf("%w: %q", ErrInvalidKind, kind)
+	}
 	id, err := newID(sessionIDPrefix)
 	if err != nil {
 		return Session{}, fmt.Errorf("generate session id: %w", err)
 	}
 	now := time.Now().UTC()
-	record := Session{ID: id, OwnerID: caller.UserID, CreatedAt: now, UpdatedAt: now}
+	record := Session{ID: id, Kind: kind, OwnerID: caller.UserID, CreatedAt: now, UpdatedAt: now}
 	if err := s.repository.Create(ctx, record); err != nil {
 		return Session{}, err
 	}
@@ -68,7 +79,14 @@ func (s *Service) Get(ctx context.Context, sessionID string, caller authz.Caller
 }
 
 // List returns one page of sessions, the recycle bin or the live ones.
+//
+// The kind is validated here rather than in storage: a kind a caller made up
+// would otherwise return an empty page, which looks like "this person has no
+// conversations" instead of "that is not a kind".
 func (s *Service) List(ctx context.Context, options ListOptions) ([]Session, error) {
+	if !options.AllKinds && options.Kind != "" && !options.Kind.Valid() {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidKind, options.Kind)
+	}
 	return s.repository.List(ctx, options)
 }
 

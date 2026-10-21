@@ -18,7 +18,11 @@ import {
 } from './labels'
 
 const props = defineProps<{ entry: QuestionEntry; busy: boolean }>()
-const emit = defineEmits<{ (event: 'bookmark'): void; (event: 'resolve'): void }>()
+const emit = defineEmits<{
+  (event: 'bookmark'): void
+  (event: 'resolve'): void
+  (event: 'ask'): void
+}>()
 </script>
 
 <template>
@@ -37,6 +41,9 @@ const emit = defineEmits<{ (event: 'bookmark'): void; (event: 'resolve'): void }
         />
       </div>
       <div class="detail__actions">
+        <button type="button" class="ghost" @click="emit('ask')">
+          {{ QUESTIONS.askAbout }}
+        </button>
         <button
           type="button"
           class="ghost"

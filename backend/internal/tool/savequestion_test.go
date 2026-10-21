@@ -128,10 +128,10 @@ func TestSaveQuestionStoresTheQuestionTheModelDescribed(t *testing.T) {
 
 func TestTheSameQuestionSavedTwiceIsOneRow(t *testing.T) {
 	bank := &stubQuestionBank{}
-	first := save(t, bank, `{"question": "勾股定理说的是什么？", "question_type": "short_answer", "correct_answer": "直角三角形两直角边的平方和等于斜边的平方。", "explanation": "直角边上的两个正方形面积之和等于斜边上的正方形。"}`)
+	first := save(t, bank, `{"question": "勾股定理说的是什么？", "question_type": "fill_blank", "correct_answer": "直角三角形两直角边的平方和等于斜边的平方。", "explanation": "直角边上的两个正方形面积之和等于斜边上的正方形。"}`)
 	// The same question again, differently spaced and with a different
 	// explanation: it is the same question, and the second call rewrites it.
-	second := save(t, bank, `{"question": "  勾股定理说的是什么？", "question_type": "short_answer", "correct_answer": "直角三角形两直角边的平方和等于斜边的平方。", "explanation": "改过的解析。"}`)
+	second := save(t, bank, `{"question": "  勾股定理说的是什么？", "question_type": "fill_blank", "correct_answer": "直角三角形两直角边的平方和等于斜边的平方。", "explanation": "改过的解析。"}`)
 
 	if !asBool(t, first.Metadata["created"]) {
 		t.Errorf("the first save reported created = %v, want true", first.Metadata["created"])
@@ -158,14 +158,14 @@ func TestTheSameQuestionSavedTwiceIsOneRow(t *testing.T) {
 
 func TestSaveQuestionReportsWhereTheSetStands(t *testing.T) {
 	bank := &stubQuestionBank{planned: 10}
-	saved := save(t, bank, `{"question": "什么是单调函数？", "question_type": "short_answer", "correct_answer": "定义域上随自变量增大而函数值不减的函数。", "explanation": "按定义比较任意两点的函数值。"}`)
+	saved := save(t, bank, `{"question": "什么是单调函数？", "question_type": "fill_blank", "correct_answer": "定义域上随自变量增大而函数值不减的函数。", "explanation": "按定义比较任意两点的函数值。"}`)
 	if !strings.Contains(saved.Content, "1/10") {
 		t.Errorf("content = %q, want the position in the set the turn planned", saved.Content)
 	}
 
 	// A turn whose plan said nothing has no denominator, and a set of one out of
 	// zero would read as a set of none.
-	planless := save(t, &stubQuestionBank{}, `{"question": "什么是单调函数？", "question_type": "short_answer", "correct_answer": "不减。", "explanation": "按定义。"}`)
+	planless := save(t, &stubQuestionBank{}, `{"question": "什么是单调函数？", "question_type": "fill_blank", "correct_answer": "不减。", "explanation": "按定义。"}`)
 	if strings.Contains(planless.Content, "/") {
 		t.Errorf("content = %q, want no total when the plan named none", planless.Content)
 	}
@@ -173,7 +173,7 @@ func TestSaveQuestionReportsWhereTheSetStands(t *testing.T) {
 
 func TestSaveQuestionMetadataSpeaksTheProgressKeys(t *testing.T) {
 	bank := &stubQuestionBank{planned: 4}
-	result := save(t, bank, `{"question": "什么是单调函数？", "question_type": "short_answer", "correct_answer": "不减。", "explanation": "按定义。"}`)
+	result := save(t, bank, `{"question": "什么是单调函数？", "question_type": "fill_blank", "correct_answer": "不减。", "explanation": "按定义。"}`)
 
 	// A question arriving and a plan advancing are one shape to a client, so
 	// these three keys are the progress keys and not a fourth set of names
@@ -259,7 +259,7 @@ func TestSaveQuestionRefusesWhatTheJudgeWouldRefuse(t *testing.T) {
 	}{
 		{
 			name:      "a question that is not a question",
-			arguments: `{"question": " 答? ", "question_type": "short_answer", "correct_answer": "不减。", "explanation": "按定义。"}`,
+			arguments: `{"question": " 答? ", "question_type": "fill_blank", "correct_answer": "不减。", "explanation": "按定义。"}`,
 			want:      "题干太短",
 		},
 		{
@@ -323,12 +323,12 @@ func TestSaveQuestionRefusesWhatTheJudgeWouldRefuse(t *testing.T) {
 		},
 		{
 			name:      "an answer with no explanation",
-			arguments: `{"question": "什么是单调函数？", "question_type": "short_answer", "correct_answer": "不减。", "explanation": " "}`,
+			arguments: `{"question": "什么是单调函数？", "question_type": "fill_blank", "correct_answer": "不减。", "explanation": " "}`,
 			want:      "explanation",
 		},
 		{
 			name:      "a difficulty outside the three",
-			arguments: `{"question": "什么是单调函数？", "question_type": "short_answer", "correct_answer": "不减。", "explanation": "按定义。", "difficulty": "very hard"}`,
+			arguments: `{"question": "什么是单调函数？", "question_type": "fill_blank", "correct_answer": "不减。", "explanation": "按定义。", "difficulty": "very hard"}`,
 			want:      "medium",
 		},
 	} {
@@ -347,6 +347,24 @@ func TestSaveQuestionRefusesWhatTheJudgeWouldRefuse(t *testing.T) {
 				t.Errorf("a refused question was stored anyway: %+v", bank.saved)
 			}
 		})
+	}
+}
+
+func TestASubjectiveQuestionIsNotWritten(t *testing.T) {
+	// The bank still stores and judges short_answer rows; generating new ones is
+	// paused (product decision, 2026-10-20). The refusal has to say what to write
+	// instead, because "short_answer is not a valid type" would send a model off
+	// to guess a spelling rather than to change the question's form.
+	bank := &stubQuestionBank{}
+	result := save(t, bank, `{"question": "用元素法证明德摩根律。", "question_type": "short_answer", "correct_answer": "两个方向各证一次。", "explanation": "元素法。"}`)
+	if result.Success {
+		t.Fatalf("a subjective question was stored: %+v", result)
+	}
+	if !strings.Contains(result.Content, "主观题") || !strings.Contains(result.Content, "fill_blank") {
+		t.Errorf("the refusal reads %q, want it to name the paused type and the way out", result.Content)
+	}
+	if len(bank.saved) != 0 {
+		t.Errorf("a refused question was stored anyway: %+v", bank.saved)
 	}
 }
 

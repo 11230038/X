@@ -64,6 +64,10 @@ type Session struct {
 	UpdatedAt     time.Time      `gorm:"column:update_time;autoCreateTime;autoUpdateTime"`
 	Preferences   datatypes.JSON `gorm:"column:preferences_json;type:json"`
 	WorkspaceMode *string        `gorm:"column:workspace_mode"`
+	// Kind says which surface lists this session (`chat`, `writing`, `mastery`
+	// or `question_bank`). The column defaults to chat so a writer that forgets
+	// it still lands in the pre-migration state rather than in neither list.
+	Kind string `gorm:"column:kind;not null;default:'chat'"`
 	// OwnerID is NULL for conversations that predate V5 (migration 00014).
 	// That is a state rather than a gap: such a row belongs to no account, is
 	// visible only to an administrator, and is claimed explicitly.

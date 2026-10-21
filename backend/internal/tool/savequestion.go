@@ -39,11 +39,15 @@ const (
 )
 
 // The two closed sets a question is written from, listed the way a refusal
-// names them. The question types are the three the answer area has (§4.3) and
-// the three judging dispatches on (§2.5) — a fourth type would be a type nothing
-// can judge.
+// names them. The bank's own set is three types — the ones the answer area has
+// (§4.3) and judging dispatches on (§2.5); a fourth would be a type nothing can
+// judge. What these two tools *generate* is narrower: 主观题 (short_answer) is
+// paused by the product as of 2026-10-20, so writes are refused for it while the
+// existing rows in the bank keep being judged. The refusal below and the schema's
+// enum are the two places that policy is written; they have to say the same
+// thing.
 const (
-	questionTypes    = "choice、fill_blank、short_answer"
+	questionTypes    = "choice、fill_blank"
 	difficulties     = "easy、medium、hard"
 	sourceAttachment = "attachment"
 )
@@ -194,8 +198,8 @@ const questionSchemaTemplate = `{
 				},
 				"question_type": {
 					"type": "string",
-					"enum": ["choice", "fill_blank", "short_answer"],
-					"description": "choice 选择题、fill_blank 填空题、short_answer 主观题"
+					"enum": ["choice", "fill_blank"],
+					"description": "choice 选择题、fill_blank 填空题；现在不出主观题，要考的开放表述请改写成这两种之一"
 				},
 				"options": {
 					"type": "array",
@@ -212,11 +216,11 @@ const questionSchemaTemplate = `{
 				},
 				"correct_answer": {
 					"type": "string",
-					"description": "选择题写选项键，多选写成 \"A,C\"（逗号分隔）；填空题写答案文本，有几个可接受的写法就写成 \"2 年|两年\"（用 | 分隔）；主观题写参考答案"
+					"description": "选择题写选项键，多选写成 \"A,C\"（逗号分隔）；填空题写答案文本，有几个可接受的写法就写成 \"2 年|两年\"（用 | 分隔）"
 				},
 				"explanation": {
 					"type": "string",
-					"description": "解析：为什么是这个答案。主观题就是照它判分的，作答之后也要展示给用户，所以要把道理说清"
+					"description": "解析：为什么是这个答案。作答之后也要展示给用户，所以要把道理说清"
 				},
 				"difficulty": {
 					"type": "string",
@@ -343,6 +347,14 @@ func questionFrom(args questionArguments, carried []Carried) (notebook.Question,
 	if !questionType.Valid() {
 		return notebook.Question{}, &Refusal{Note: fmt.Sprintf(
 			"question_type 只能是 %s 之一，收到的是「%s」。", questionTypes, args.QuestionType)}
+	}
+	// 主观题 is a type the bank still stores and judging still dispatches on, but
+	// the product has paused generating it. The check is here rather than in each
+	// tool because both tools build their question through this one function, so
+	// "which tool wrote it" cannot decide whether the rule applies.
+	if questionType == notebook.QuestionShortAnswer {
+		return notebook.Question{}, &Refusal{Note: "现在只出选择题和填空题，不出主观题（short_answer）：" +
+			"把这道题改成 choice 或 fill_blank 再存一次——要考开放的表述，就拆成一道答案唯一的填空题，或者给出选项。"}
 	}
 	explanation := strings.TrimSpace(args.Explanation)
 	if runes := utf8.RuneCountInString(explanation); runes < MinExplanationRunes {

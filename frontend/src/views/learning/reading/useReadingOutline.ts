@@ -82,7 +82,14 @@ export function useReadingOutline(options: {
     const materialId = options.currentId.value
     units[ordinal] = { status: 'loading', text: '', failure: null }
     try {
-      const loaded = await getReadingContent(materialId, { ordinal })
+      // 正文按坐标读：`ordinal` 只是告诉服务端"我以为自己在第几个单元"的
+      // 提示，`char_start` / `char_end` 才是真正的读取范围。只发 ordinal
+      // 会被服务端以 400 `invalid_request` 拒绝，材料就一个字都出不来。
+      const loaded = await getReadingContent(materialId, {
+        char_start: unit.char_start,
+        char_end: unit.char_end,
+        ordinal,
+      })
       if (options.currentId.value !== materialId) return
       units[ordinal] = { status: 'ready', text: loaded.passage.text, failure: null }
     } catch (cause) {

@@ -34,10 +34,33 @@ func (r *turnRun) endTurn(ctx context.Context, failure error) {
 			"turn_id", r.turn.ID, "error", err)
 	}
 
+	// After the last write and before the client is told the turn is over: a
+	// finished turn is not a writer, and a client that sends its next message the
+	// instant `done` arrives must find the path free.
+	r.letGo(ctx)
 	r.announce(ctx, outcome, turnFailure)
 	r.nameSession(ctx, turnFailure == nil)
 	if err := r.emitter.Close(ctx); err != nil {
 		r.runner.logger.ErrorContext(ctx, "could not flush the end of a turn",
+			"turn_id", r.turn.ID, "error", err)
+	}
+}
+
+// letGo releases the path this turn was writing, if it was writing one.
+//
+// The lease is about concurrent writers, and a turn whose status is final is not
+// one. Releasing it here rather than waiting for the TTL is what lets the next
+// message in the same conversation write immediately; leaving that to the model's
+// mastery_leave is a promise a prompt cannot keep. A turn that never held the
+// path releases nothing: the delete is scoped to this turn's id.
+func (r *turnRun) letGo(ctx context.Context) {
+	if r.release == nil {
+		return
+	}
+	if err := r.release(ctx); err != nil {
+		// The turn has already ended; a lease left behind expires on its own, and
+		// failing the ending now would report a turn that did finish as broken.
+		r.runner.logger.WarnContext(ctx, "could not release the turn's path",
 			"turn_id", r.turn.ID, "error", err)
 	}
 }

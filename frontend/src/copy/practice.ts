@@ -19,8 +19,14 @@ export const PRACTICE = {
   finish: '完成练习',
   cancel: '取消',
 
+  /** 题目旁：不会就先记成答错，再去题目问答里问它。 */
+  askAbout: '我不会，去提问',
+  asking: '正在记成答错…',
+  askFailed: '这道题没有记成答错：',
+
   objectiveTitle: '判定结果',
   modelTitle: 'AI 的判断',
+  selfReportTitle: '你的声明',
   correct: '回答正确',
   incorrect: '回答不正确',
   confidence: '置信度',
@@ -36,7 +42,7 @@ export const PRACTICE = {
   emptyQueue: '现在没有要复习的题',
   emptyQueueHint: '去题库里挑几道题，或者等复习时间到了再来。',
   goQuestions: '去题库',
-  goLearning: '回到学习首页',
+  backToQuestions: '回到题库',
 
   judgeUnavailable: '判分服务暂时不可用。你的作答还在，稍后可以原样重试。',
   notJudgeable: '这道题暂时无法判分。作答没有被保存，可以跳过它。',

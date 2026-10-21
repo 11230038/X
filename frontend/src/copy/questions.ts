@@ -8,6 +8,8 @@ export const QUESTIONS = {
   filterResolved: '掌握状态',
   filterType: '题型',
   filterCategory: '分类',
+  filterPath: '掌握路径',
+  pathFallback: (pathId: string) => `掌握路径 ${pathId}`,
   all: '全部',
   resolvedUntouched: '未处理过',
   resolvedOpen: '未掌握',
@@ -48,6 +50,7 @@ export const QUESTIONS = {
   outcomeInvalid: '无效',
   conflictWith: (id: string, line: number) => `与第 ${line} 行的 ${id} 冲突`,
 
+  askAbout: '提问',
   bookmark: '收藏',
   bookmarked: '已收藏',
   markMastered: '标为已掌握',
@@ -74,4 +77,49 @@ export const QUESTIONS = {
   loadFailed: '题目列表没能读出来',
   detailFailed: '这道题没能读出来',
   options: '选项',
+} as const
+
+/**
+ * 题目问答：题库自己的对话页。
+ *
+ * 单独一份，是因为它不是题库列表的一部分：这个页面先在题库里挑一道题，再就
+ * 这道题建立一段对话。文案放在这里而不是 `chat.ts`，与 `MASTERY` 的路径对话
+ * 文案放在掌握路径下是同一条规矩。
+ */
+export const QUESTION_CHAT = {
+  title: '题目问答',
+  lead: '选一道题库里的题，就它提问：为什么这样答、考的是什么、换一种问法还会不会。',
+  searchPlaceholder: '按题目内容搜索',
+  loadFailed: '题目列表没能读出来',
+  retry: '重试',
+  empty: '题库还是空的',
+  emptyHint: '先在题库页导入题目，或者在对话里让助手出题。',
+  noMatch: '没有找到匹配的题目',
+  noMatchHint: '换一个关键词再看。',
+  resultLimit: (count: number) => `只显示前 ${count} 道；没看到要找的题就搜一下。`,
+  pickPrompt: '先在上面选一道题',
+  /** 从练习页带着题号过来、但这个题号没能读到时。 */
+  preselectFailed: '没能自动选中这道题，请在上面搜索它。',
+  selectedLabel: '已选题目',
+  askLabel: '你想问什么',
+  askPlaceholder: '例如：为什么不是 B？这道题考的是哪个概念？',
+  defaultAsk: '请先讲解这道题，并指出最容易错的地方。',
+  start: '开始提问',
+  starting: '正在建立对话…',
+  startError: '对话没能建起来，请重试',
+  composeQuestion: '题目',
+  composeType: '题型',
+  composeOptions: '选项',
+  composeAnswer: '参考答案',
+  composeExplanation: '解析',
+  composeIntro: '我想就题库里的这道题提问。',
+  composeAsk: '我的问题',
+  /** 列表栏的标题、空态与新建文案。 */
+  listTitle: '题目问答',
+  listEmptyAction: '选一道题开始',
+  listNewLabel: '新建问答',
+  emptySession: '这段问答还没有消息',
+  emptySessionHint: '输入一句话继续问，或者回到首页换一道题。',
+  emptySessionAction: '回到首页',
+  placeholder: '就这道题继续问，Enter 发送，Shift+Enter 换行',
 } as const

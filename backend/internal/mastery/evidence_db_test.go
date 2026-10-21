@@ -58,8 +58,9 @@ func (r *refusingSave) Within(ctx context.Context, work func(Repository) error) 
 func (h *harness) serviceOver(t *testing.T, repository Repository) *Service {
 	t.Helper()
 	service, err := NewService(repository, Options{
-		LeaseTTL: time.Hour,
-		Gate:     GateOptions{Consecutive: 3, MinEvidence: 2},
+		LeaseTTL:    time.Hour,
+		QuestionTTL: time.Hour,
+		Gate:        GateOptions{Consecutive: 3, MinEvidence: 2},
 	})
 	if err != nil {
 		t.Fatalf("build a service over the refusing repository: %v", err)

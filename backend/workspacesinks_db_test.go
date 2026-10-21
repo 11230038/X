@@ -152,7 +152,7 @@ func TestDBTheSessionSinkWritesWhatThePackageHeldAndTakesItBack(t *testing.T) {
 	fixture := newSinkFixture(t)
 	ref := sessionRef()
 	object := objectOf(t, ref, sessionPayload{
-		Session: session.Session{ID: "sess_test1", Title: "为什么天是蓝的"},
+		Session: session.Session{ID: "sess_test1", Title: "为什么天是蓝的", Kind: session.KindWriting},
 		Messages: []session.Message{
 			{ID: "msg_1", SessionID: "sess_test1", Role: session.RoleUser, Content: "为什么天是蓝的"},
 			{ID: "msg_2", SessionID: "sess_test1", Role: session.RoleAssistant, Content: "因为瑞利散射"},
@@ -171,13 +171,22 @@ func TestDBTheSessionSinkWritesWhatThePackageHeldAndTakesItBack(t *testing.T) {
 	}
 	// The owner is the caller's and not the payload's: a package names the work,
 	// and the account it lands in is the one that asked for the import.
-	var owner *int64
-	if err := fixture.resource.GORM().Raw("SELECT owner_id FROM sessions WHERE session_id = ?", ref.ID).
-		Scan(&owner).Error; err != nil {
-		t.Fatalf("read the session's owner: %v", err)
+	var row struct {
+		OwnerID *int64 `gorm:"column:owner_id"`
+		Kind    string `gorm:"column:kind"`
 	}
-	if owner == nil || *owner != fixture.owner {
-		t.Fatalf("the session landed owned by %v, want account %d", owner, fixture.owner)
+	if err := fixture.resource.GORM().Raw(
+		"SELECT owner_id, kind FROM sessions WHERE session_id = ?", ref.ID,
+	).Scan(&row).Error; err != nil {
+		t.Fatalf("read the session's owner and kind: %v", err)
+	}
+	if row.OwnerID == nil || *row.OwnerID != fixture.owner {
+		t.Fatalf("the session landed owned by %v, want account %d", row.OwnerID, fixture.owner)
+	}
+	// The partition travels with the package: a writing session imported into
+	// another instance belongs in that instance's writing list, not its chat.
+	if row.Kind != string(session.KindWriting) {
+		t.Errorf("kind = %q, want writing", row.Kind)
 	}
 
 	if err := fixture.sessions.Undo(context.Background(), fixture.caller, landed); err != nil {
@@ -194,6 +203,29 @@ func TestDBTheSessionSinkWritesWhatThePackageHeldAndTakesItBack(t *testing.T) {
 	// answers are the same answer to the person pressing the button.
 	if err := fixture.sessions.Undo(context.Background(), fixture.caller, landed); err != nil {
 		t.Errorf("the second Undo() error = %v, want the row simply not being there", err)
+	}
+}
+
+// TestDBTheSessionSinkReadsAPackageFromBeforeKindsAsChat covers a package an
+// older build wrote: it has no `Kind` field, and the column default is the only
+// thing that makes the row a conversation. The sink must not invent a partition
+// from absence.
+func TestDBTheSessionSinkReadsAPackageFromBeforeKindsAsChat(t *testing.T) {
+	fixture := newSinkFixture(t)
+	ref := sessionRef()
+	object := objectOf(t, ref, sessionPayload{
+		Session: session.Session{ID: ref.ID, Title: "旧包里的对话"},
+	})
+	if _, err := fixture.sessions.Write(context.Background(), fixture.caller, []workspace.Object{object}); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	var kind string
+	if err := fixture.resource.GORM().Raw("SELECT kind FROM sessions WHERE session_id = ?", ref.ID).
+		Scan(&kind).Error; err != nil {
+		t.Fatalf("read the session's kind: %v", err)
+	}
+	if kind != string(session.KindChat) {
+		t.Errorf("kind = %q, want chat", kind)
 	}
 }
 

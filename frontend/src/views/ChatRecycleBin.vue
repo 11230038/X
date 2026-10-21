@@ -11,7 +11,7 @@
  * 回收站里才出现「永久删除」。
  */
 
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import type { ApiFailure } from '../api/client'
 import { describeFailure } from '../api/errors'
@@ -19,6 +19,7 @@ import {
   listSessions,
   purgeSession,
   restoreSession,
+  type SessionKind,
   type SessionSummary,
 } from '../api/sessions'
 import { canSurface } from '../auth/permissions'
@@ -40,6 +41,12 @@ const PAGE_SIZE = 30
 
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'failed'
 
+/**
+ * 回收站按会话分区分开看。各边的恢复与永久删除是同一条规矩，只是行来自
+ * 不同的列表；合并成一份会让「对话」列表里突然冒出写作或路径对话。
+ */
+const activeKind = ref<SessionKind>('chat')
+
 const sessions = ref<SessionSummary[]>([])
 const status = ref<LoadStatus>('idle')
 const failure = ref<ApiFailure | null>(null)
@@ -51,7 +58,70 @@ const exhausted = ref(false)
 const rowErrors = ref<Record<string, string>>({})
 const busyId = ref('')
 
+const homeName = computed(() => {
+  switch (activeKind.value) {
+    case 'writing':
+      return 'co-writer'
+    case 'mastery':
+      return 'mastery-chat'
+    case 'question_bank':
+      return 'question-chat'
+    default:
+      return 'chat'
+  }
+})
+const backLabel = computed(() => {
+  switch (activeKind.value) {
+    case 'writing':
+      return CHAT.backToWriting
+    case 'mastery':
+      return CHAT.backToMastery
+    case 'question_bank':
+      return CHAT.backToQuestionChat
+    default:
+      return CHAT.backToChat
+  }
+})
+const emptyTitle = computed(() => {
+  switch (activeKind.value) {
+    case 'writing':
+      return CHAT.recycleBinEmptyWriting
+    case 'mastery':
+      return CHAT.recycleBinEmptyMastery
+    case 'question_bank':
+      return CHAT.recycleBinEmptyQuestionBank
+    default:
+      return CHAT.recycleBinEmpty
+  }
+})
+const emptyHint = computed(() => {
+  switch (activeKind.value) {
+    case 'writing':
+      return CHAT.recycleBinEmptyWritingHint
+    case 'mastery':
+      return CHAT.recycleBinEmptyMasteryHint
+    case 'question_bank':
+      return CHAT.recycleBinEmptyQuestionBankHint
+    default:
+      return CHAT.recycleBinEmptyHint
+  }
+})
+
+function switchKind(kind: SessionKind): void {
+  if (activeKind.value === kind) return
+  activeKind.value = kind
+  sessions.value = []
+  exhausted.value = false
+  rowErrors.value = {}
+  moreFailure.value = null
+  staleFailure.value = null
+  void load()
+}
+
 async function load(): Promise<void> {
+  // 切 tab 时上一个请求可能还在飞；它回来时 kind 已经变了，不能把它的结果
+  // 写进当前列表。
+  const requestedKind = activeKind.value
   const reset = sessions.value.length === 0
   if (reset) {
     status.value = 'loading'
@@ -60,12 +130,19 @@ async function load(): Promise<void> {
   staleFailure.value = null
 
   try {
-    const result = await listSessions({ deleted: true, limit: PAGE_SIZE, offset: 0 })
+    const result = await listSessions({
+      deleted: true,
+      kind: requestedKind,
+      limit: PAGE_SIZE,
+      offset: 0,
+    })
+    if (activeKind.value !== requestedKind) return
     sessions.value = result.sessions
     exhausted.value = result.sessions.length < PAGE_SIZE
     status.value = 'ready'
     failure.value = null
   } catch (cause) {
+    if (activeKind.value !== requestedKind) return
     const next = toFailure(cause)
     if (sessions.value.length === 0) {
       failure.value = next
@@ -80,17 +157,21 @@ async function load(): Promise<void> {
 
 async function loadMore(): Promise<void> {
   if (loadingMore.value || exhausted.value) return
+  const requestedKind = activeKind.value
   loadingMore.value = true
   moreFailure.value = null
   try {
     const result = await listSessions({
       deleted: true,
+      kind: requestedKind,
       limit: PAGE_SIZE,
       offset: sessions.value.length,
     })
+    if (activeKind.value !== requestedKind) return
     sessions.value = [...sessions.value, ...result.sessions]
     exhausted.value = result.sessions.length < PAGE_SIZE
   } catch (cause) {
+    if (activeKind.value !== requestedKind) return
     moreFailure.value = toFailure(cause)
   } finally {
     loadingMore.value = false
@@ -170,9 +251,49 @@ onMounted(() => {
         <div class="page__inner">
           <PageHeader :title="CHAT.recycleBin" :description="CHAT.recycleBinDescription">
             <template #actions>
-              <RouterLink class="back" :to="{ name: 'chat' }">{{ CHAT.backToChat }}</RouterLink>
+              <RouterLink class="back" :to="{ name: homeName }">{{ backLabel }}</RouterLink>
             </template>
           </PageHeader>
+
+          <!-- 对话、写作、路径对话与题目问答各有一份回收站：分区在删除之后也成立。 -->
+          <div class="kinds" role="group" :aria-label="CHAT.kindTabsLabel">
+            <button
+              type="button"
+              class="kind"
+              :class="{ 'kind--on': activeKind === 'chat' }"
+              :aria-pressed="activeKind === 'chat'"
+              @click="switchKind('chat')"
+            >
+              {{ CHAT.kindChat }}
+            </button>
+            <button
+              type="button"
+              class="kind"
+              :class="{ 'kind--on': activeKind === 'writing' }"
+              :aria-pressed="activeKind === 'writing'"
+              @click="switchKind('writing')"
+            >
+              {{ CHAT.kindWriting }}
+            </button>
+            <button
+              type="button"
+              class="kind"
+              :class="{ 'kind--on': activeKind === 'mastery' }"
+              :aria-pressed="activeKind === 'mastery'"
+              @click="switchKind('mastery')"
+            >
+              {{ CHAT.kindMastery }}
+            </button>
+            <button
+              type="button"
+              class="kind"
+              :class="{ 'kind--on': activeKind === 'question_bank' }"
+              :aria-pressed="activeKind === 'question_bank'"
+              @click="switchKind('question_bank')"
+            >
+              {{ CHAT.kindQuestionBank }}
+            </button>
+          </div>
 
           <SkeletonBlock v-if="status === 'loading'" :lines="6" :line-height="42" />
 
@@ -185,10 +306,10 @@ onMounted(() => {
 
           <EmptyState
             v-else-if="sessions.length === 0"
-            :title="CHAT.recycleBinEmpty"
-            :hint="CHAT.recycleBinEmptyHint"
-            :action-label="CHAT.backToChat"
-            @action="$router.push({ name: 'chat' })"
+            :title="emptyTitle"
+            :hint="emptyHint"
+            :action-label="backLabel"
+            @action="$router.push({ name: homeName })"
           />
 
           <template v-else>
@@ -269,6 +390,33 @@ onMounted(() => {
 
 .back:hover {
   border-color: var(--accent);
+  color: var(--accent);
+}
+
+.kinds {
+  display: flex;
+  gap: 4px;
+  margin-top: 16px;
+}
+
+.kind {
+  padding: 5px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.kind:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.kind--on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
   color: var(--accent);
 }
 

@@ -24,7 +24,44 @@ var (
 	ErrInvalidTitle = errors.New("session: invalid title")
 	// ErrInvalidMessage reports a message that could not be appended.
 	ErrInvalidMessage = errors.New("session: invalid message")
+	// ErrInvalidKind reports a session kind this version does not know. It is a
+	// programming error at a call site rather than something a client can
+	// correct in the request — the HTTP boundary parses and rejects the wire
+	// value before it gets here.
+	ErrInvalidKind = errors.New("session: invalid kind")
 )
+
+// Kind says which surface a conversation belongs to: the chat page, the
+// writing page, the mastery path's conversation page or the question bank's
+// conversation page. It is a partition of one table and not a permission: every
+// kind still runs a capability behind the chat surface, as its page requires.
+//
+// The zero value is chat on purpose. Every caller that existed before the
+// other pages were a thing expected chat, and a listing that defaulted to
+// "all" would mix the lists the first time somebody forgot to pass a kind.
+type Kind string
+
+// The kinds this version writes.
+const (
+	KindChat         Kind = "chat"
+	KindWriting      Kind = "writing"
+	KindMastery      Kind = "mastery"
+	KindQuestionBank Kind = "question_bank"
+)
+
+// Valid reports whether the kind is one this version writes.
+func (k Kind) Valid() bool {
+	return k == KindChat || k == KindWriting || k == KindMastery || k == KindQuestionBank
+}
+
+// normalizeKind maps the empty value to chat, which is what a zero-value
+// request or an old stored row means.
+func normalizeKind(kind Kind) Kind {
+	if kind == "" {
+		return KindChat
+	}
+	return kind
+}
 
 // TitleMaxRunes bounds a stored title. The column is TEXT and would accept far
 // more, but a title exists to be read in a list, and a limit that is enforced
@@ -54,6 +91,10 @@ func (r Role) Valid() bool {
 type Session struct {
 	ID    string
 	Title string
+	// Kind is which list the session belongs to. A session read from storage
+	// always has one; a session being created may leave it empty, which means
+	// chat.
+	Kind Kind
 	// OwnerID is the account the conversation belongs to, or zero for a row
 	// written before V5 (migration 00014 left every earlier row NULL). Zero is a
 	// state rather than a missing value: such a session belongs to nobody, is
@@ -104,6 +145,15 @@ type ListOptions struct {
 	// never listed together: a client showing both would have to filter every
 	// row to know which actions it may offer.
 	Deleted bool
+	// Kind narrows the listing to one surface. Its zero value is chat, matching
+	// every caller that existed before the other surfaces did: a listing that
+	// defaulted to everything would put writing, mastery or question-bank
+	// history in the chat list the first time a caller forgot the field.
+	Kind Kind
+	// AllKinds asks for every surface. It is explicit because showing
+	// everything is a decision (the recycle bin, a workspace export), not a
+	// default.
+	AllKinds bool
 	// Limit and Offset page the listing. A zero Limit takes the default; a
 	// Limit above the maximum is clamped rather than rejected, since an
 	// oversized page is a client asking for more than it should get, not an

@@ -241,8 +241,12 @@ func (r Resolution) Valid() bool {
 type Filter struct {
 	Source     string
 	MaterialID string
-	Difficulty string
-	Type       QuestionType
+	// MasteryPathID selects the questions a mastery-path turn filed against that
+	// path. Empty means the filter is not applied; it is not how a caller asks
+	// for the questions that have no path — that is the unfiltered listing.
+	MasteryPathID string
+	Difficulty    string
+	Type          QuestionType
 	// Category selects by category name rather than by id: names are what the
 	// API and the tool speak, and the join table is an implementation detail of
 	// how a question is filed.

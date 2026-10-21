@@ -187,10 +187,11 @@ func (m *memoryRepository) storedEvents(turnID string) []event.Event {
 
 // stubSessions is the conversation domain in memory.
 type stubSessions struct {
-	mu       sync.Mutex
-	created  int
-	sessions map[string]session.Session
-	messages map[string][]session.Message
+	mu           sync.Mutex
+	created      int
+	createdKinds []session.Kind
+	sessions     map[string]session.Session
+	messages     map[string][]session.Message
 }
 
 func newStubSessions() *stubSessions {
@@ -200,12 +201,18 @@ func newStubSessions() *stubSessions {
 	}
 }
 
-func (s *stubSessions) Create(context.Context, authz.Caller) (session.Session, error) {
+func (s *stubSessions) Create(_ context.Context, _ authz.Caller, kind session.Kind) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.created++
+	s.createdKinds = append(s.createdKinds, kind)
 	now := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
-	record := session.Session{ID: fmt.Sprintf("sess_%d", s.created), CreatedAt: now, UpdatedAt: now}
+	record := session.Session{
+		ID:        fmt.Sprintf("sess_%d", s.created),
+		Kind:      kind,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
 	s.sessions[record.ID] = record
 	return record, nil
 }

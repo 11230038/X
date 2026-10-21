@@ -73,7 +73,7 @@ func (t *MasteryQuestionTool) Invoke(ctx context.Context, call Call) (Result, er
 	}
 	view, err := path.Current(ctx)
 	if err != nil {
-		return Result{}, err
+		return refused(err)
 	}
 	if _, _, ok := view.Path.Tree.KnowledgePoint(knowledgePointID); !ok {
 		return refused(&Refusal{Note: fmt.Sprintf(
@@ -81,9 +81,14 @@ func (t *MasteryQuestionTool) Invoke(ctx context.Context, call Call) (Result, er
 				"用其中一个 id 再出一次题；要加一条，先用 mastery_map。",
 			knowledgePointID, strings.Join(view.Path.Tree.KnowledgePointIDs(), "、"))})
 	}
+	// Ask refuses with the sentence the model needs — who else is writing the
+	// path, or which question is already waiting for an answer — and refused is
+	// what puts that sentence in the result. Returning the error raw would hand
+	// the model the loop's generic "the tool could not be run", which says
+	// nothing it can act on.
 	saved, err := path.Ask(ctx, question, knowledgePointID)
 	if err != nil {
-		return Result{}, err
+		return refused(err)
 	}
 
 	content := fmt.Sprintf("%s 这道题算在知识点 %s 上。", savedText(saved), knowledgePointID)
@@ -112,7 +117,8 @@ func (t *MasteryGradeTool) Definition() Definition {
 	return Definition{
 		Name: MasteryGradeName,
 		Description: "判一次作答对不对，并把这次判卷记进复习曲线。" +
-			"question_id 是题库存那道题的 id；user_answer 原样抄用户写的答案，不要替他改正、不要补全。" +
+			"question_id 是题库存那道题的 id（qn_ 开头，从出题时的返回或 mastery_state 里取；min_ 开头的是交互 id，不是题目 id）；" +
+			"user_answer 原样抄用户写的答案，不要替他改正、不要补全。" +
 			"对不对由判卷决定，不要在正文里自己下结论；这道题是选择题还是填空题由题目本身决定。",
 		Parameters: json.RawMessage(`{
 			"type": "object",

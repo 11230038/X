@@ -8,6 +8,7 @@
  */
 
 import { request } from './client'
+import type { ChunkSpan } from './files'
 
 export interface KnowledgeBase {
   kb_id: string
@@ -38,6 +39,15 @@ export interface KbDocument {
   vector_error?: string
   created_at: string
   updated_at: string
+}
+
+export interface KbDocumentTextView {
+  document: KbDocument
+  text: string
+  chunks: ChunkSpan[]
+  char_start: number
+  char_end: number
+  total_chars: number
 }
 
 export interface KbSource {
@@ -95,6 +105,23 @@ export function addKnowledgeBaseDocument(
   return request<{ document: KbDocument }>(
     `/knowledge-bases/${encodeURIComponent(kbId)}/documents`,
     { method: 'POST', body: { file_id: fileId } },
+  )
+}
+
+/**
+ * 一份文档的抽取文本，一次一个窗口。
+ *
+ * 按 document 读而不是按 file 读：同一个文件可以被文件库和多个知识库各自
+ * 解析成不同的 document，预览必须打开这一行自己的那一份。
+ */
+export function getKnowledgeDocumentText(
+  kbId: string,
+  documentId: string,
+  options: { offset?: number; limit?: number } = {},
+): Promise<KbDocumentTextView> {
+  return request<KbDocumentTextView>(
+    `/knowledge-bases/${encodeURIComponent(kbId)}/documents/${encodeURIComponent(documentId)}/text`,
+    { query: { offset: options.offset, limit: options.limit } },
   )
 }
 

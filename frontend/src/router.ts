@@ -68,63 +68,77 @@ const routes: RouteRecordRaw[] = [
     component: () => import('./views/Partners.vue'),
   },
   {
-    path: '/co-writer',
+    // 写作页自己就是工作台：没有 sessionId 时是准备表，有 sessionId 时是那段
+    // 写作。一条可选参数记录就够了，不再跳去对话页。
+    path: '/co-writer/:sessionId?',
     name: 'co-writer',
     component: () => import('./views/CoWriter.vue'),
   },
 
-  // ── 学习 ────────────────────────────────────────────────────────────────
+  // ── 掌握路径 ────────────────────────────────────────────────────────────
+  // 一级页面：不挂在学习外壳下，自己带 AppShell（`MasteryPage.vue`）。
   {
-    path: '/learning',
-    component: () => import('./views/learning/LearningLayout.vue'),
-    children: [
-      {
-        path: '',
-        name: 'learning',
-        component: () => import('./views/learning/LearningHome.vue'),
-      },
-      {
-        path: 'practice',
-        name: 'practice',
-        component: () => import('./views/learning/Practice.vue'),
-      },
-      {
-        path: 'mastery',
-        name: 'mastery',
-        component: () => import('./views/learning/Mastery.vue'),
-      },
-      {
-        path: 'map',
-        name: 'learning-map',
-        component: () => import('./views/learning/LearningMap.vue'),
-      },
-      {
-        path: 'reading',
-        name: 'reading',
-        component: () => import('./views/learning/Reading.vue'),
-      },
-      {
-        path: 'watching',
-        name: 'watching',
-        component: () => import('./views/learning/Watching.vue'),
-      },
-      // 书架与大纲/阅读页。详情页用 props 接 `bookId`，组件里再 `watch` 它，
-      // 这样从一本书跳到另一本书时不用重建页面。
-      {
-        path: 'books',
-        name: 'books',
-        component: () => import('./views/learning/Books.vue'),
-      },
-      {
-        path: 'books/:bookId',
-        name: 'book',
-        component: () => import('./views/learning/Book.vue'),
-        props: true,
-      },
-    ],
+    path: '/mastery',
+    name: 'mastery',
+    component: () => import('./views/MasteryPage.vue'),
+  },
+  // 路径自己的对话页：能力固定 `mastery_path`，会话按 `kind=mastery` 分区。
+  // 一条可选参数记录同时承担首页与某一段对话，与写作页同一种写法。
+  {
+    path: '/mastery/chat/:sessionId?',
+    name: 'mastery-chat',
+    component: () => import('./views/MasteryChatPage.vue'),
   },
 
-  // ── 材料 ────────────────────────────────────────────────────────────────
+  // ── 学习 ────────────────────────────────────────────────────────────────
+  // 首页就是「学习」这个一级入口本身；其余学习页面已经独立，收在「其他」下。
+  {
+    path: '/learning',
+    name: 'learning',
+    component: () => import('./views/LearningPage.vue'),
+  },
+  // 旧地址保留重定向，书签不会失效。
+  { path: '/learning/practice', redirect: { name: 'practice' } },
+  { path: '/learning/mastery', redirect: { name: 'mastery' } },
+  { path: '/learning/watching', redirect: { name: 'watching' } },
+  { path: '/learning/map', redirect: { name: 'learning-map' } },
+  { path: '/learning/reading', redirect: { name: 'reading' } },
+  { path: '/learning/books', redirect: { name: 'books' } },
+  { path: '/learning/books/:bookId', redirect: (to) => ({ name: 'book', params: to.params }) },
+
+  // ── 学习地图 / 沉浸阅读 / 活书 ─────────────────────────────────────────
+  // 三页从学习外壳里独立出来，各自带 AppShell。
+  {
+    path: '/learning-map',
+    name: 'learning-map',
+    component: () => import('./views/LearningMapPage.vue'),
+  },
+  {
+    path: '/reading',
+    name: 'reading',
+    component: () => import('./views/ReadingPage.vue'),
+  },
+  {
+    path: '/books',
+    name: 'books',
+    component: () => import('./views/BooksPage.vue'),
+  },
+  {
+    path: '/books/:bookId',
+    name: 'book',
+    component: () => import('./views/BookPage.vue'),
+    props: true,
+  },
+
+  // ── 视频学习 ────────────────────────────────────────────────────────────
+  // 与「学习」并列，但收在「其他」下；自己带 AppShell（`WatchingPage.vue`）。
+  {
+    path: '/watching',
+    name: 'watching',
+    component: () => import('./views/WatchingPage.vue'),
+  },
+
+  // ── 数据库（知识库） ─────────────────────────────────────────────────────
   {
     path: '/files',
     name: 'files',
@@ -189,6 +203,20 @@ const routes: RouteRecordRaw[] = [
     name: 'questions',
     component: () => import('./views/Questions.vue'),
   },
+  // 题目问答：题库自己的对话页。一条可选参数记录同时承担首页与某一段对话，
+  // 与写作页、路径对话页同一种写法；会话按 `kind=question_bank` 分区。
+  // 它排在 `/questions` 之后不影响匹配：两条都是静态前缀，参数只在这一条上。
+  {
+    path: '/questions/chat/:sessionId?',
+    name: 'question-chat',
+    component: () => import('./views/questions/QuestionChatPage.vue'),
+  },
+  // 练习归到题库下，自己带 AppShell（`PracticePage.vue`），不进学习外壳。
+  {
+    path: '/practice',
+    name: 'practice',
+    component: () => import('./views/PracticePage.vue'),
+  },
 
   // ── 设置 ────────────────────────────────────────────────────────────────
   {
@@ -234,7 +262,7 @@ const routes: RouteRecordRaw[] = [
     ],
   },
 
-  // ── 管理台（头像菜单进入，不在九组里） ─────────────────────────────────
+  // ── 管理台（头像菜单进入，不在导航入口里） ─────────────────────────────
   {
     path: '/admin',
     component: () => import('./views/admin/AdminLayout.vue'),

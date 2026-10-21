@@ -56,7 +56,10 @@ func TestTheKindsAreAClosedSetReadInAFixedOrder(t *testing.T) {
 		{"one kind", "出 5 道选择题", []notebook.QuestionType{notebook.QuestionChoice}},
 		{"its other spellings", "出 5 道单选题", []notebook.QuestionType{notebook.QuestionChoice}},
 		{"fill in the blank", "出 5 道填空题", []notebook.QuestionType{notebook.QuestionFillBlank}},
-		{"a written answer", "出 3 道简答题", []notebook.QuestionType{notebook.QuestionShortAnswer}},
+		// 主观题 is paused (product decision, 2026-10-20). A request that names it
+		// plans no kind, so the prompt falls back to the two kinds that exist —
+		// rather than instructing a turn to write rows save_question will refuse.
+		{"a written answer", "出 3 道简答题", []notebook.QuestionType{}},
 		{"two kinds, one order", "出 5 道填空题和选择题", []notebook.QuestionType{notebook.QuestionChoice, notebook.QuestionFillBlank}},
 		{"two kinds, the other phrasing", "出 5 道选择题和填空题", []notebook.QuestionType{notebook.QuestionChoice, notebook.QuestionFillBlank}},
 		{"a kind with no answer key is not one", "出 5 道判断题", []notebook.QuestionType{}},
@@ -187,8 +190,8 @@ func TestThePlanIsRenderedForAPerson(t *testing.T) {
 		},
 		{
 			name: "two kinds read as one list",
-			plan: Plan{Count: 4, Types: []notebook.QuestionType{notebook.QuestionChoice, notebook.QuestionShortAnswer}},
-			want: "我准备出 4 道题，题型是选择题、主观题。",
+			plan: Plan{Count: 4, Types: []notebook.QuestionType{notebook.QuestionChoice, notebook.QuestionFillBlank}},
+			want: "我准备出 4 道题，题型是选择题、填空题。",
 		},
 	}
 	for _, test := range tests {

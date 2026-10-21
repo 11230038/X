@@ -22,6 +22,12 @@ type Options struct {
 	// a deployment that asked for one has a mistake in its configuration that
 	// should be reported rather than papered over.
 	LeaseTTL time.Duration
+	// QuestionTTL is how long one question may stay open on a path before it is
+	// closed unanswered. A path allows one open question, so an abandoned one
+	// blocks every question after it for as long as it exists; the ttl is what
+	// makes "the learner walked away" a bounded state rather than a permanent
+	// one. It is refused rather than defaulted for the same reason as the lease.
+	QuestionTTL time.Duration
 	// Gate is the two thresholds that decide what a knowledge point's evidence
 	// means.
 	Gate GateOptions
@@ -32,6 +38,9 @@ func (o Options) Validate() error {
 	if o.LeaseTTL <= 0 {
 		return fmt.Errorf("mastery: the lease ttl must be positive, not %s", o.LeaseTTL)
 	}
+	if o.QuestionTTL <= 0 {
+		return fmt.Errorf("mastery: the question ttl must be positive, not %s", o.QuestionTTL)
+	}
 	return o.Gate.Validate()
 }
 
@@ -39,9 +48,10 @@ func (o Options) Validate() error {
 // change has to leave behind, who is allowed to write it, and what a version
 // guard means when it fails.
 type Service struct {
-	repository Repository
-	leaseTTL   time.Duration
-	gate       GateOptions
+	repository  Repository
+	leaseTTL    time.Duration
+	questionTTL time.Duration
+	gate        GateOptions
 	// clock is a field and not a call to time.Now inside the methods, because
 	// every write here stores a time and a case that cannot choose the time
 	// cannot pin the row it wrote.
@@ -57,10 +67,11 @@ func NewService(repository Repository, options Options) (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		repository: repository,
-		leaseTTL:   options.LeaseTTL,
-		gate:       options.Gate,
-		clock:      func() time.Time { return time.Now().UTC() },
+		repository:  repository,
+		leaseTTL:    options.LeaseTTL,
+		questionTTL: options.QuestionTTL,
+		gate:        options.Gate,
+		clock:       func() time.Time { return time.Now().UTC() },
 	}, nil
 }
 
@@ -69,6 +80,16 @@ func NewService(repository Repository, options Options) (*Service, error) {
 type View struct {
 	Path Path
 	Meta TopicMeta
+	// Open is the question this path is waiting for an answer to, if one is
+	// still open.
+	//
+	// It is part of the view rather than a separate read because the open
+	// question is what the state *is*: while one is waiting, every new question
+	// is refused, and the only id mastery_grade will accept is this one's
+	// QuestionID. A reader told "a question is waiting" without being told which
+	// one can only guess, and the guess that looks natural — the interaction id
+	// in the refusal sentence — is not a question id at all.
+	Open *Interaction
 }
 
 // Create is a request to start a path.
@@ -107,7 +128,30 @@ func (s *Service) Load(ctx context.Context, pathID string, caller authz.Caller) 
 		}
 		meta = TopicMeta{PathID: pathID, Status: StatusActive}
 	}
-	return View{Path: path, Meta: meta}, nil
+	// An interaction that is not there is the ordinary case — a path with
+	// nothing waiting — and it is not an error. Everything else is: a state read
+	// that silently dropped the open question would be the view a caller acts on
+	// while a question is in fact blocking every new one.
+	view := View{Path: path, Meta: meta}
+	open, err := s.repository.ActiveInteraction(ctx, pathID, caller)
+	switch {
+	case err == nil && !s.expired(open, s.clock()):
+		view.Open = &open
+	case err != nil && !isNotFound(err):
+		return View{}, err
+	}
+	// An expired question is reported as no question: the next write settles it
+	// (see settleQuestion). Reading is not the moment to close it, and a state
+	// that showed a question the path would not accept a verdict on would send
+	// the model to grade something already over.
+	return view, nil
+}
+
+// expired reports whether a question has been waiting longer than the question
+// ttl. It is a comparison and not a stored flag, for the same reason the lease's
+// expiry is: nothing here runs on a timer.
+func (s *Service) expired(open Interaction, now time.Time) bool {
+	return !open.CreatedAt.IsZero() && now.Sub(open.CreatedAt) >= s.questionTTL
 }
 
 // Create starts a path, its topic metadata and its history in one transaction.

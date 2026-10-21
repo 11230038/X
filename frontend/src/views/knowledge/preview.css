@@ -1,0 +1,134 @@
+.dialog {
+  width: min(480px, calc(100vw - 32px));
+  padding: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.dialog--wide {
+  width: min(780px, calc(100vw - 32px));
+}
+
+.dialog::backdrop {
+  background: rgb(0 0 0 / 35%);
+}
+
+.dialog__title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.dialog__hint {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.dialog__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--surface-sunken);
+}
+
+.button:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.preview__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.preview__headtext {
+  min-width: 0;
+}
+
+.preview__headtext .dialog__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview__close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.preview__close:hover {
+  background: var(--surface-sunken);
+  color: var(--text);
+}
+
+.preview__note {
+  margin: 0 0 10px;
+  color: var(--warning, var(--text-muted));
+  font-size: 11px;
+}
+
+.preview__range {
+  margin: 10px 0 6px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.preview__text {
+  max-height: 60vh;
+  margin: 0;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.preview__more {
+  margin-top: 10px;
+}
+
+@media (max-width: 640px) {
+  .dialog--wide {
+    width: calc(100vw - 16px);
+  }
+
+  .preview__text {
+    max-height: 55vh;
+  }
+}

@@ -58,6 +58,10 @@ const judgeTemperature = 0.2
 // asks for in words; and it is a field rather than a convention about the
 // reason text, because the surface must not have to read prose to find out
 // whether the prose is an opinion.
+//
+// There are three authors and not two: the bank's stored answer, a model, and
+// the person answering. The third is the one that looks like it could be folded
+// into either and cannot — nobody compared anything and no model was asked.
 type Kind string
 
 const (
@@ -69,6 +73,11 @@ const (
 	// KindModelJudgment is a model reading an answer against the question's
 	// explanation. It is a judgement, and the surface says so.
 	KindModelJudgment Kind = "model_judgment"
+	// KindSelfReport is the person answering declaring that they do not know.
+	// Nothing was read and nothing was compared: the marker already schedules
+	// the question as wrong, and asking either branch to look at an answer that
+	// was never given would spend a call to learn what was just said out loud.
+	KindSelfReport Kind = "self_report"
 )
 
 // Judgment is one answer judged once.

@@ -50,6 +50,18 @@ export const KNOWLEDGE = {
   rebuildSucceeded: '已开始重新解析',
   rebuildFailed: '重新解析没能开始',
 
+  preview: '预览',
+  previewTitle: '文档预览',
+  previewClose: '关闭',
+  previewFailed: '文档正文没能加载出来',
+  previewLoadMore: '加载更多',
+  previewLoadingMore: '正在加载…',
+  previewLoadMoreFailed: '后面的正文没能加载出来，请重试',
+  previewRange: (start: number, end: number, total: number) =>
+    `第 ${start}–${end} 字，共 ${total} 字`,
+  previewTruncated: '解析结果已被截断，这里显示的是服务端保存的那部分正文。',
+  previewEmpty: '这份文档没有可显示的正文',
+
   search: '检索测试',
   searchPlaceholder: '输入一句话，看看会取回哪些片段',
   searchAction: '检索',

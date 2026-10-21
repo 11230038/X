@@ -12,12 +12,18 @@
  *
  * 「来源已删除」这个状态后端没有字段（`实现规划` 记为缺口），这里不伪造，
  * 只把后端给的 `source` 原样显示。
+ *
+ * 「掌握路径」是一个下拉筛选：选中一条路径，列表就只请求这条路径出的题。
+ * 筛选在服务端做（`mastery_path_id`），不是把已经取回来的那几页过滤一遍 ——
+ * 否则翻页会在筛选后漏题。路径名从 `/mastery/paths` 取，只用于画选项。
  */
 
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 import type { ApiFailure } from '../api/client'
 import { describeFailure } from '../api/errors'
+import { listMasteryPaths, type MasterySummary } from '../api/mastery'
 import {
   listQuestionCategories,
   listQuestions,
@@ -44,6 +50,7 @@ import QuestionImportDialog from './questions/QuestionImportDialog.vue'
 import { resolvedLabel, resolvedTone, typeLabel } from './questions/labels'
 
 const PAGE_SIZE = 30
+const router = useRouter()
 
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'failed'
 type ResolvedFilter = '' | 'untouched' | 'open' | 'done'
@@ -55,6 +62,7 @@ const searchTerm = ref('')
 const resolvedFilter = ref<ResolvedFilter>('')
 const typeFilter = ref<'' | QuestionType>('')
 const categoryFilter = ref('')
+const pathFilter = ref('')
 
 const questions = ref<QuestionEntry[]>([])
 const status = ref<LoadStatus>('idle')
@@ -65,6 +73,8 @@ const loadingMore = ref(false)
 const exhausted = ref(false)
 
 const categories = ref<QuestionCategory[]>([])
+/** 下拉里的掌握路径。读不到也不影响读题，只是少了这一个筛选项。 */
+const paths = ref<MasterySummary[]>([])
 
 const selectedId = ref<string | null>(null)
 const busyId = ref('')
@@ -75,12 +85,18 @@ const hasFilters = computed(
     searchTerm.value !== '' ||
     resolvedFilter.value !== '' ||
     typeFilter.value !== '' ||
-    categoryFilter.value !== '',
+    categoryFilter.value !== '' ||
+    pathFilter.value !== '',
 )
 
 const selected = computed(
   () => questions.value.find((entry) => entry.question.question_id === selectedId.value) ?? null,
 )
+
+/** 下拉里显示的名字。路径名读不到时退回 id —— 选项仍然能选，只是不好认。 */
+function pathLabel(path: MasterySummary): string {
+  return path.goal || QUESTIONS.pathFallback(path.path_id)
+}
 
 let searchTimer: number | null = null
 
@@ -111,6 +127,7 @@ async function loadList(): Promise<void> {
       resolved: resolvedFilter.value || undefined,
       question_type: typeFilter.value || undefined,
       category: categoryFilter.value || undefined,
+      mastery_path_id: pathFilter.value || undefined,
       limit: PAGE_SIZE,
       offset: 0,
     })
@@ -141,6 +158,7 @@ async function loadMore(): Promise<void> {
       resolved: resolvedFilter.value || undefined,
       question_type: typeFilter.value || undefined,
       category: categoryFilter.value || undefined,
+      mastery_path_id: pathFilter.value || undefined,
       limit: PAGE_SIZE,
       offset: questions.value.length,
     })
@@ -167,6 +185,7 @@ function clearFilters(): void {
   resolvedFilter.value = ''
   typeFilter.value = ''
   categoryFilter.value = ''
+  pathFilter.value = ''
   void loadList()
 }
 
@@ -180,6 +199,18 @@ async function loadCategories(): Promise<void> {
     categories.value = (await listQuestionCategories()).categories
   } catch {
     // 分类筛选是辅助，不因为它失败就把整个题库画成错误。
+  }
+}
+
+/**
+ * 路径列表只用来画下拉选项。读不到（例如权限快照还没到）时没有这一项，
+ * 题目照常按其余筛选条件列出。
+ */
+async function loadPaths(): Promise<void> {
+  try {
+    paths.value = (await listMasteryPaths()).paths
+  } catch {
+    // 同上：选项是辅助信息。
   }
 }
 
@@ -229,6 +260,18 @@ async function markResolved(entry: QuestionEntry): Promise<void> {
   }
 }
 
+/**
+ * 就这道题提问：跳到题目问答并直接进对话，第一句由那边用题干拼好发出去。
+ * 题库页自己不读题、也不建会话——会话属于 `question_bank` 分区，页面只有一处
+ * 该知道怎么开它。
+ */
+function askAbout(entry: QuestionEntry): void {
+  void router.push({
+    name: 'question-chat',
+    query: { question: entry.question.question_id, send: '1' },
+  })
+}
+
 // ── 导入 ──────────────────────────────────────────────────────────────────
 
 const importDialog = ref<InstanceType<typeof QuestionImportDialog> | null>(null)
@@ -249,7 +292,7 @@ onMounted(() => {
     status.value = 'ready'
     return
   }
-  void Promise.all([loadList(), loadCategories()])
+  void Promise.all([loadList(), loadCategories(), loadPaths()])
 })
 </script>
 
@@ -303,6 +346,18 @@ onMounted(() => {
               <option value="">{{ QUESTIONS.filterCategory }}：{{ QUESTIONS.all }}</option>
               <option v-for="category in categories" :key="category.name" :value="category.name">
                 {{ category.name }}（{{ category.count }}）
+              </option>
+            </select>
+
+            <select
+              v-model="pathFilter"
+              class="bank__select"
+              :aria-label="QUESTIONS.filterPath"
+              @change="refreshForFilter"
+            >
+              <option value="">{{ QUESTIONS.filterPath }}：{{ QUESTIONS.all }}</option>
+              <option v-for="path in paths" :key="path.path_id" :value="path.path_id">
+                {{ pathLabel(path) }}
               </option>
             </select>
           </div>
@@ -390,6 +445,7 @@ onMounted(() => {
             :busy="busyId !== ''"
             @bookmark="toggleBookmark(selected)"
             @resolve="markResolved(selected)"
+            @ask="askAbout(selected)"
           />
 
           <EmptyState

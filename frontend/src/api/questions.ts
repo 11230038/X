@@ -24,6 +24,12 @@ export interface Question {
   difficulty?: string
   source?: string
   material_id?: string
+  /**
+   * 掌握路径出题时记下的坐标。两者要么都有、要么都没有；别的来源（知识库、
+   * 附件、导入）没有这两个字段。
+   */
+  mastery_path_id?: string
+  knowledge_point_id?: string
   knowledge_points?: string[]
   categories: string[]
 }
@@ -62,6 +68,8 @@ export interface ListQuestionsOptions {
   q?: string
   source?: string
   material_id?: string
+  /** 只列出这条掌握路径出的题。 */
+  mastery_path_id?: string
   difficulty?: string
   category?: string
   question_type?: QuestionType
@@ -77,6 +85,7 @@ export function listQuestions(options: ListQuestionsOptions = {}): Promise<Quest
       q: options.q,
       source: options.source,
       material_id: options.material_id,
+      mastery_path_id: options.mastery_path_id,
       difficulty: options.difficulty,
       category: options.category,
       question_type: options.question_type,

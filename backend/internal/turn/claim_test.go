@@ -29,6 +29,7 @@ type stubPaths struct {
 	lease    map[string]any
 	work     context.Context
 	failure  error
+	release  func(context.Context) error
 	requests []ClaimRequest
 }
 
@@ -39,7 +40,7 @@ func (s *stubPaths) Claim(_ context.Context, request ClaimRequest) (Claimed, err
 	if s.failure != nil {
 		return Claimed{}, s.failure
 	}
-	return Claimed{Context: s.work, Lease: s.lease}, nil
+	return Claimed{Context: s.work, Lease: s.lease, Release: s.release}, nil
 }
 
 // aLease is a claim as the domain reports it, spelled out rather than imported:
@@ -102,6 +103,50 @@ func TestATurnOnAPathSaysWhichOneInItsFirstEvent(t *testing.T) {
 		if lease[key] != want {
 			t.Errorf("lease[%q] = %v, want %v", key, lease[key], want)
 		}
+	}
+}
+
+func TestATurnLetsGoOfItsPathWhenItEnds(t *testing.T) {
+	// A finished turn is not a writer, so the runtime releases the path itself
+	// rather than waiting for the lease to expire. Waiting would lock out the
+	// next message in the same conversation whenever the model forgot to call
+	// mastery_leave. The release happens before `done`: watch waits for the end
+	// of the stream, so a release counted here has already happened.
+	released := 0
+	paths := &stubPaths{lease: aLease(), work: context.Background()}
+	paths.release = func(context.Context) error {
+		released++
+		return nil
+	}
+	fixture := claimedFixture(t, paths)
+
+	started := fixture.start(t, StartRequest{Capability: "mastery_path", Content: "接着上次的闭包"})
+	fixture.watch(t, started.Turn.ID)
+
+	if released != 1 {
+		t.Errorf("the path was released %d times, want once when the turn ended", released)
+	}
+}
+
+func TestAFailedReleaseDoesNotChangeHowTheTurnEnded(t *testing.T) {
+	// The turn is already final when the lease is let go. A storage failure at
+	// that point leaves a lease that expires on its own; reporting the completed
+	// turn as failed would tell the client to retry something that succeeded.
+	paths := &stubPaths{lease: aLease(), work: context.Background()}
+	paths.release = func(context.Context) error {
+		return errors.New("the lease table is not answering")
+	}
+	fixture := claimedFixture(t, paths)
+
+	started := fixture.start(t, StartRequest{Capability: "mastery_path", Content: "接着上次的闭包"})
+	records := fixture.watch(t, started.Turn.ID)
+
+	done := only(t, records, event.TypeDone)
+	if got := done.Metadata[event.MetaStatus]; got != string(StatusCompleted) {
+		t.Errorf("done status = %v, want %q", got, StatusCompleted)
+	}
+	if stored := fixture.repository.mustTurn(t, started.Turn.ID); stored.Status != StatusCompleted {
+		t.Errorf("Status = %s, want the turn completed", stored.Status)
 	}
 }
 

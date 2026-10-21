@@ -6,7 +6,11 @@
  */
 
 import { computed, ref } from 'vue'
-import type { RouteLocationNormalizedLoaded, Router } from 'vue-router'
+import type {
+  RouteLocationNormalizedLoaded,
+  RouteLocationRaw,
+  Router,
+} from 'vue-router'
 
 import { isApiFailure } from '../../api/client'
 import { describeFailure } from '../../api/errors'
@@ -14,6 +18,7 @@ import {
   deleteSession,
   listSessions,
   renameSession,
+  type SessionKind,
   type SessionSummary,
 } from '../../api/sessions'
 import { canSurface } from '../../auth/permissions'
@@ -29,6 +34,10 @@ function describe(cause: unknown, fallback: string): string {
 export function useChatSessions(deps: {
   route: RouteLocationNormalizedLoaded
   router: Router
+  /** 这个页面只列哪一种会话。写作页传 `writing`，对话页传 `chat`。 */
+  kind: SessionKind
+  /** 当前会话被删掉、或者要离开当前会话时回到哪里。 */
+  homeRoute: RouteLocationRaw
   /** 当前选中的会话被删掉了：页面负责拆连接、清历史与跳转。 */
   onActiveRemoved: () => Promise<void> | void
 }) {
@@ -59,6 +68,7 @@ export function useChatSessions(deps: {
     }
     try {
       const result = await listSessions({
+        kind: deps.kind,
         limit: SESSION_PAGE,
         offset: reset ? 0 : sessions.value.length,
       })
@@ -117,7 +127,7 @@ export function useChatSessions(deps: {
       sessionListError.value = null
       if (activeId.value === session.session_id) {
         await deps.onActiveRemoved()
-        await deps.router.push({ name: 'chat' })
+        await deps.router.push(deps.homeRoute)
       }
       void loadSessions(true)
     } catch (cause) {

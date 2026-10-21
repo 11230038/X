@@ -126,6 +126,14 @@ func TestTheSessionIsNamedBeforeTheFirstEvent(t *testing.T) {
 	if first.Content != started.Session.ID {
 		t.Errorf("Content = %q, want the session id %q", first.Content, started.Session.ID)
 	}
+	// A client that sent no session id gets a conversation, never a writing
+	// session: the writing page always creates its own before the first turn.
+	if started.Session.Kind != session.KindChat {
+		t.Errorf("implicit session kind = %q, want chat", started.Session.Kind)
+	}
+	if len(fixture.sessions.createdKinds) != 1 || fixture.sessions.createdKinds[0] != session.KindChat {
+		t.Errorf("created kinds = %v, want [chat]", fixture.sessions.createdKinds)
+	}
 }
 
 func TestTheAnswerBecomesPartOfTheConversation(t *testing.T) {

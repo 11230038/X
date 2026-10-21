@@ -21,7 +21,7 @@ import (
 // against a conversation without a database behind it, and so that what the
 // runtime may do to a conversation is a list someone can read.
 type Sessions interface {
-	Create(ctx context.Context, caller authz.Caller) (session.Session, error)
+	Create(ctx context.Context, caller authz.Caller, kind session.Kind) (session.Session, error)
 	Get(ctx context.Context, sessionID string, caller authz.Caller) (session.Session, error)
 	Rename(ctx context.Context, sessionID, title string, caller authz.Caller) (session.Session, error)
 	AppendMessage(ctx context.Context, input session.NewMessage, caller authz.Caller) (session.Message, error)

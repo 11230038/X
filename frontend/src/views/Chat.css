@@ -4,6 +4,20 @@
   height: 100%;
 }
 
+/*
+ * 写作页的「对话模块框」：同一套工作台，但收成一块有边的模块，和左边那份
+ * 写作历史分开看。它只是框住已有内容，不改任何行为。
+ */
+.main--writing {
+  height: calc(100% - 32px);
+  margin: 14px 18px 18px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgb(20 26 38 / 5%);
+}
+
 .main__head {
   display: flex;
   gap: 12px;
@@ -31,6 +45,22 @@
   font-size: 13px;
 }
 
+/* 写作会话右上角的退出动作。标题用 space-between 顶开，这里再靠一次右。 */
+.main__end {
+  flex: none;
+  margin-left: auto;
+  padding: 5px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.main__end:hover {
+  background: var(--surface-sunken);
+}
+
 .main__body {
   flex: 1;
   overflow-y: auto;
@@ -51,26 +81,3 @@
   cursor: pointer;
 }
 
-.notices {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 0 24px;
-}
-
-.banner {
-  margin: 0 0 2px;
-  padding: 7px 11px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-}
-
-.banner--pending {
-  background: var(--surface-sunken);
-  color: var(--text-muted);
-}
-
-.banner--error {
-  background: var(--danger-soft);
-  color: var(--danger);
-}

@@ -169,6 +169,7 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	knowledgeBase.GET("/knowledge-bases/:kbID", handlers.KnowledgeBase.Get)
 	knowledgeBase.DELETE("/knowledge-bases/:kbID", handlers.KnowledgeBase.Delete)
 	knowledgeBase.POST("/knowledge-bases/:kbID/documents", handlers.KnowledgeBase.AddDocument)
+	knowledgeBase.GET("/knowledge-bases/:kbID/documents/:documentID/text", handlers.KnowledgeBase.DocumentText)
 	knowledgeBase.DELETE("/knowledge-bases/:kbID/documents/:documentID", handlers.KnowledgeBase.RemoveDocument)
 	// Rebuilding is per document: the path says which collection the request is
 	// about, and the body says which document in it to re-read.

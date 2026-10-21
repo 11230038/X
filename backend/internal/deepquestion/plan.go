@@ -259,13 +259,18 @@ var (
 	// "给我 5 题", "三道". The counting word is what makes it a count — without
 	// it "第一章出题" would read as a request for one question.
 	countPattern = regexp.MustCompile(`([0-9]+|[一二两三四五六七八九十]+)\s*(?:道|个|题)`)
-	// choiceWords, fillBlankWords and shortAnswerWords are the three kinds'
-	// spellings. A kind nobody can judge is not one of them: 判断题 is a way of
-	// writing a two-option choice question, and reading it as one would be this
-	// service deciding how somebody else's question is answered.
-	choiceWords      = regexp.MustCompile("选择|单选|多选")
-	fillBlankWords   = regexp.MustCompile("填空")
-	shortAnswerWords = regexp.MustCompile("主观|简答|问答|论述")
+	// choiceWords and fillBlankWords are the two kinds this turn may write. A
+	// kind nobody can judge is not one of them: 判断题 is a way of writing a
+	// two-option choice question, and reading it as one would be this service
+	// deciding how somebody else's question is answered.
+	//
+	// 主观题 was the third kind and is deliberately not read any more (product
+	// decision, 2026-10-20): the bank still stores and judges those rows, but a
+	// turn that planned to write one would have every save_question refused. A
+	// request that asks for 简答/论述 therefore names no kind, and the prompt's
+	// rule about the two kinds does the rest.
+	choiceWords    = regexp.MustCompile("选择|单选|多选")
+	fillBlankWords = regexp.MustCompile("填空")
 	// The three difficulties. The earliest spelling mentioned wins, so a sentence
 	// that names two of them ("从简单到困难") is read as the first one it names.
 	//
@@ -329,14 +334,13 @@ func readCount(content string, limits Limits) int {
 // tests and read by a client, and a list whose order depended on the phrasing
 // would be a list with no meaning.
 func readTypes(content string) []notebook.QuestionType {
-	kinds := make([]notebook.QuestionType, 0, 3)
+	kinds := make([]notebook.QuestionType, 0, 2)
 	for _, asked := range []struct {
 		kind  notebook.QuestionType
 		words *regexp.Regexp
 	}{
 		{notebook.QuestionChoice, choiceWords},
 		{notebook.QuestionFillBlank, fillBlankWords},
-		{notebook.QuestionShortAnswer, shortAnswerWords},
 	} {
 		if asked.words.MatchString(content) {
 			kinds = append(kinds, asked.kind)

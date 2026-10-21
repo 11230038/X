@@ -26,7 +26,7 @@ export const PARTNERS = {
 export const CO_WRITER = {
   title: '协同写作',
   description:
-    '选一个伙伴和写作步骤，这里会把第一句话带进对话。真正的写作在对话里进行；这一版没有独立的文稿存储，写下来的内容就是对话消息。',
+    '选一个伙伴和写作步骤，就在这一页开始写。写作的来回只留在写作列表里，不会混进对话历史；这一版没有独立的文稿存储，写下来的内容就是对话消息。',
   stepTitle: '写作步骤',
   personaTitle: '选一个伙伴',
   noPersona: '不指定伙伴',
@@ -37,9 +37,22 @@ export const CO_WRITER = {
   contentLabel: '这次写什么',
   contentPlaceholder: '写一句主题，越具体越好',
   contentPlaceholderRevise: '把要改的文字贴在这里',
-  start: '去对话开始',
+  start: '开始写作',
+  starting: '正在开始…',
+  startFailed: '这次写作没能开始，请重试',
+  /** 写作会话里的退出动作：只回到准备页，不删除这段历史。 */
+  endWriting: '结束写作',
   emptyContent: '先写一句主题，或者贴上要改的文字',
   backToPartners: '看看伙伴',
+
+  /** 左侧列表是写作自己的历史，措辞不能沿用对话页那套。 */
+  listTitle: '写作',
+  listEmptyAction: '开始一段写作',
+  listNewLabel: '新建写作',
+  composerPlaceholder: '接着写，Enter 发送，Shift+Enter 换行',
+  emptySession: '这段写作还没有消息',
+  emptySessionHint: '输入一句话接着写，或者回到写作首页重新开始。',
+  emptySessionAction: '回到写作首页',
 
   steps: {
     free: {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"backend/internal/authz"
@@ -365,9 +366,27 @@ func (s *Service) stale(ctx context.Context, review Review, caller authz.Caller)
 // Nothing is judged for a skip, and that is not an optimisation: the user
 // answered the question with "not now", and a verdict on it would be a verdict
 // on an answer that was not given.
+//
+// A "needs review" marker with no answer at all is the same kind of thing said
+// differently — the user declared they do not know — so it is not sent to a
+// judge either. The marker already schedules the question as wrong, and there is
+// no answer to read: an objective comparison would return "you left it blank"
+// after checking the bank, and a subjective question would spend a model call
+// (and depend on the provider being up) to learn what the user just said. The
+// verdict is recorded as self-reported, because saying "not compared, not
+// judged" is the honest label for it.
 func (s *Service) judgeAnswer(ctx context.Context, entry StoredEntry, review Review) (*Judgment, error) {
 	if review.Marker == MarkerSkipped {
 		return nil, nil
+	}
+	if review.Marker == MarkerNeedsReview && strings.TrimSpace(review.UserAnswer) == "" {
+		return &Judgment{
+			Kind:      KindSelfReport,
+			IsCorrect: false,
+			Reason:    selfReportReason,
+			Rubric:    []string{},
+			Boundary:  selfReportBoundary,
+		}, nil
 	}
 	judged, err := s.judge.Judge(ctx, entry.Question, review.UserAnswer)
 	if err != nil {
@@ -375,6 +394,13 @@ func (s *Service) judgeAnswer(ctx context.Context, entry StoredEntry, review Rev
 	}
 	return &judged, nil
 }
+
+// selfReportReason and selfReportBoundary are what a declaration of "I do not
+// know" says about itself when it is read back.
+const (
+	selfReportReason   = "你没有作答，按「不会」记为答错。"
+	selfReportBoundary = "这不是对答案的比对，也不是模型的判断，而是作答者自己声明不会。"
+)
 
 // correctnessOf is the judgement as the review event's column holds it: nil when
 // nothing was judged, which is a skip and only ever a skip.

@@ -36,6 +36,8 @@ type KnowledgeBases interface {
 	DeleteKnowledgeBase(ctx context.Context, kbID string, caller authz.Caller) error
 	Documents(ctx context.Context, kbID string, caller authz.Caller) ([]kb.Document, error)
 	Document(ctx context.Context, documentID string, caller authz.Caller) (kb.Document, error)
+	ReadWindow(ctx context.Context, documentID string, offset, limit int64, caller authz.Caller) (kb.Window, error)
+	ChunkSpans(ctx context.Context, documentID string, caller authz.Caller) ([]kb.ChunkSpan, error)
 	AddDocument(ctx context.Context, fileID, kbID string, caller authz.Caller) (kb.Document, error)
 	RemoveDocument(ctx context.Context, documentID string, caller authz.Caller) error
 	RebuildDocument(ctx context.Context, documentID string, caller authz.Caller) (kb.Document, error)

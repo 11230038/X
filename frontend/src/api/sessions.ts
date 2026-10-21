@@ -8,9 +8,19 @@
 
 import { request } from './client'
 
+/**
+ * 会话属于哪个页面。它是**分区**，不是权限：写作、掌握路径与题目问答会话仍然
+ * 走 `chat` 权限面，`kind` 只决定它出现在哪一份列表里。
+ */
+export type SessionKind = 'chat' | 'writing' | 'mastery' | 'question_bank'
+
+/** 列表可以要一半，也可以显式地要全部（回收站、导出）。 */
+export type SessionKindFilter = SessionKind | 'all'
+
 export interface SessionSummary {
   session_id: string
   title: string
+  kind: SessionKind
   created_at: string
   updated_at: string
   /** 只有回收站里的会话才有这个字段；活跃会话不带（不是 null）。 */
@@ -35,18 +45,21 @@ export interface MessageSummary {
 
 export interface ListSessionsOptions {
   deleted?: boolean
+  /** 不传时后端按 `chat` 处理；要几份合在一起看才显式传 `all`。 */
+  kind?: SessionKindFilter
   limit?: number
   offset?: number
 }
 
-export function createSession(): Promise<SessionSummary> {
-  return request<SessionSummary>('/sessions', { method: 'POST' })
+export function createSession(kind: SessionKind = 'chat'): Promise<SessionSummary> {
+  return request<SessionSummary>('/sessions', { method: 'POST', query: { kind } })
 }
 
 export function listSessions(options: ListSessionsOptions = {}): Promise<SessionList> {
   return request<SessionList>('/sessions', {
     query: {
       deleted: options.deleted,
+      kind: options.kind,
       limit: options.limit,
       offset: options.offset,
     },

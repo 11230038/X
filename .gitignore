@@ -4,6 +4,7 @@ bin/
 
 # Local uploaded content and staging files
 /data/upload/
+/data/*.log
 
 # Local tooling shortcuts
 redis-server.exe.lnk

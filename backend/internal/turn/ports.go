@@ -319,6 +319,18 @@ type Claimed struct {
 	// domain's reading of who holds a path, and the runtime's job is to publish
 	// them in the place a client looks, not to have an opinion about them.
 	Lease map[string]any
+	// Release lets go of the path this turn was writing, and the runtime calls it
+	// once the turn has reached its final state — before the client is told the
+	// turn is over, so a message sent the instant `done` arrives finds the path
+	// free.
+	//
+	// It is here rather than left to the model's mastery_leave because a finished
+	// turn is not a writer: waiting for the lease to expire would lock out the
+	// very next turn of the same conversation whenever the model forgets to say
+	// goodbye. It is safe for a turn that never held the path — releasing is
+	// scoped to the caller's turn id — and it follows a mastery_switch to the
+	// path the turn ended on. Nil for a turn with no path.
+	Release func(ctx context.Context) error
 }
 
 // Notebook is the part of the question bank domain the runtime uses: the bank a

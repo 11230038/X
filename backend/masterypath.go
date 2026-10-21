@@ -72,9 +72,14 @@ func (m masteryPath) Claim(ctx context.Context, request turn.ClaimRequest) (turn
 	}
 	path := masterypath.NewTurnPath(m.service, m.bank, m.reader, m.judge,
 		arrival.Path.ID, actor, request.Caller, arrival.Path.Version, arrival.Ours, arrival.Lease)
+	// The runtime lets the path go when the turn ends. path.Leave releases
+	// whichever path the turn is on by then, so a mastery_switch mid-turn is
+	// followed rather than leaving the destination locked. It is a no-op for a
+	// turn that never held the lease.
 	return turn.Claimed{
 		Context: tool.WithMasteryPath(ctx, path),
 		Lease:   arrival.Metadata(),
+		Release: path.Leave,
 	}, nil
 }
 
@@ -96,7 +101,8 @@ func newMasteryPaths(
 	judge *practice.Judge,
 ) (masteryPath, error) {
 	service, err := mastery.NewService(mastery.NewGORMRepository(db), mastery.Options{
-		LeaseTTL: cfg.Mastery.LeaseTTL,
+		LeaseTTL:    cfg.Mastery.LeaseTTL,
+		QuestionTTL: cfg.Mastery.QuestionTTL,
 		Gate: mastery.GateOptions{
 			Consecutive: cfg.Mastery.GateConsecutive,
 			MinEvidence: cfg.Mastery.GateMinEvidence,

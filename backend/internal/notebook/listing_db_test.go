@@ -157,9 +157,13 @@ func TestListNarrowsToWhatTheFilterSelects(t *testing.T) {
 		{
 			text:   "闭包是什么",
 			second: 0,
-			adjust: func(question *Question) { question.Difficulty = "medium" },
-			names:  []string{"数学"},
-			marks:  Change{Bookmarked: &yes, Resolved: &no},
+			adjust: func(question *Question) {
+				question.Difficulty = "medium"
+				question.MasteryPathID = "mp_1"
+				question.KnowledgePointID = "kp_001"
+			},
+			names: []string{"数学"},
+			marks: Change{Bookmarked: &yes, Resolved: &no},
 		},
 		{
 			text:   "What is a closure",
@@ -195,6 +199,7 @@ func TestListNarrowsToWhatTheFilterSelects(t *testing.T) {
 		{"one difficulty", Filter{Difficulty: "easy"}, wantTexts("50% 的人会答错")},
 		{"one type", Filter{Type: QuestionFillBlank}, wantTexts("50% 的人会答错")},
 		{"one category", Filter{Category: "数学"}, wantTexts("闭包是什么")},
+		{"one mastery path", Filter{MasteryPathID: "mp_1"}, wantTexts("闭包是什么")},
 		{"a category nobody is filed under", Filter{Category: "物理"}, nil},
 		// The three states of resolved, which is why the column is not a flag.
 		{"untouched", Filter{Resolution: ResolutionUntouched}, wantTexts("50% 的人会答错")},

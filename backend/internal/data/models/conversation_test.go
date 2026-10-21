@@ -28,7 +28,7 @@ func TestConversationModelMappings(t *testing.T) {
 			model:      &Session{},
 			table:      "sessions",
 			primaryKey: "session_id",
-			columns:    []string{"title", "creat_time", "update_time", "preferences_json", "workspace_mode"},
+			columns:    []string{"title", "kind", "creat_time", "update_time", "preferences_json", "workspace_mode"},
 		},
 		{
 			name:       "message",

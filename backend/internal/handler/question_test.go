@@ -162,6 +162,7 @@ func TestQuestionHandlerListTurnsTheQueryIntoAFilter(t *testing.T) {
 		{name: "by question type", query: "?question_type=choice", want: notebook.Filter{Caller: handlerCaller(), Type: notebook.QuestionChoice}},
 		{name: "by resolution", query: "?resolved=done", want: notebook.Filter{Caller: handlerCaller(), Resolution: notebook.ResolutionDone}},
 		{name: "by category", query: "?category=数学", want: notebook.Filter{Caller: handlerCaller(), Category: "数学"}},
+		{name: "by mastery path", query: "?mastery_path_id=mp_1", want: notebook.Filter{Caller: handlerCaller(), MasteryPathID: "mp_1"}},
 		{name: "paging", query: "?limit=20&offset=40", want: notebook.Filter{Caller: handlerCaller(), Limit: 20, Offset: 40}},
 	}
 	for _, test := range tests {

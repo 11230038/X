@@ -16,7 +16,15 @@ import (
 // deliberately about the call rather than about the failure: whatever went
 // wrong inside the tool is the operator's to read, not the model's, and not the
 // client's.
-const toolFailureText = "The tool could not be run. Try a different approach or answer without it."
+//
+// What it does say is the two things the model gets wrong at that moment. It
+// must not report the action as done — a mastery turn that says "this question
+// has been filed" about a call that never reached the bank is telling the
+// learner something false. And it must not conclude the tool is gone: "answer
+// without it" made one failed call into a whole turn spent teaching with the
+// tools laid aside, and the next question was never asked at all.
+const toolFailureText = "The tool could not be run for this call. Do not report it as done, " +
+	"and do not conclude the tool is unavailable — call it again when it is next needed."
 
 // dispatch runs one tool call and returns the message that answers it.
 //

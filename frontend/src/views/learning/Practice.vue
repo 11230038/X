@@ -82,8 +82,22 @@ const stateVersion = ref<number | null>(null)
 const result = ref<ReviewResult | null>(null)
 const submitFailure = ref<ApiFailure | null>(null)
 const staleState = ref<ReviewState | null>(null)
+/** 「我不会，去提问」正在把当前题记为答错。它与 `phase` 分开：跳转才是主目的。 */
+const asking = ref(false)
+const askFailure = ref<ApiFailure | null>(null)
 /** 模型判断失败时那句话是"可以重试"还是"换个动作"靠它分。 */
 const failureCode = computed(() => submitFailure.value?.code ?? '')
+
+/**
+ * 「我不会，去提问」可用的时机：这道题还没有被判过，且没有别的提交在跑。
+ *
+ * 判分已经落下来的题不再给这个入口——那时再记一次答错是第二份复习记录，
+ * 不是"当前题目判错"。判分失败与不可判的两种状态里它仍然有用：那条提交没
+ * 有被记下，而这一次走的是不判分的路径。
+ */
+const canAsk = computed(
+  () => phase.value === 'answering' || phase.value === 'failed' || phase.value === 'not_judgeable',
+)
 
 function newRequestId(): string {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
@@ -99,6 +113,8 @@ function prepare(): void {
   result.value = null
   submitFailure.value = null
   staleState.value = null
+  asking.value = false
+  askFailure.value = null
 }
 
 async function loadQueue(): Promise<void> {
@@ -136,7 +152,11 @@ const answerValue = computed(() => {
 })
 
 const canSubmit = computed(
-  () => current.value !== null && answerValue.value !== '' && phase.value !== 'submitting',
+  () =>
+    current.value !== null &&
+    answerValue.value !== '' &&
+    phase.value !== 'submitting' &&
+    !asking.value,
 )
 
 async function submit(marker: Marker = ''): Promise<void> {
@@ -233,6 +253,57 @@ function skip(): void {
   void submit('skipped')
 }
 
+/**
+ * 我不会，去提问：先把这道题按「不会」记成答错，再带着题号跳到题目问答。
+ * `send=1` 让那一页不必停在选题上：它会选中这道题、建好会话，把题干连同默认
+ * 问题直接发给模型，地址随即变成 `/questions/chat/<session_id>`。
+ *
+ * 记录用的还是练习自己的提交接口，只是 marker 是 `needs_review` 且不带作答。
+ * 服务端对这一对组合不判分：题按答错进复习安排，但是谁也没有读这份"答案"——
+ * 主观题也不会因此去调模型，判分服务在不在都不影响这个按钮。
+ *
+ * 失败不挡跳转的反面：跳转是主目的，但如果记录没成，这次点击就只完成了一半。
+ * 所以失败留在原处（带原因与重试），提交与跳过照常可用；下一次点它会用同一个
+ * `request_id` 重发，服务端只记一次。
+ */
+async function askAboutCurrent(): Promise<void> {
+  const item = current.value
+  if (!item || asking.value || !canAsk.value) return
+  asking.value = true
+  askFailure.value = null
+  try {
+    await submitReview({
+      request_id: requestId.value,
+      question_id: item.question.question_id,
+      user_answer: '',
+      marker: 'needs_review',
+      rating: null,
+      version: stateVersion.value,
+    })
+    await router.push({
+      name: 'question-chat',
+      query: { question: item.question.question_id, send: '1' },
+    })
+  } catch (cause) {
+    const failure = toFailure(cause)
+    // 两次冲突按各自的修法处理，否则「重试」只会把同一个错的请求再发一遍：
+    // 版本落后就把服务端带回的最新版本用上（这次没有被记下，可以原样重发）；
+    // 编号被别的作答占用过就换一个新的。
+    if (failure.code === 'stale_review') {
+      const latest = stateFromDetails(failure.details)
+      if (latest) {
+        stateVersion.value = latest.version
+        item.state = latest
+      }
+    } else if (failure.code === 'conflicting_request_id') {
+      requestId.value = newRequestId()
+    }
+    askFailure.value = failure
+  } finally {
+    asking.value = false
+  }
+}
+
 // ── 展示 ──────────────────────────────────────────────────────────────────
 
 function typeLabel(type: string): string {
@@ -245,6 +316,23 @@ function reasonLabel(item: QueueItem): string {
 
 function confidenceText(judgment: Judgment): string {
   return judgment.confidence === null ? '' : formatPercent(judgment.confidence, 0)
+}
+
+/**
+ * 判分标题按作者分：题库的答案、模型、还是作答者自己。
+ *
+ * `self_report` 不可能是前两者的任何一种——没有比对也没有模型，把它挂在
+ * 「AI 的判断」下面就是在替模型认领一句话。
+ */
+function judgmentTitle(judgment: Judgment): string {
+  switch (judgment.kind) {
+    case 'objective':
+      return PRACTICE.objectiveTitle
+    case 'self_report':
+      return PRACTICE.selfReportTitle
+    default:
+      return PRACTICE.modelTitle
+  }
 }
 
 const quotaResetAt = computed(() => {
@@ -279,19 +367,17 @@ onMounted(() => {
       :title="PRACTICE.emptyQueue"
       :hint="PRACTICE.emptyQueueHint"
       :action-label="PRACTICE.goQuestions"
-      secondary-label="回到学习首页"
       @action="router.push({ name: 'questions' })"
-      @secondary="router.push({ name: 'learning' })"
     />
 
     <EmptyState
       v-else-if="finished"
       title="这一轮做完了"
-      hint="可以重新抽一轮队列，或者回学习首页看看下一步。"
+      hint="可以重新抽一轮队列，或者回题库看看。"
       action-label="再看一次队列"
-      secondary-label="回到学习首页"
+      :secondary-label="PRACTICE.backToQuestions"
       @action="loadQueue"
-      @secondary="router.push({ name: 'learning' })"
+      @secondary="router.push({ name: 'questions' })"
     />
 
     <section v-else-if="current" class="card">
@@ -305,6 +391,25 @@ onMounted(() => {
       </header>
 
       <p class="card__question">{{ current.question.text }}</p>
+
+      <!-- 题目旁边：不会就先把这道题记成答错，再去题目问答里问它。 -->
+      <div v-if="canAsk" class="card__ask">
+        <button
+          type="button"
+          class="ghost card__ask-button"
+          :disabled="asking || phase === 'submitting'"
+          @click="askAboutCurrent"
+        >
+          {{ asking ? PRACTICE.asking : PRACTICE.askAbout }}
+        </button>
+        <p v-if="askFailure" class="card__ask-error" role="alert">
+          <span>{{ PRACTICE.askFailed }}</span>
+          {{ describeFailure(askFailure) }}
+          <button type="button" class="card__ask-retry" @click="askAboutCurrent">
+            {{ PRACTICE.retry }}
+          </button>
+        </p>
+      </div>
 
       <p v-if="current.answer.attempt_count > 0" class="card__prior">
         {{ QUESTIONS.attempts(current.answer.attempt_count) }}
@@ -357,7 +462,7 @@ onMounted(() => {
         <button
           type="button"
           class="ghost"
-          :disabled="phase === 'submitting'"
+          :disabled="phase === 'submitting' || asking"
           @click="skip"
         >
           {{ phase === 'submitting' ? PRACTICE.skipping : PRACTICE.skip }}
@@ -368,7 +473,7 @@ onMounted(() => {
       <section v-if="phase === 'judged' && result?.judgment" class="judgment">
         <header class="judgment__head">
           <h2 class="judgment__title">
-            {{ result.judgment.kind === 'objective' ? PRACTICE.objectiveTitle : PRACTICE.modelTitle }}
+            {{ judgmentTitle(result.judgment) }}
           </h2>
           <span
             class="judgment__verdict"
@@ -461,7 +566,7 @@ onMounted(() => {
       <QuotaState
         v-else-if="phase === 'quota'"
         :reset-at="quotaResetAt"
-        @back="router.push({ name: 'learning' })"
+        @back="router.push({ name: 'questions' })"
       />
     </section>
 

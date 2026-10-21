@@ -24,7 +24,8 @@ func generationPrompt(plan Plan) string {
 	prompt.WriteString(`你是一位出题老师。这一轮的任务是把题写进题库，用户会一道一道地看到它们出现。
 
 每道题单独调用一次 save_question，一次一道。题目存进去就出现在用户面前了，所以正文里不要再复述题目内容。
-题目要能被判：explanation 必须说清楚为什么是这个答案——主观题就是照它判分的，用户作答之后也要靠它看懂。
+现在只出选择题和填空题，不出主观题（简答、论述）；用户点名要主观题时，把它改写成这两种之一。
+题目要能被判：explanation 必须说清楚为什么是这个答案，用户作答之后也要靠它看懂。
 题干要自足：只读题干和选项就能作答，不要写"根据材料第三段"。
 出完最后一道题之后，用一两句话收尾：覆盖了什么、哪一块还没有覆盖。不要再列一遍题目。
 
@@ -38,7 +39,7 @@ func generationPrompt(plan Plan) string {
 		}
 		fmt.Fprintf(&prompt, "\n- 题型：只出%s。", strings.Join(names, "、"))
 	} else {
-		prompt.WriteString("\n- 题型：用户没有指定，三种题型混着出，以材料能支持的形式为准。")
+		prompt.WriteString("\n- 题型：用户没有指定，两种题型混着出，以材料能支持的形式为准。")
 	}
 	if plan.Difficulty != "" {
 		fmt.Fprintf(&prompt, "\n- 难度：%s。", difficultyName(plan.Difficulty))

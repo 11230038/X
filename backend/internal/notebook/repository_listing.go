@@ -72,6 +72,9 @@ func applyFilter(query *gorm.DB, filter Filter) *gorm.DB {
 	if filter.MaterialID != "" {
 		query = query.Where("material_id = ?", filter.MaterialID)
 	}
+	if filter.MasteryPathID != "" {
+		query = query.Where("mastery_path_id = ?", filter.MasteryPathID)
+	}
 	if filter.Difficulty != "" {
 		query = query.Where("difficulty = ?", filter.Difficulty)
 	}

@@ -2,18 +2,21 @@
 /**
  * 一级导航。`设计说明书.md` §2.2 的九个分组，§3.1 的两条形态要求。
  *
- * 九个分组现在都有落点：有后端的落到真页面，没有后端的落到各自的占位页
- * （写作 / 扩展 / 伙伴）。**不按权限隐藏分组** —— 进得去却看到"没有权限"比
- * 导航里少一项更容易理解，而且权限快照可能还没到。
+ * 这一版把一级入口收成六个：学习、对话、掌握路径、题库、数据库、其他。学习
+ * 首页是日常起点，置顶；写作挂在对话下面，学习地图挂在掌握路径下面，练习挂在
+ * 题库下面，活书与沉浸阅读挂在数据库下面，作为二级入口；原来的其余分组暂时收进
+ * 「其他」，作为它的二级入口 —— 这是前端实现上的临时归并，不改路由，也不
+ * 改权限面。**不按权限隐藏入口** ——
+ * 进得去却看到"没有权限"比导航里少一项更容易理解，而且权限快照可能还没到。
  *
- * 管理台不进九组：它不是日常入口，放在头像菜单里，且只有管理员看得到。
+ * 管理台不在导航里：它不是日常入口，放在头像菜单里，且只有管理员看得到。
  *
  * 图标是内联 SVG，没有引图标库。§2.2 要求**图标必须配文字**，所以图标是
  * 辅助，文字才是主体 —— 收合态才只剩图标，且悬停出名称（§3.1）。
  */
 
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import { currentAccount, clearSession } from '../../session'
 import { logout } from '../../api/auth'
@@ -26,14 +29,59 @@ interface NavEntry {
   to: string
 }
 
-/** §2.2 的九个分组，顺序照那张表。 */
-const entries: readonly NavEntry[] = [
-  { key: 'chat', label: '对话', to: '/chat' },
+/**
+ * 一级入口。顺序按产品这一版的要求：学习置顶，其后是对话、掌握路径、题库、
+ * 数据库，「其他」收在末尾。
+ */
+const primaryEntries: readonly NavEntry[] = [
   { key: 'learning', label: '学习', to: '/learning' },
-  { key: 'materials', label: '材料', to: '/knowledge-bases' },
-  { key: 'memory', label: '记忆', to: '/memory' },
-  { key: 'writing', label: '写作', to: '/co-writer' },
+  { key: 'chat', label: '对话', to: '/chat' },
+  { key: 'mastery', label: '掌握路径', to: '/mastery' },
   { key: 'questions', label: '题库', to: '/questions' },
+  { key: 'materials', label: '数据库', to: '/knowledge-bases' },
+]
+
+/**
+ * 对话下的二级入口。写作页自己就是工作台：没有 sessionId 时是准备表，有
+ * sessionId 时是那段写作，所以和对话放在一组。
+ */
+const chatEntries: readonly NavEntry[] = [
+  { key: 'writing', label: '写作', to: '/co-writer' },
+]
+
+/**
+ * 题库下的二级入口。练习已经有了自己的页面外壳（`views/PracticePage.vue`），
+ * 不再借用学习外壳。题目问答是题库自己的对话页：选一道题，就这道题提问，
+ * 历史按 `kind=question_bank` 与普通对话分开。
+ */
+const questionEntries: readonly NavEntry[] = [
+  { key: 'question-chat', label: '题目问答', to: '/questions/chat' },
+  { key: 'practice', label: '练习', to: '/practice' },
+]
+
+/**
+ * 掌握路径下的二级入口。路径对话是一段独立的工作台：能力固定
+ * `mastery_path`，会话按 `kind=mastery` 与对话页分区；学习地图看的是同一条
+ * 路径上的知识点分布。
+ */
+const masteryEntries: readonly NavEntry[] = [
+  { key: 'mastery-chat', label: '路径对话', to: '/mastery/chat' },
+  { key: 'learning-map', label: '学习地图', to: '/learning-map' },
+]
+
+/**
+ * 数据库下的二级入口。活书与沉浸阅读的正文都来自知识库里的文档，所以收在
+ * 数据库下，而不是散在「其他」里。
+ */
+const materialEntries: readonly NavEntry[] = [
+  { key: 'books', label: '活书', to: '/books' },
+  { key: 'reading', label: '沉浸阅读', to: '/reading' },
+]
+
+/** 「其他」下的二级入口：还没有归到别处的一级分组加设置，暂时全部收在这里。 */
+const otherEntries: readonly NavEntry[] = [
+  { key: 'watching', label: '视频学习', to: '/watching' },
+  { key: 'memory', label: '记忆', to: '/memory' },
   { key: 'extensions', label: '扩展', to: '/skills' },
   { key: 'companions', label: '伙伴', to: '/partners' },
   { key: 'settings', label: '设置', to: '/settings/account' },
@@ -47,16 +95,26 @@ const entries: readonly NavEntry[] = [
  */
 const ICON_PATHS: Record<string, string> = {
   chat: 'M4 5h16v10H9l-5 4V5z',
+  mastery: 'M4 20h4v-5h4V9h4V4h4',
+  'mastery-chat': 'M4 5h16v11H10l-6 4V5zM8 10h8M8 13h5',
   learning: 'M4 5h7v14H4zM13 5h7v14h-7z',
+  watching: 'M4 5h16v14H4zM10 9l5 3-5 3V9z',
+  'learning-map': 'M4 5h16v14H4zM4 10h16M10 10v9M16 10v9',
+  reading: 'M4 5h7a3 3 0 013 3v11a3 3 0 00-3-3H4zM20 5h-7a3 3 0 00-3 3v11a3 3 0 013-3h7z',
+  books: 'M4 5h6v14H4zM11 7l4-2 5 12-4 2z',
   materials: 'M12 4l8 4-8 4-8-4 8-4zM4 12l8 4 8-4M4 16l8 4 8-4',
   memory: 'M12 4a4 4 0 014 4 4 4 0 010 8 4 4 0 01-8 0 4 4 0 010-8 4 4 0 014-4z',
   writing: 'M5 19l1-4L16 5l3 3L9 18l-4 1z',
   questions: 'M5 4h14v16H5zM8 9h8M8 13h8M8 17h4',
+  'question-chat': 'M4 5h16v11H10l-6 4V5zM9 8v2M9 12h.01M12 8h4M12 12h3',
+  practice: 'M5 5h14v14H5zM8 12l2 2 4-4',
   extensions: 'M10 4h4v4h4v4h-4v4h-4v-4H6V8h4z',
   companions:
     'M9 5a3 3 0 013 3 3 3 0 01-6 0 3 3 0 013-3zM4 19c0-3 2-5 5-5s5 2 5 5M16 7a2 2 0 010 4M15 19c0-2 1-4 3-4',
   settings:
     'M12 9a3 3 0 100 6 3 3 0 000-6zM12 3v2M12 19v2M4.2 7.2l1.4 1.4M18.4 15.4l1.4 1.4M3 12h2M19 12h2M4.2 16.8l1.4-1.4M18.4 8.6l1.4-1.4',
+  other: 'M5 12h.01M12 12h.01M19 12h.01',
+  chevronDown: 'M6 9l6 6 6-6',
   chevronLeft: 'M14 6l-6 6 6 6',
   chevronRight: 'M10 6l6 6-6 6',
 }
@@ -65,10 +123,105 @@ const props = defineProps<{ collapsed: boolean }>()
 const emit = defineEmits<{ (event: 'toggle'): void }>()
 
 const router = useRouter()
+const route = useRoute()
 const menuOpen = ref(false)
 const signingOut = ref(false)
+const otherOpen = ref(false)
 
 const username = computed(() => currentAccount.value?.username ?? '')
+
+/**
+ * 入口是否高亮。按路由名或路径前缀判断，不依赖 `RouterLink` 自带的
+ * `active-class`：一级入口的归属由这张表决定，而不是由路由记录的父子关系
+ * 决定。
+ */
+function isActive(entry: NavEntry): boolean {
+  switch (entry.key) {
+    case 'chat':
+      return (
+        route.path === '/chat' ||
+        route.path.startsWith('/chat/') ||
+        route.path.startsWith('/co-writer')
+      )
+    case 'mastery':
+      return route.name === 'mastery'
+    case 'mastery-chat':
+      return route.name === 'mastery-chat'
+    case 'questions':
+      return route.name === 'questions'
+    case 'question-chat':
+      return route.name === 'question-chat'
+    case 'practice':
+      return route.name === 'practice'
+    case 'learning':
+      return route.name === 'learning'
+    case 'watching':
+      return route.name === 'watching'
+    case 'learning-map':
+      return route.name === 'learning-map'
+    case 'reading':
+      return route.name === 'reading'
+    case 'books':
+      return route.name === 'books' || route.name === 'book'
+    case 'materials':
+      return route.path.startsWith('/knowledge-bases') || route.path.startsWith('/materials')
+    case 'memory':
+      return route.path.startsWith('/memory')
+    case 'writing':
+      return route.path.startsWith('/co-writer')
+    case 'extensions':
+      return route.path === '/skills' || route.path === '/tools'
+    case 'companions':
+      return route.path === '/partners'
+    case 'settings':
+      return route.path.startsWith('/settings')
+    default:
+      return false
+  }
+}
+
+/** 一级入口的高亮。题库在它自己的二级入口上也要亮。 */
+function isPrimaryActive(entry: NavEntry): boolean {
+  if (entry.key === 'questions') {
+    return (
+      route.name === 'questions' || route.name === 'practice' || route.name === 'question-chat'
+    )
+  }
+  if (entry.key === 'mastery') {
+    return (
+      route.name === 'mastery' || route.name === 'mastery-chat' || route.name === 'learning-map'
+    )
+  }
+  if (entry.key === 'materials') {
+    return isActive(entry) || route.name === 'books' || route.name === 'book' || route.name === 'reading'
+  }
+  return isActive(entry)
+}
+
+const otherActive = computed(() => otherEntries.some(isActive))
+
+// 进到「其他」里的任意页面时把分组展开，否则二级入口收着，用户看不出自己
+// 当前在哪一项。
+watch(
+  otherActive,
+  (active) => {
+    if (active) otherOpen.value = true
+  },
+  { immediate: true },
+)
+
+/**
+ * 「其他」是分组标题，不是一条路由。收合态下点它先把导航展开 —— 只有图标
+ * 时无处安放二级入口。
+ */
+function toggleOther(): void {
+  if (props.collapsed) {
+    emit('toggle')
+    otherOpen.value = true
+    return
+  }
+  otherOpen.value = !otherOpen.value
+}
 
 /**
  * 管理台入口只在"角色是管理员"且权限快照没有明确拒绝 `admin` 面时出现。
@@ -113,10 +266,10 @@ async function signOut(): Promise<void> {
     </div>
 
     <ul class="nav__list">
-      <li v-for="entry in entries" :key="entry.key">
+      <li v-for="entry in primaryEntries" :key="entry.key">
         <RouterLink
           class="nav__item"
-          active-class="nav__item--active"
+          :class="{ 'nav__item--active': isPrimaryActive(entry) }"
           :to="entry.to"
           :title="props.collapsed ? entry.label : undefined"
         >
@@ -126,6 +279,108 @@ async function signOut(): Promise<void> {
           <span v-if="!props.collapsed" class="nav__label">{{ entry.label }}</span>
           <span v-else class="nav__sr">{{ entry.label }}</span>
         </RouterLink>
+
+        <ul v-if="entry.key === 'chat' && !props.collapsed" class="nav__sublist">
+          <li v-for="sub in chatEntries" :key="sub.key">
+            <RouterLink
+              class="nav__subitem"
+              :class="{ 'nav__subitem--active': isActive(sub) }"
+              :to="sub.to"
+            >
+              <svg class="nav__icon nav__icon--sub" viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="ICON_PATHS[sub.key]" />
+              </svg>
+              <span class="nav__label">{{ sub.label }}</span>
+            </RouterLink>
+          </li>
+        </ul>
+
+        <ul v-if="entry.key === 'questions' && !props.collapsed" class="nav__sublist">
+          <li v-for="sub in questionEntries" :key="sub.key">
+            <RouterLink
+              class="nav__subitem"
+              :class="{ 'nav__subitem--active': isActive(sub) }"
+              :to="sub.to"
+            >
+              <svg class="nav__icon nav__icon--sub" viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="ICON_PATHS[sub.key]" />
+              </svg>
+              <span class="nav__label">{{ sub.label }}</span>
+            </RouterLink>
+          </li>
+        </ul>
+
+        <ul v-if="entry.key === 'mastery' && !props.collapsed" class="nav__sublist">
+          <li v-for="sub in masteryEntries" :key="sub.key">
+            <RouterLink
+              class="nav__subitem"
+              :class="{ 'nav__subitem--active': isActive(sub) }"
+              :to="sub.to"
+            >
+              <svg class="nav__icon nav__icon--sub" viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="ICON_PATHS[sub.key]" />
+              </svg>
+              <span class="nav__label">{{ sub.label }}</span>
+            </RouterLink>
+          </li>
+        </ul>
+
+        <ul v-if="entry.key === 'materials' && !props.collapsed" class="nav__sublist">
+          <li v-for="sub in materialEntries" :key="sub.key">
+            <RouterLink
+              class="nav__subitem"
+              :class="{ 'nav__subitem--active': isActive(sub) }"
+              :to="sub.to"
+            >
+              <svg class="nav__icon nav__icon--sub" viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="ICON_PATHS[sub.key]" />
+              </svg>
+              <span class="nav__label">{{ sub.label }}</span>
+            </RouterLink>
+          </li>
+        </ul>
+      </li>
+
+      <li class="nav__group">
+        <button
+          type="button"
+          class="nav__item nav__item--button nav__group-toggle"
+          :class="{ 'nav__item--active': otherActive }"
+          :aria-expanded="!props.collapsed && otherOpen"
+          aria-controls="nav-other"
+          :title="props.collapsed ? '其他' : undefined"
+          @click="toggleOther"
+        >
+          <svg class="nav__icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path :d="ICON_PATHS.other" />
+          </svg>
+          <span v-if="!props.collapsed" class="nav__label">其他</span>
+          <span v-else class="nav__sr">其他</span>
+          <svg
+            v-if="!props.collapsed"
+            class="nav__chevron"
+            :class="{ 'nav__chevron--open': otherOpen }"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path :d="ICON_PATHS.chevronDown" />
+          </svg>
+        </button>
+
+        <ul v-if="otherOpen && !props.collapsed" id="nav-other" class="nav__sublist">
+          <li v-for="entry in otherEntries" :key="entry.key">
+            <RouterLink
+              class="nav__subitem"
+              :class="{ 'nav__subitem--active': isActive(entry) }"
+              :to="entry.to"
+            >
+              <svg class="nav__icon nav__icon--sub" viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="ICON_PATHS[entry.key]" />
+              </svg>
+              <span class="nav__label">{{ entry.label }}</span>
+            </RouterLink>
+          </li>
+        </ul>
       </li>
     </ul>
 
@@ -261,6 +516,69 @@ async function signOut(): Promise<void> {
 
 .nav__item--button {
   text-align: left;
+}
+
+.nav__group {
+  display: flex;
+  flex-direction: column;
+}
+
+.nav__group-toggle {
+  text-align: left;
+}
+
+.nav__chevron {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.15s ease;
+}
+
+.nav__chevron--open {
+  transform: rotate(180deg);
+}
+
+.nav__sublist {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 0 4px 8px;
+  padding: 0 0 0 8px;
+  border-left: 1px solid var(--border);
+  list-style: none;
+}
+
+.nav__subitem {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.nav__subitem:hover {
+  background: var(--surface-sunken);
+  color: var(--text);
+}
+
+.nav__subitem--active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.nav__icon--sub {
+  width: 16px;
+  height: 16px;
 }
 
 .nav__icon {

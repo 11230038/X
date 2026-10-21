@@ -8,14 +8,13 @@
  * 2. 重建也是逐文档的，没有全库重建。失败的那一份才有「重新解析」；
  * 3. 删除知识库是不可逆的，要二次确认并说明原文件不受影响。
  *
- * 列表/详情、新建、文档动作、加入文档与检索各在自己的 composable 里。
+ * 页面只保留模板；列表/详情、新建、文档动作、加入文档、检索与预览在这里
+ * 由 `useKnowledgeBases` 接成一张表。
  */
 
-import { computed, onMounted } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
-import type { KbSource } from '../api/knowledgeBases'
-import { canSurface } from '../auth/permissions'
 import EmptyState from '../components/common/EmptyState.vue'
 import FailureState from '../components/common/FailureState.vue'
 import PartialBanner from '../components/common/PartialBanner.vue'
@@ -25,14 +24,10 @@ import SurfaceGate from '../components/common/SurfaceGate.vue'
 import AppShell from '../components/shell/AppShell.vue'
 import PageHeader from '../components/shell/PageHeader.vue'
 import { KNOWLEDGE } from '../copy/knowledge'
-import { VECTOR_STATE_LABELS, VECTOR_STATE_TONES } from '../copy/files'
 import { formatDateTime, formatNumber, formatPercent, truncate } from '../shared/format'
 
-import { useKbAdd } from './knowledge/useKbAdd'
-import { useKbCreate } from './knowledge/useKbCreate'
-import { useKbDetail } from './knowledge/useKbDetail'
-import { useKbDocuments } from './knowledge/useKbDocuments'
-import { useKbSearch } from './knowledge/useKbSearch'
+import KbDocumentPreviewDialog from './knowledge/KbDocumentPreviewDialog.vue'
+import { useKnowledgeBases } from './knowledge/useKnowledgeBases'
 
 const props = defineProps<{ kbId?: string }>()
 const router = useRouter()
@@ -40,72 +35,9 @@ const router = useRouter()
 const selectedId = computed(() => props.kbId ?? null)
 
 /**
- * 换库时要清掉面板状态。详情层的 immediate 首次加载发生在下面这些面板创建
- * 之前，此时它们本来就是空的；之后的每次换库都会调到真正的重置。
+ * 弹窗实例由页面持有：`ref` 是模板里的那一个，怎么打开、怎么收起由组装层决定。
  */
-let resetPanels: () => void = () => {}
-
-const detailApi = useKbDetail({
-  selectedId,
-  router,
-  onResetPanels: () => resetPanels(),
-})
-
-const searchApi = useKbSearch(selectedId)
-
-const addApi = useKbAdd({
-  selectedId,
-  detail: detailApi.detail,
-  loadDetail: detailApi.loadDetail,
-  loadList: detailApi.loadList,
-})
-
-resetPanels = () => {
-  searchApi.resetSearch()
-  addApi.resetAdd()
-}
-
-const actionsApi = useKbDocuments({
-  selectedId,
-  router,
-  detail: detailApi.detail,
-  loadList: detailApi.loadList,
-  loadDetail: detailApi.loadDetail,
-  clearPoll: detailApi.clearPoll,
-  schedulePoll: detailApi.schedulePoll,
-})
-
-const createApi = useKbCreate({
-  onCreated: async (kbId) => {
-    await detailApi.loadList()
-    detailApi.openBase(kbId)
-  },
-})
-
-// ── 展示辅助 ──────────────────────────────────────────────────────────────
-function vectorLabel(state: string): string {
-  return VECTOR_STATE_LABELS[state] ?? state
-}
-
-function vectorTone(state: string): 'neutral' | 'accent' | 'success' | 'warning' | 'danger' {
-  return VECTOR_STATE_TONES[state] ?? 'neutral'
-}
-
-function locatorLabel(source: KbSource): string {
-  const parts: string[] = [source.locator.kind]
-  if (source.locator.page !== null && source.locator.page !== undefined) {
-    parts.push(`第 ${source.locator.page} 页`)
-  }
-  parts.push(`第 ${source.locator.char_start}–${source.locator.char_end} 字`)
-  return parts.join(' · ')
-}
-
-onMounted(() => {
-  if (canSurface('knowledge_base') === false) return
-  void detailApi.loadList()
-})
-
-/* ── 交给模板 ────────────────────────────────────────────────────────── */
+const previewDialog = ref<InstanceType<typeof KbDocumentPreviewDialog> | null>(null)
 
 const {
   bases,
@@ -121,9 +53,6 @@ const {
   currentBase,
   currentDocuments,
   partialVectors,
-} = detailApi
-
-const {
   createOpen,
   createName,
   createDescription,
@@ -132,18 +61,21 @@ const {
   openCreate,
   closeCreate,
   submitCreate,
-} = createApi
-
-const {
   actionBusy,
   isRebuilding,
   setDefault,
   deleteBase,
   rebuild,
   removeDocument,
-} = actionsApi
-
-const {
+  previewDocument,
+  previewText,
+  previewStatus,
+  previewFailure,
+  previewLoadingMore,
+  previewRetry,
+  previewLoadMore,
+  openPreview,
+  closePreview,
   addOpen,
   fileOptions,
   addFileId,
@@ -152,17 +84,18 @@ const {
   resetAdd,
   openAdd,
   submitAdd,
-} = addApi
-
-const {
   searchQuery,
   searchBusy,
   searchResults,
   searchFailure,
   searchedFor,
   runSearch,
-} = searchApi
+  vectorLabel,
+  vectorTone,
+  locatorLabel,
+} = useKnowledgeBases(selectedId, router, previewDialog)
 </script>
+
 
 
 <template>
@@ -400,6 +333,13 @@ const {
                       small
                     />
                     <button
+                      type="button"
+                      class="link-button"
+                      @click="openPreview(document)"
+                    >
+                      {{ KNOWLEDGE.preview }}
+                    </button>
+                    <button
                       v-if="document.vector_state === 'failed'"
                       type="button"
                       class="link-button"
@@ -464,6 +404,18 @@ const {
         </div>
       </div>
     </AppShell>
+
+    <KbDocumentPreviewDialog
+      ref="previewDialog"
+      :document="previewDocument"
+      :text="previewText"
+      :status="previewStatus"
+      :failure="previewFailure"
+      :loading-more="previewLoadingMore"
+      @close="closePreview"
+      @retry="previewRetry"
+      @load-more="previewLoadMore"
+    />
   </SurfaceGate>
 </template>
 

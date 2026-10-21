@@ -3,6 +3,7 @@ package mastery
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -77,6 +78,10 @@ type interactionOutcome struct {
 	Result  string `json:"result,omitempty"`
 	Detail  string `json:"detail,omitempty"`
 	Skipped bool   `json:"skipped,omitempty"`
+	// Expired is the third ending: nobody answered within the question ttl. It
+	// is neither a verdict nor a skip — no evidence is written, and the row says
+	// only that the path stopped waiting.
+	Expired bool   `json:"expired,omitempty"`
 	Reason  string `json:"reason,omitempty"`
 }
 
@@ -89,6 +94,14 @@ type interactionOutcome struct {
 // "there is an open question (min_…)" can pick it back up, while a model told
 // "conflict" can only start over.
 var ErrOpenInteraction = fmt.Errorf("mastery: this path already has an open question")
+
+// ErrNoOpenQuestion is a verdict on a path that is not waiting for one.
+//
+// The ordinary cause is time: the question was closed unanswered when its ttl
+// ran out, and the answer arrived after that. It is a refusal rather than a
+// defect because the caller can carry on — ask again — and the sentence it turns
+// into has to say so; "not found" leaves a model apologising about a tool.
+var ErrNoOpenQuestion = fmt.Errorf("mastery: this path has no question waiting")
 
 // OpenInteractionError is that refusal, with the interaction that is waiting.
 type OpenInteractionError struct {
@@ -121,6 +134,78 @@ type AskRequest struct {
 	QuestionID string
 }
 
+// settleQuestion closes a question that has waited past the question ttl, and
+// reports what is still waiting afterwards (nil when nothing is).
+//
+// Expiry is a comparison rather than a timer, the same way the lease's is:
+// nothing here runs in the background, and a question closes the next time
+// somebody writes to the path. It is a write and not only a comparison because
+// "one open question per path" is a unique key over the open rows — an expired
+// row that was merely ignored would go on blocking every insert.
+//
+// The close commits on its own before the caller's transaction begins, and that
+// ordering is the point: a caller that discovered the expiry inside its own
+// transaction and then refused would roll the close back with it.
+func (s *Service) settleQuestion(ctx context.Context, pathID string, caller authz.Caller, now time.Time) (*Interaction, error) {
+	var waiting *Interaction
+	err := s.repository.Within(ctx, func(repository Repository) error {
+		open, err := repository.ActiveInteraction(ctx, pathID, caller)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			return nil
+		case err != nil:
+			return err
+		}
+		if !s.expired(open, now) {
+			waiting = &open
+			return nil
+		}
+		path, err := repository.Path(ctx, pathID, caller)
+		if err != nil {
+			return err
+		}
+		outcome, err := json.Marshal(interactionOutcome{Expired: true})
+		if err != nil {
+			return fmt.Errorf("encode the expiry of %s: %w", open.ID, err)
+		}
+		closed, err := repository.CloseInteraction(ctx, open.ID, "", outcome, now, caller)
+		if err != nil {
+			return err
+		}
+		if !closed {
+			// Somebody answered it between the read and this write. The verdict is
+			// theirs and the path is free either way.
+			return nil
+		}
+		payload, err := json.Marshal(map[string]any{
+			"interaction_id":  open.ID,
+			"knowledge_point": open.KnowledgePointID,
+			"question_id":     open.QuestionID,
+		})
+		if err != nil {
+			return fmt.Errorf("encode the expiry of %s: %w", open.ID, err)
+		}
+		eventID, err := newID(eventIDPrefix)
+		if err != nil {
+			return err
+		}
+		event := Event{
+			ID:        eventID,
+			PathID:    path.ID,
+			Type:      EventInteractionExpired,
+			Version:   path.Version,
+			Payload:   payload,
+			Actor:     open.Actor,
+			CreatedAt: now,
+		}
+		return repository.AppendEvent(ctx, event, caller)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return waiting, nil
+}
+
 // Ask records that a question has been put, and reports the interaction that is
 // now waiting for an answer.
 //
@@ -142,8 +227,19 @@ func (s *Service) Ask(ctx context.Context, ask AskRequest, caller authz.Caller) 
 	}
 	now := s.clock()
 
+	// A question nobody answered must not block this one for good. The close
+	// commits before this call's transaction opens, so a refusal below cannot
+	// roll it back. Whether the path is still waiting is decided inside the
+	// transaction, after the coordinate is checked: a call that named a knowledge
+	// point the path does not have is told that, rather than being pointed back at
+	// a question that has nothing to do with the mistake.
+	waiting, err := s.settleQuestion(ctx, ask.PathID, caller, now)
+	if err != nil {
+		return Interaction{}, err
+	}
+
 	var asked Interaction
-	err := s.repository.Within(ctx, func(repository Repository) error {
+	err = s.repository.Within(ctx, func(repository Repository) error {
 		// Scoped first: a question put on another account's path is ErrNotFound
 		// before any interaction or event is written.
 		path, err := repository.Path(ctx, ask.PathID, caller)
@@ -153,6 +249,9 @@ func (s *Service) Ask(ctx context.Context, ask AskRequest, caller authz.Caller) 
 		if _, _, ok := path.Tree.KnowledgePoint(ask.KnowledgePointID); !ok {
 			return fmt.Errorf("%w: knowledge point %s is not in path %s",
 				ErrNotFound, ask.KnowledgePointID, path.ID)
+		}
+		if waiting != nil {
+			return &OpenInteractionError{Interaction: *waiting}
 		}
 		open, err := repository.ActiveInteraction(ctx, path.ID, caller)
 		switch {
@@ -263,8 +362,21 @@ func (s *Service) Grade(ctx context.Context, grade GradeRequest, caller authz.Ca
 	}
 	now := s.clock()
 
+	// A verdict on a question that closed unanswered is refused before anything
+	// else happens, and in words that say which of the two things went wrong. The
+	// model's next move is to ask again, and it can only know that if it is told
+	// the question closed rather than that something was not found.
+	waiting, err := s.settleQuestion(ctx, grade.PathID, caller, now)
+	if err != nil {
+		return Interaction{}, err
+	}
+	if waiting == nil {
+		return Interaction{}, fmt.Errorf("%w: the question on path %s is no longer open",
+			ErrNoOpenQuestion, grade.PathID)
+	}
+
 	var graded Interaction
-	err := s.repository.Within(ctx, func(repository Repository) error {
+	err = s.repository.Within(ctx, func(repository Repository) error {
 		// The path is read for its version and for the fact that it is there: the
 		// answered event is a statement about the state the answer arrived at, and
 		// the evidence write below may move that state afterwards. The read is
@@ -274,6 +386,10 @@ func (s *Service) Grade(ctx context.Context, grade GradeRequest, caller authz.Ca
 			return err
 		}
 		open, err := repository.ActiveInteraction(ctx, grade.PathID, caller)
+		if errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("%w: the question on path %s closed before this verdict",
+				ErrNoOpenQuestion, grade.PathID)
+		}
 		if err != nil {
 			return err
 		}

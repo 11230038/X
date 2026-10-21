@@ -112,7 +112,7 @@ func seedConversation(t *testing.T, resource *data.Resource) (*session.Service, 
 	if err != nil {
 		t.Fatalf("build the session service: %v", err)
 	}
-	record, err := service.Create(context.Background(), caller)
+	record, err := service.Create(context.Background(), caller, session.KindChat)
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}

@@ -62,6 +62,18 @@ func storeOwnedSession(t *testing.T, repo *GORMRepository, id string, ownerID in
 	return record
 }
 
+// storeSessionOfKind writes a session into a chosen partition. The ordinary
+// helper leaves the kind empty on purpose: that is the state every row from
+// before migration 22 is in, and the adapter has to read it as chat.
+func storeSessionOfKind(t *testing.T, repo *GORMRepository, id string, kind Kind, at time.Time) Session {
+	t.Helper()
+	record := Session{ID: id, Title: id, Kind: kind, OwnerID: testOwnerID, CreatedAt: at, UpdatedAt: at}
+	if err := repo.Create(context.Background(), record); err != nil {
+		t.Fatalf("create %s session %s: %v", kind, id, err)
+	}
+	return record
+}
+
 // appendMessage writes one message through the adapter's own path, which is what
 // marks the session active as well.
 func appendMessage(t *testing.T, repo *GORMRepository, id, sessionID string,

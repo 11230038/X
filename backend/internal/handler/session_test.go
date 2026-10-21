@@ -28,6 +28,100 @@ func TestSessionHandlerCreateReturnsTheNewSession(t *testing.T) {
 	if envelope.Data.DeletedAt != nil {
 		t.Error("a session that was just created is reported as deleted")
 	}
+	if envelope.Data.Kind != "chat" {
+		t.Errorf("kind = %q, want chat", envelope.Data.Kind)
+	}
+	// A create without a kind is the pre-existing request, and it still means a
+	// conversation: only the pages that own a partition name a kind.
+	if len(stub.createdKinds) != 1 || stub.createdKinds[0] != session.KindChat {
+		t.Errorf("created kinds = %v, want [chat]", stub.createdKinds)
+	}
+}
+
+func TestSessionHandlerCreatesThePartitionItWasAskedFor(t *testing.T) {
+	record := sampleSession()
+	record.Kind = session.KindWriting
+	stub := &sessionStub{record: record}
+
+	recorder := callAs(t, newSessionRouter(stub), http.MethodPost, "/api/v1/sessions?kind=writing", "")
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", recorder.Code, recorder.Body.String())
+	}
+	var envelope struct {
+		Data sessionView `json:"data"`
+	}
+	decodeBody(t, recorder, &envelope)
+	if envelope.Data.Kind != "writing" {
+		t.Errorf("kind = %q, want writing", envelope.Data.Kind)
+	}
+	if len(stub.createdKinds) != 1 || stub.createdKinds[0] != session.KindWriting {
+		t.Errorf("created kinds = %v, want [writing]", stub.createdKinds)
+	}
+}
+
+func TestSessionHandlerCreatesTheMasteryPartition(t *testing.T) {
+	record := sampleSession()
+	record.Kind = session.KindMastery
+	stub := &sessionStub{record: record}
+
+	recorder := callAs(t, newSessionRouter(stub), http.MethodPost, "/api/v1/sessions?kind=mastery", "")
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", recorder.Code, recorder.Body.String())
+	}
+	var envelope struct {
+		Data sessionView `json:"data"`
+	}
+	decodeBody(t, recorder, &envelope)
+	if envelope.Data.Kind != "mastery" {
+		t.Errorf("kind = %q, want mastery", envelope.Data.Kind)
+	}
+	if len(stub.createdKinds) != 1 || stub.createdKinds[0] != session.KindMastery {
+		t.Errorf("created kinds = %v, want [mastery]", stub.createdKinds)
+	}
+}
+
+func TestSessionHandlerCreatesTheQuestionBankPartition(t *testing.T) {
+	record := sampleSession()
+	record.Kind = session.KindQuestionBank
+	stub := &sessionStub{record: record}
+
+	recorder := callAs(t, newSessionRouter(stub), http.MethodPost, "/api/v1/sessions?kind=question_bank", "")
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", recorder.Code, recorder.Body.String())
+	}
+	var envelope struct {
+		Data sessionView `json:"data"`
+	}
+	decodeBody(t, recorder, &envelope)
+	if envelope.Data.Kind != "question_bank" {
+		t.Errorf("kind = %q, want question_bank", envelope.Data.Kind)
+	}
+	if len(stub.createdKinds) != 1 || stub.createdKinds[0] != session.KindQuestionBank {
+		t.Errorf("created kinds = %v, want [question_bank]", stub.createdKinds)
+	}
+}
+
+func TestSessionHandlerRefusesKindsItCannotCreate(t *testing.T) {
+	// `all` is meaningful only for a listing; a create has to pick one side.
+	for _, query := range []string{"?kind=all", "?kind=diary"} {
+		t.Run(query, func(t *testing.T) {
+			stub := &sessionStub{record: sampleSession()}
+			recorder := callAs(t, newSessionRouter(stub), http.MethodPost, "/api/v1/sessions"+query, "")
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", recorder.Code, recorder.Body.String())
+			}
+			if !strings.Contains(recorder.Body.String(), `"code":"invalid_query"`) {
+				t.Errorf("body = %s, want invalid_query", recorder.Body.String())
+			}
+			if len(stub.createdKinds) != 0 {
+				t.Errorf("a session was created for %s", query)
+			}
+		})
+	}
 }
 
 func TestSessionHandlerListAsksForTheBinItWasAskedFor(t *testing.T) {
@@ -36,11 +130,39 @@ func TestSessionHandlerListAsksForTheBinItWasAskedFor(t *testing.T) {
 		query string
 		want  session.ListOptions
 	}{
-		{name: "no query lists live sessions", query: "", want: session.ListOptions{Caller: handlerCaller()}},
+		{
+			name:  "no query lists live chat sessions",
+			query: "",
+			want:  session.ListOptions{Caller: handlerCaller(), Kind: session.KindChat},
+		},
 		{
 			name:  "deleted lists the bin",
 			query: "?deleted=true&limit=20&offset=40",
-			want:  session.ListOptions{Caller: handlerCaller(), Deleted: true, Limit: 20, Offset: 40},
+			want: session.ListOptions{
+				Caller: handlerCaller(), Deleted: true, Kind: session.KindChat, Limit: 20, Offset: 40,
+			},
+		},
+		{
+			name:  "writing lists the other partition",
+			query: "?kind=writing",
+			want:  session.ListOptions{Caller: handlerCaller(), Kind: session.KindWriting},
+		},
+		{
+			name:  "mastery lists its own partition",
+			query: "?kind=mastery",
+			want:  session.ListOptions{Caller: handlerCaller(), Kind: session.KindMastery},
+		},
+		{
+			name:  "question_bank lists its own partition",
+			query: "?kind=question_bank",
+			want:  session.ListOptions{Caller: handlerCaller(), Kind: session.KindQuestionBank},
+		},
+		{
+			// `all` is explicit and leaves Kind empty: a zero value still means
+			// chat, so "every partition" has to be said out loud.
+			name:  "all asks for every partition",
+			query: "?kind=all",
+			want:  session.ListOptions{Caller: handlerCaller(), AllKinds: true},
 		},
 	}
 	for _, test := range tests {
@@ -72,6 +194,7 @@ func TestSessionHandlerRefusesPagingItCannotRead(t *testing.T) {
 		{name: "a limit that is not a number", query: "?limit=lots"},
 		{name: "a negative offset", query: "?offset=-1"},
 		{name: "a deleted flag that is not a boolean", query: "?deleted=perhaps"},
+		{name: "a kind that does not exist", query: "?kind=diary"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

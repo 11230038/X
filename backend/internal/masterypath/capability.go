@@ -56,10 +56,12 @@ const StageResponding = "responding"
 // whether the order means something.
 //
 // There are nine. §2.5's heading says eight and its table lists nine; the
-// design's own prose settles it ("原文九个词……我们按九个工具实现"), and the ninth
-// one is not a formality: leaving the lease to the runtime would mean a turn
-// that has finished with a path still holding it until it expired, and only the
-// turn knows when it is finished.
+// design's own prose settles it ("原文九个词……我们按九个工具实现"). The ninth is
+// not a formality and the runtime is not a substitute for it: mastery_leave lets
+// a turn that is still running put the path down — before a switch, or when it
+// is done with the path and still has other work — while the runtime releases
+// whatever is still held when the turn ends. Those are different moments, and
+// only the model knows the first one.
 func Manifest() capability.Manifest {
 	return capability.Manifest{
 		Name:        Name,
@@ -113,5 +115,21 @@ func (c *Capability) Manifest() capability.Manifest { return Manifest() }
 func (c *Capability) Run(ctx context.Context, rc capability.RunContext) error {
 	return capability.Answer(ctx, rc, c.settings, StageResponding,
 		capability.Messages(systemPrompt, rc.Messages(),
-			capability.PersonaMessage(rc.Persona())))
+			capability.PersonaMessage(rc.Persona())),
+		capability.NudgeWithoutToolCall(noToolCallNudge))
 }
+
+// noToolCallNudge is what a mastery turn hears when it tries to finish without
+// calling a single tool.
+//
+// The failure it exists for is not a refusal but a hallucination: the model
+// writes "我先把题存进题库。题目已经存好了" and then asks the learner to answer,
+// and no tool call was ever made — so nothing is stored, and the popup the
+// learner expects has no question to show. Instructions at the top of the
+// conversation did not stop it, twice. This one arrives at the end of the
+// conversation, after the discarded attempt, and the loop makes it the only way
+// to end the turn: a mastery answer that never touched a tool is not published.
+const noToolCallNudge = `这一轮的回复没有调用任何工具，已经作废。掌握路径上的每件事都只能通过工具发生：` +
+	`要出题，必须调用 mastery_question 把题真正写进题库——正文里写「题目已经存进题库」不算存进去，用户也看不到作答框；` +
+	`要判卷用 mastery_grade；只是想知道现在有什么，也先调 mastery_state。` +
+	`现在重新回答这一轮：先调用需要的工具，再写讲解；不要在正文里出题，也不要声称工具做过什么。`

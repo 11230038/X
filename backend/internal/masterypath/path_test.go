@@ -121,8 +121,9 @@ func newFixture(t *testing.T) *fixture {
 		"trn_1", "ses_1", atSecond(0))
 
 	service, err := mastery.NewService(mastery.NewGORMRepository(resource.GORM()), mastery.Options{
-		LeaseTTL: 2 * time.Minute,
-		Gate:     mastery.GateOptions{Consecutive: 2, MinEvidence: 3},
+		LeaseTTL:    2 * time.Minute,
+		QuestionTTL: time.Hour,
+		Gate:        mastery.GateOptions{Consecutive: 2, MinEvidence: 3},
 	})
 	if err != nil {
 		t.Fatalf("new mastery service: %v", err)
@@ -280,5 +281,54 @@ func TestATurnThatDoesNotHoldThePathCannotFileAQuestion(t *testing.T) {
 	}
 	if len(fixture.bank.handed) != 0 {
 		t.Errorf("a refused question reached the bank: %+v", fixture.bank.handed)
+	}
+}
+
+// TestTheRefusalOfASecondQuestionNamesTheQuestionToGrade is the sentence the
+// model has to act on, checked for the one id it can act with.
+//
+// The refusal is about a question already waiting, and the way out of it is
+// mastery_grade — which is keyed by the *question* id. An interaction id leading
+// that sentence is the natural thing to reach for and the wrong one every time:
+// the grade is refused as a fault, the path stays blocked, and the learner is
+// told the tools are down.
+func TestTheRefusalOfASecondQuestionNamesTheQuestionToGrade(t *testing.T) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	path := fixture.turnPath(true)
+
+	saved, err := path.Ask(ctx, sampleAsked(), "kp_001")
+	if err != nil {
+		t.Fatalf("the first question: %v", err)
+	}
+	_, err = path.Ask(ctx, sampleAsked(), "kp_002")
+	var refusal *tool.Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("the second question: %v, want a refusal the model reads", err)
+	}
+	if !strings.Contains(refusal.Note, saved.QuestionID) {
+		t.Errorf("the refusal does not name %s, the id mastery_grade takes:\n%s",
+			saved.QuestionID, refusal.Note)
+	}
+	if !strings.Contains(refusal.Note, tool.MasteryGradeName) {
+		t.Errorf("the refusal does not say what to call:\n%s", refusal.Note)
+	}
+}
+
+// TestGradingAQuestionTheBankDoesNotHaveSaysSo pins the other end of the same
+// mistake: the judge is handed an id no question answers to, and what comes back
+// is a sentence about which ids are questions rather than "the tool could not be
+// run".
+func TestGradingAQuestionTheBankDoesNotHaveSaysSo(t *testing.T) {
+	fixture := newFixture(t)
+
+	// The shape of the wrong guess, written out: this is an interaction id.
+	_, err := fixture.turnPath(true).Grade(context.Background(), "min_3a64e9df51c74a62", "B")
+	var refusal *tool.Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Grade() error = %v, want a refusal the model reads", err)
+	}
+	if !strings.Contains(refusal.Note, "题库里没有") || !strings.Contains(refusal.Note, "qn_") {
+		t.Errorf("the refusal reads:\n%s", refusal.Note)
 	}
 }

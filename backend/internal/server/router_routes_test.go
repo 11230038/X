@@ -32,6 +32,7 @@ func TestRouterRegistersTheKnowledgeBaseAndReadRoutes(t *testing.T) {
 		{"get base", http.MethodGet, "/api/v1/knowledge-bases/kb_1"},
 		{"delete base", http.MethodDelete, "/api/v1/knowledge-bases/kb_1"},
 		{"add document", http.MethodPost, "/api/v1/knowledge-bases/kb_1/documents"},
+		{"document text", http.MethodGet, "/api/v1/knowledge-bases/kb_1/documents/doc_1/text"},
 		{"remove document", http.MethodDelete, "/api/v1/knowledge-bases/kb_1/documents/doc_1"},
 		{"rebuild", http.MethodPost, "/api/v1/knowledge-bases/kb_1/rebuild"},
 		{"search", http.MethodPost, "/api/v1/knowledge-bases/kb_1/search"},

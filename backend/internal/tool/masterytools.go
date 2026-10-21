@@ -225,6 +225,16 @@ func masteryText(view mastery.View) string {
 	fmt.Fprintf(&text, "版本 %d · %d 个模块 · %d 条知识点\n",
 		view.Path.Version, len(view.Path.Tree.Modules), points)
 
+	// The open question is stated here because while it is open nothing else can
+	// be asked, and the question id is the one argument mastery_grade takes. The
+	// interaction id is repeated beside it only so that a reader who saw the id
+	// in a refusal can tell the two apart.
+	if open := view.Open; open != nil {
+		fmt.Fprintf(&text, "有一道题在等用户作答：题目 %s（交互 %s，知识点 %s）。"+
+			"用户回复后把原话交给 mastery_grade，question_id 写 %s；判完这道题才能再出下一题。\n",
+			open.QuestionID, open.ID, open.KnowledgePointID, open.QuestionID)
+	}
+
 	if len(view.Path.Tree.Modules) == 0 {
 		text.WriteString("树还是空的：用 mastery_map 把要学的知识点按模块列出来。\n")
 		return strings.TrimSpace(text.String())
@@ -272,10 +282,16 @@ func masteryMetadata(view mastery.View) map[string]any {
 	for _, module := range view.Path.Tree.Modules {
 		points += len(module.KnowledgePoints)
 	}
-	return map[string]any{
+	metadata := map[string]any{
 		"path_id":          view.Path.ID,
 		"version":          view.Path.Version,
 		"modules":          len(view.Path.Tree.Modules),
 		"knowledge_points": points,
 	}
+	if open := view.Open; open != nil {
+		metadata["open_interaction_id"] = open.ID
+		metadata["open_question_id"] = open.QuestionID
+		metadata["open_knowledge_point_id"] = open.KnowledgePointID
+	}
+	return metadata
 }

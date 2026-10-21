@@ -60,6 +60,22 @@ func (s Settings) Validate(manifest Manifest) error {
 	return nil
 }
 
+// AnswerOption is one rule a capability adds to its run of the shared loop.
+type AnswerOption func(*agentloop.Request)
+
+// NudgeWithoutToolCall asks the loop to hold back an answer that arrives before
+// any tool call and ask the model again with this note.
+//
+// It exists for capabilities whose answer can *claim* an action that only a tool
+// performs. A mastery turn is the case that produced it: "题目已经存进题库了"
+// written in prose stores nothing, and the learner waits for an answer box that
+// was never going to appear.
+func NudgeWithoutToolCall(note string) AnswerOption {
+	return func(request *agentloop.Request) {
+		request.NudgeWithoutToolCall = note
+	}
+}
+
 // Answer runs one stage of a capability: opens it, calls the model through the
 // shared loop, publishes the answer and what it cost, and closes the stage.
 //
@@ -74,7 +90,11 @@ func (s Settings) Validate(manifest Manifest) error {
 // and translating them here would lose which one it was (RT-07). A stage that
 // failed publishes no result and no end — it did not finish, and saying it did
 // would tell a client the answer was complete.
-func Answer(ctx context.Context, rc RunContext, settings Settings, stage string, messages []llm.Message) error {
+//
+// The options are for the rules a particular capability adds to the loop, not
+// for the loop's own settings: today the only one is the note a capability sends
+// to a model that tries to finish without calling any tool.
+func Answer(ctx context.Context, rc RunContext, settings Settings, stage string, messages []llm.Message, options ...AnswerOption) error {
 	// Read before anything is published: a stage the tuning does not cover would
 	// otherwise be sent to the provider as a limit of zero, which some providers
 	// read as "no output" rather than as the configuration mistake it is.
@@ -86,7 +106,7 @@ func Answer(ctx context.Context, rc RunContext, settings Settings, stage string,
 	if err := EmitStage(ctx, rc, event.TypeStageStart, stage); err != nil {
 		return err
 	}
-	result, err := rc.RunLoop(ctx, agentloop.Request{
+	request := agentloop.Request{
 		Stage:               stage,
 		Model:               settings.Model,
 		Temperature:         settings.Temperature,
@@ -95,7 +115,11 @@ func Answer(ctx context.Context, rc RunContext, settings Settings, stage string,
 		Tools:               rc.Tools(),
 		MaxRounds:           settings.MaxRounds,
 		ContextBudgetTokens: settings.ContextBudgetTokens,
-	})
+	}
+	for _, option := range options {
+		option(&request)
+	}
+	result, err := rc.RunLoop(ctx, request)
 	if err != nil {
 		return err
 	}
