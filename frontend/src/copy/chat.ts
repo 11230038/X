@@ -86,6 +86,7 @@ export const CHAT = {
   reconnectingShort: '正在重连…',
   retryUnconfirmedHint: '这条消息可能没有发出去。',
   offlineDraft: '连接未就绪，这条消息没有发出去',
+  personaNotReady: '这一页固定的人格没有准备好，这条消息没有发出去',
   capabilityLabel: '本轮用哪个能力',
   sendingCapability: '能力',
 

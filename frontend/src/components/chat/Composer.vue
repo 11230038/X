@@ -52,6 +52,13 @@ const props = defineProps<{
   /** 列表没读出来。与"没有选中"分开画，否则失败会悄悄变成"不指定人格"。 */
   personaFailure: boolean
   /**
+   * 这一页锁死了人格（题目问答）。锁定时不画下拉：下拉会暗示可以换，
+   * 而每一轮发出去的都是同一个人格。
+   */
+  personaLocked?: boolean
+  /** 锁定时显示的固定人格名。 */
+  personaLockLabel?: string
+  /**
    * 进入页面时预填的第一句话。协同写作页把它拼好带过来；只做初值，不跟着
    * prop 变化覆盖用户已经敲进去的字。
    */
@@ -113,6 +120,20 @@ function onKeydown(event: KeyboardEvent): void {
 function onPersonaChange(event: Event): void {
   emit('select-persona', (event.target as HTMLSelectElement).value)
 }
+
+/**
+ * 把一段文字放进输入框并聚焦。题目问答选完题之后用它：题目内容要看得见、
+ * 能被用户接着改，而不是悄悄附在发送动作后面。
+ */
+function replace(value: string): void {
+  text.value = value
+  void nextTick(() => {
+    resize()
+    field.value?.focus()
+  })
+}
+
+defineExpose({ replace, value: () => text.value })
 </script>
 
 <template>
@@ -183,7 +204,13 @@ function onPersonaChange(event: Event): void {
         />
 
         <div v-if="!props.waiting" class="composer__tools">
-          <label class="composer__tool composer__persona">
+          <span v-if="props.personaLocked" class="composer__tool composer__persona">
+            {{ PERSONAS.composerLabel }}
+            <strong class="composer__locked">
+              {{ props.personaLoading ? PERSONAS.personaLoading : props.personaLockLabel }}
+            </strong>
+          </span>
+          <label v-else class="composer__tool composer__persona">
             {{ PERSONAS.composerLabel }}
             <select
               class="composer__select"
@@ -203,6 +230,8 @@ function onPersonaChange(event: Event): void {
           <button type="button" class="composer__tool" @click="emit('manage-personas')">
             {{ PERSONAS.manage }}
           </button>
+          <!-- 页面自己的工具（题目问答的「选择题目」）。 -->
+          <slot name="tools" />
           <button type="button" class="composer__tool" @click="emit('open-attachments')">
             {{ CHAT.attachments }}
             <span v-if="attachments.length > 0" class="composer__badge">{{ attachments.length }}</span>

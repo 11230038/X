@@ -7,44 +7,98 @@
  *
  * 列表来自服务端。选中的那个人格如果已经被删掉，刷新列表时就把它清掉，
  * 否则下一轮会点一个不存在的 id。
+ *
+ * **锁定**是给题目问答页用的：那里每一轮都必须带上同一个人格，输入区不提供
+ * 切换。人格是账号级数据、id 不跨账号，所以锁定按名字找；账号里还没有同名
+ * 人格时，按页面给的种子内容建一个。`ensure()` 是发送前的等待点 —— 首页的
+ * 「开始提问」可能早于列表返回，不 await 就会把第一句话发成没有人格的一轮。
  */
 
 import { computed, ref } from 'vue'
 import type { RouteLocationNormalizedLoaded } from 'vue-router'
 
 import type { ApiFailure } from '../../api/client'
-import { listPersonas, type Persona } from '../../api/personas'
+import { createPersona, listPersonas, type Persona } from '../../api/personas'
 import type { PersonaChoice } from '../../components/chat/Composer.vue'
 import { toFailure } from '../../shared/resource'
 
-function initialSelection(route: RouteLocationNormalizedLoaded): string {
+/** 一页只允许用这一个人格；内容只在建号时作为种子。 */
+export interface PersonaLock {
+  name: string
+  description: string
+  content: string
+}
+
+function initialSelection(route: RouteLocationNormalizedLoaded, lock?: PersonaLock): string {
+  if (lock) return ''
   const value = route.query.persona
   return typeof value === 'string' ? value : ''
 }
 
-export function useChatPersona(route: RouteLocationNormalizedLoaded) {
+export function useChatPersona(route: RouteLocationNormalizedLoaded, lock?: PersonaLock) {
   const records = ref<Persona[]>([])
-  const selectedId = ref(initialSelection(route))
+  const selectedId = ref(initialSelection(route, lock))
   const loading = ref(false)
   const failure = ref<ApiFailure | null>(null)
   let loaded = false
+  /** 列表请求已在飞：`load()` 与 `ensure()` 共用它，不重复发。 */
+  let pending: Promise<void> | null = null
 
-  const items = computed<PersonaChoice[]>(() =>
-    records.value.map((persona) => ({
+  const locked = lock !== undefined
+
+  const items = computed<PersonaChoice[]>(() => {
+    const visible = lock
+      ? records.value.filter((persona) => persona.name === lock.name)
+      : records.value
+    return visible.map((persona) => ({
       id: persona.persona_id,
       label: persona.name,
       detail: persona.description,
-    })),
-  )
+    }))
+  })
 
-  async function load(force = false): Promise<void> {
-    if (loaded && !force) return
+  function remember(list: Persona[]): void {
+    records.value = [...list].sort((left, right) => left.name.localeCompare(right.name))
+  }
+
+  /**
+   * 锁定人格的解析：先找同名的，没有就建。
+   *
+   * 建失败要再读一次列表：名字在同一账号内唯一，另一个标签页可能刚好先建了
+   * 同名的那一行，这时正确的动作是采用它，而不是把这一页报成失败。
+   */
+  async function resolveLock(): Promise<void> {
+    if (!lock) return
+    const match = records.value.find((persona) => persona.name === lock.name)
+    if (match) {
+      selectedId.value = match.persona_id
+      return
+    }
+    try {
+      const created = await createPersona({
+        name: lock.name,
+        description: lock.description,
+        content: lock.content,
+      })
+      remember([...records.value, created])
+      selectedId.value = created.persona_id
+    } catch (cause) {
+      remember((await listPersonas()).personas)
+      const raced = records.value.find((persona) => persona.name === lock.name)
+      if (!raced) throw cause
+      selectedId.value = raced.persona_id
+    }
+  }
+
+  async function loadOnce(): Promise<void> {
     loading.value = true
     failure.value = null
     try {
-      records.value = (await listPersonas()).personas
+      remember((await listPersonas()).personas)
       loaded = true
-      if (
+      if (lock) {
+        await resolveLock()
+      } else if (
         selectedId.value !== '' &&
         !records.value.some((persona) => persona.persona_id === selectedId.value)
       ) {
@@ -52,14 +106,36 @@ export function useChatPersona(route: RouteLocationNormalizedLoaded) {
       }
     } catch (cause) {
       failure.value = toFailure(cause)
+      if (lock) selectedId.value = ''
     } finally {
       loading.value = false
     }
   }
 
+  function load(force = false): Promise<void> {
+    if (loaded && !force) return Promise.resolve()
+    if (pending !== null) return pending
+    pending = loadOnce().finally(() => {
+      pending = null
+    })
+    return pending
+  }
+
+  /**
+   * 发送前把锁定人格准备好。普通页面没有锁定，直接返回。
+   *
+   * 建号失败时不抛错：失败已经落在 `failure` 上，调用方按"人格没准备好"
+   * 拒绝这一句，界面同时给重试入口。
+   */
+  async function ensure(): Promise<void> {
+    if (!lock || selectedId.value !== '') return
+    await load()
+  }
+
   function select(personaId: string): void {
+    if (lock) return
     selectedId.value = personaId
   }
 
-  return { items, selectedId, loading, failure, load, select }
+  return { items, selectedId, loading, failure, locked, load, select, ensure }
 }

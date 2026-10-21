@@ -7,9 +7,11 @@
  * 1. **列哪一种会话** —— `kind` 决定列表只读 `chat`、`writing` 还是 `mastery`；
  * 2. **用哪一种能力** —— 给了 `capability` 就固定用它、不画选择器（路径对话页
  *    固定 `mastery_path`）；不给则按清单默认，写作页就是 `chat`；
- * 3. **首页是什么** —— 由 `#home` 插槽给出（对话页是起始提示，写作页是准备表，
+ * 3. **用哪个人格** —— 给了 `personaLock` 就每一轮都用它（题目问答页锁死
+ *    「题目问答伙伴」）；不给则由输入区下拉自由选择；
+ * 4. **首页是什么** —— 由 `#home` 插槽给出（对话页是起始提示，写作页是准备表，
  *    路径对话页是想学什么的入口）；
- * 4. **会话地址** —— `sessionRoute` 决定点开一行、新建一条之后往哪个路由名去。
+ * 5. **会话地址** —— `sessionRoute` 决定点开一行、新建一条之后往哪个路由名去。
  *
  * 这样各页面不必复制输入区、状态条、引用面板与断线处理：那些行为一旦分成几
  * 份，迟早只有一边跟上后端的协议变化。
@@ -50,7 +52,7 @@ import { useChatClarify } from './useChatClarify'
 import { useChatConnection } from './useChatConnection'
 import { useChatMaterials } from './useChatMaterials'
 import { useChatPage } from './useChatPage'
-import { useChatPersona } from './useChatPersona'
+import { useChatPersona, type PersonaLock } from './useChatPersona'
 import { useChatSessions } from './useChatSessions'
 import { useChatSources } from './useChatSources'
 import { useMasteryQuestion } from './useMasteryQuestion'
@@ -69,6 +71,11 @@ const props = withDefaults(
     showCapability?: boolean
     /** 固定使用的能力名。给了它就隐藏选择器，每一轮都用它。 */
     capability?: string
+    /**
+     * 锁死的人格。给了它，每一轮都带上这一个人格，输入区不提供切换；
+     * 账号里没有同名人格时按这份内容建一个。题目问答页用它。
+     */
+    personaLock?: PersonaLock
     /** 首页是否也显示输入区。对话页要（可以直接问），写作页不要（先填准备表）。 */
     composerOnHome?: boolean
     /** 输入框占位文案。 */
@@ -110,6 +117,12 @@ defineSlots<{
     retryPersonas: () => void
     managePersonas: () => void
   }): unknown
+  /** 输入区工具行里的页面私有按钮（题目问答的「选择题目」）。 */
+  'composer-tools'(props: {
+    send: (text: string) => void
+    setComposerText: (text: string) => void
+    getComposerText: () => string
+  }): unknown
 }>()
 
 const route = useRoute()
@@ -140,7 +153,7 @@ const connection = useChatConnection({
   stages: () => caps.stagePlan.value,
 })
 
-const persona = useChatPersona(route)
+const persona = useChatPersona(route, props.personaLock)
 const materials = useChatMaterials(route, persona.selectedId)
 
 /**
@@ -190,6 +203,25 @@ const {
   sessionRoute: props.sessionRoute,
   draftEnabled: props.kind === 'chat',
 })
+
+/**
+ * 输入区的两个把手，给页面私有的工具按钮用。
+ *
+ * 题目问答的「选择题目」在输入区的工具行里：选中的题要写进输入框，用户能
+ * 看见、能接着改。`startSession` 也一并暴露，是因为从练习页/题库页带题号
+ * 进来时要直接发，不必先经过输入框。
+ */
+const composerRef = useTemplateRef<InstanceType<typeof Composer>>('composer')
+
+function setComposerText(text: string): void {
+  composerRef.value?.replace(text)
+}
+
+function getComposerText(): string {
+  return composerRef.value?.value() ?? ''
+}
+
+defineExpose({ startSession, setComposerText, getComposerText })
 
 /**
  * 出题弹窗的答案就是一条普通的用户消息：模型下一轮拿它去 `mastery_grade`
@@ -427,6 +459,7 @@ const {
 
         <Composer
           v-if="activeId !== null || composerOnHome"
+          ref="composer"
           :running="running && connectionStatus === 'open'"
           :waiting="waiting"
           :disabled="activeId !== null && connectionStatus !== 'open'"
@@ -438,6 +471,8 @@ const {
           :persona="personaSelected"
           :persona-loading="personaLoading"
           :persona-failure="personaFailure !== null"
+          :persona-locked="personaLock !== undefined"
+          :persona-lock-label="personaLock?.name ?? ''"
           :draft="draft"
           @send="onSend"
           @stop="onStop"
@@ -449,7 +484,16 @@ const {
           @remove-attachment="toggleFile"
           @remove-knowledge-base="toggleKb"
           @clear-selection="selection = null"
-        />
+        >
+          <template #tools>
+            <slot
+              name="composer-tools"
+              :send="onSend"
+              :set-composer-text="setComposerText"
+              :get-composer-text="getComposerText"
+            />
+          </template>
+        </Composer>
       </div>
 
       <template #panel="{ collapsed, toggle }">

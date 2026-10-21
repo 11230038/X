@@ -121,6 +121,13 @@ export function useChatPage(parts: ChatPageParts) {
     composerError.value = null
     starting.value = true
     try {
+      // 锁定人格的页面（题目问答）必须等它解析完再建会话：第一句话可能在
+      // 人格列表返回之前就发出去了，那一轮就没有锁定的人格。
+      await persona.ensure()
+      if (persona.locked && persona.selectedId.value === '') {
+        composerError.value = CHAT.personaNotReady
+        return
+      }
       const created = await createSession(kind)
       // 先塞进列表再跳转：列表行在跳过去的那一刻就要在。
       sessionsApi.sessions.value = [created, ...sessionsApi.sessions.value]
@@ -137,10 +144,15 @@ export function useChatPage(parts: ChatPageParts) {
     }
   }
 
-  function onSend(text: string): void {
+  async function onSend(text: string): Promise<void> {
     composerError.value = null
     if (sessionsApi.activeId.value === null) {
-      void startSession(text)
+      await startSession(text)
+      return
+    }
+    await persona.ensure()
+    if (persona.locked && persona.selectedId.value === '') {
+      composerError.value = CHAT.personaNotReady
       return
     }
     const current = connection.conversation.value
