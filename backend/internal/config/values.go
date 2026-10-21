@@ -15,12 +15,16 @@ import (
 // reach.
 
 // blankAllowedKeys are the required keys whose empty value is a deployment
-// somebody meant. There is one, and it is the exception for one reason: it is a
-// list of accounts, and "no account" is a complete answer. Every other key's
-// blank is a line the operator meant to finish, and refusing it at startup is
-// how the message can name the key rather than the symptom.
+// somebody meant. They are exceptions for two different reasons:
+// SUPER_ADMIN_USER_IDS is a list of accounts, and "no account" is a complete
+// answer; DB_PASSWORD is empty when the account it names really has no password,
+// which is how a local seekdb starts. The key must still be present in both
+// cases — a missing line is not the same statement as an empty one. Every other
+// key's blank is a line the operator meant to finish, and refusing it at startup
+// is how the message can name the key rather than the symptom.
 var blankAllowedKeys = map[string]bool{
 	"SUPER_ADMIN_USER_IDS": true,
+	"DB_PASSWORD":          true,
 }
 
 // requireValues checks that the file carries every key at all. It is breadth, not

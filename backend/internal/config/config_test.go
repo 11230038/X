@@ -259,6 +259,22 @@ func TestLoadRejectsMissingAndEmptyValues(t *testing.T) {
 	}
 }
 
+// A blank password is a statement about the database account, not an unfinished
+// line: a local seekdb starts with root's password empty. The key still has to be
+// present — TestLoadRejectsMissingAndEmptyValues keeps the missing case rejected.
+func TestLoadAllowsBlankDatabasePassword(t *testing.T) {
+	values := validValues()
+	values["DB_PASSWORD"] = ""
+
+	cfg, err := Load(writeDotenv(t, values))
+	if err != nil {
+		t.Fatalf("Load() error = %v, want a blank password to load", err)
+	}
+	if cfg.Database.Password != "" {
+		t.Fatalf("Database.Password = %q, want empty", cfg.Database.Password)
+	}
+}
+
 func TestLoadRejectsInvalidValues(t *testing.T) {
 	cases := []struct {
 		name  string

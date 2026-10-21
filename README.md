@@ -84,7 +84,7 @@ docker start seekdb
 
 ### 配置
 
-服务只读取 `backend/.env`，不会从进程环境补值或覆盖。文件缺失、键缺失、空值或非法值都会阻止启动；[backend/.env.example](backend/.env.example) 是完整的非秘密模板，真实 `.env` 不得提交。
+服务只读取 `backend/.env`，不会从进程环境补值或覆盖。文件缺失、键缺失、空值或非法值都会阻止启动，只有 `SUPER_ADMIN_USER_IDS` 与 `DB_PASSWORD` 允许留空——前者表示没有超级管理员，后者表示数据库账号本身没有密码（本地 seekdb 的 root 就是这样）；两个键仍然必须存在，删掉整行一样会阻止启动。[backend/.env.example](backend/.env.example) 是完整的非秘密模板，真实 `.env` 不得提交。
 
 必填配置包括：
 
