@@ -47,7 +47,7 @@ go run .
 go run test_environment.go
 ```
 
-它核对 Go / Node / npm 的版本、Go 依赖（`go mod verify` 与 `go build ./...`，会下载缺失的模块并证明全部包可编译）、前端依赖（`package-lock.json`、`npm ls --all`）、`backend/.env` 是否覆盖了后端源码里声明的全部必填键（含空值与模板占位值），再用 `go run ./cmd/migrate status` 读取数据库 schema 版本、探测 seekdb，并探测本机 docling——配了地址就查：解析引擎是 `docling` 时不可达算缺失，引擎是 `text` 时只算警告（用不到它）。它不应用迁移、不安装依赖，只读配置、**只打印键名不打印值**；不缺失退出 0，有缺失退出 1。
+它核对 Go / Node / npm 的版本、Go 依赖（`go mod verify` 与 `go build ./...`，会下载缺失的模块并证明全部包可编译）、前端依赖（`package-lock.json`、`npm ls --all`）、`backend/.env` 是否覆盖了后端源码里声明的全部必填键（含空值与模板占位值），并探测数据库与本机 docling。数据库分三层：TCP 可达与握手延迟、MySQL 协议握手（读出服务端版本，确认端口后面确实是数据库）、`go run ./cmd/migrate status`（打印目标 `用户@地址/库名`——**密码从不显示**——以及已应用条数、最新版本和待应用迁移清单）。docling 配了地址就查：解析引擎是 `docling` 时不可达算缺失，引擎是 `text` 时只算警告（用不到它）。它不应用迁移、不安装依赖，只读配置、**只打印键名不打印值**；不缺失退出 0，有缺失退出 1。
 
 本机开发还可以用根目录的 [dev.sh](dev.sh) 一条命令同时起 docling、后端与前端：
 

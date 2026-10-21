@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -335,9 +336,11 @@ func (c *checker) checkDotenv() map[string]string {
 }
 
 // checkDatabase proves the service can reach seekdb and that the schema it
-// expects is already applied. `migrate status` reads .env, ensures the database
-// exists (IF NOT EXISTS, the same thing startup does), and reads the migration
-// table; it never applies anything.
+// expects is already applied. Three layers, each one narrower than the last:
+// the TCP port answers, the server speaks MySQL's protocol, and `migrate status`
+// — which reads .env, ensures the database exists (IF NOT EXISTS, the same thing
+// startup does) and reads the migration table — can list every migration and
+// say whether it is applied. It never applies anything.
 func (c *checker) checkDatabase(values map[string]string) {
 	host := strings.TrimSpace(values["DB_HOST"])
 	if host == "" {
@@ -348,11 +351,34 @@ func (c *checker) checkDatabase(values map[string]string) {
 		port = "2881"
 	}
 	dbAddr := net.JoinHostPort(host, port)
+	started := time.Now()
 	if err := dialTCP(dbAddr); err != nil {
 		c.missingf("seekdb %s 连不上：先启动本地实例（例如 docker start seekdb）", dbAddr)
 		return
 	}
-	c.okf("seekdb %s 可连接", dbAddr)
+	c.okf("seekdb %s 可连接（%s）", dbAddr, time.Since(started).Round(time.Millisecond))
+
+	// The greeting is read without authenticating: the protocol byte and the
+	// server's own version string are enough to tell "a MySQL-compatible server
+	// answered" from "something else happens to own this port".
+	if version, err := mysqlGreeting(dbAddr, 3*time.Second); err != nil {
+		c.warnf("MySQL 协议握手失败（%v）；端口通，但对面可能不是 seekdb", err)
+	} else {
+		c.okf("MySQL 协议握手成功，服务端版本 %s", version)
+	}
+
+	target := strings.TrimSpace(values["DB_USER"])
+	if target == "" {
+		target = "?"
+	}
+	target += "@" + dbAddr + "/"
+	if name := strings.TrimSpace(values["DB_NAME"]); name != "" {
+		target += name
+	} else {
+		target += "?"
+	}
+	c.infof("目标库 %s（密码不显示；库不存在时 status 会创建它）", target)
+
 	if _, err := exec.LookPath("go"); err != nil {
 		c.infof("Go 不可用，跳过迁移状态检查")
 		return
@@ -364,27 +390,75 @@ func (c *checker) checkDatabase(values map[string]string) {
 		c.missingf("读不到迁移状态：检查 .env 的数据库配置、库权限与 seekdb 状态%s", tailText(output, 6))
 		return
 	}
-	pending, latest := 0, ""
+	applied, latest := 0, ""
+	var pending []string
 	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) < 2 {
+		if len(fields) < 3 {
 			continue
 		}
-		if latest == "" || fields[1] > latest {
-			latest = fields[1]
+		state, version, name := fields[0], fields[1], fields[2]
+		if strings.EqualFold(state, "applied") {
+			applied++
+			if latest == "" || version > latest {
+				latest = version
+			}
+			continue
 		}
-		if !strings.EqualFold(fields[0], "applied") {
-			pending++
-		}
+		pending = append(pending, version+" "+name)
 	}
 	switch {
-	case pending > 0:
-		c.missingf("schema 有 %d 条迁移未应用：cd backend && go run ./cmd/migrate up", pending)
-	case latest != "":
-		c.okf("schema 已是最新（%s）", latest)
+	case len(pending) > 0:
+		c.missingf("schema 有 %d 条迁移未应用：%s（cd backend && go run ./cmd/migrate up）",
+			len(pending), summarizePending(pending, 3))
+	case applied > 0:
+		c.okf("schema 已是最新：%d 条迁移全部已应用，最新 %s", applied, latest)
 	default:
 		c.warnf("迁移状态没有输出，跳过版本判断")
 	}
+}
+
+// mysqlGreeting reads the first packet a MySQL-compatible server sends without
+// authenticating: protocol version 10, then a NUL-terminated server version.
+// It proves the port belongs to a database rather than to some other process.
+func mysqlGreeting(addr string, timeout time.Duration) (string, error) {
+	conn, err := net.DialTimeout("tcp", addr, timeout)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return "", err
+	}
+	header := make([]byte, 4)
+	if _, err := io.ReadFull(conn, header); err != nil {
+		return "", fmt.Errorf("读取握手包长度失败: %w", err)
+	}
+	length := int(header[0]) | int(header[1])<<8 | int(header[2])<<16
+	if length < 2 || length > 1<<16 {
+		return "", fmt.Errorf("握手包长度不合理: %d", length)
+	}
+	body := make([]byte, length)
+	if _, err := io.ReadFull(conn, body); err != nil {
+		return "", fmt.Errorf("读取握手包失败: %w", err)
+	}
+	if body[0] != 10 {
+		return "", fmt.Errorf("不是 MySQL 协议: protocol=%d", body[0])
+	}
+	end := bytes.IndexByte(body[1:], 0)
+	if end <= 0 {
+		return "", fmt.Errorf("握手包里没有版本号")
+	}
+	return string(body[1 : 1+end]), nil
+}
+
+// summarizePending keeps the "what is left to apply" line readable when a clone
+// is many versions behind: the first few names, then a count of the rest.
+func summarizePending(pending []string, limit int) string {
+	if len(pending) <= limit {
+		return strings.Join(pending, "、")
+	}
+	return strings.Join(pending[:limit], "、") + fmt.Sprintf(" 等 %d 条", len(pending))
 }
 
 // checkServices always probes docling when an address is configured. Whether an
