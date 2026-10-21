@@ -32,17 +32,17 @@ func main() {
 	// The connection that runs migrations cannot create the database it points
 	// at, so create it first over a connection that selects no database.
 	if err := data.EnsureDatabase(ctx, cfg.Database); err != nil {
-		log.Fatal("ensure database exists")
+		log.Fatalf("ensure database exists: %v", err)
 	}
 
 	resource, err := data.Open(cfg.Database)
 	if err != nil {
-		log.Fatal("open database")
+		log.Fatalf("open database: %v", err)
 	}
 	defer resource.Close()
 
 	if err := resource.Ping(ctx); err != nil {
-		log.Fatal("database is unavailable")
+		log.Fatalf("database is unavailable: %v", err)
 	}
 
 	switch os.Args[1] {

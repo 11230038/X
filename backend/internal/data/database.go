@@ -41,12 +41,12 @@ func Open(cfg config.DatabaseConfig) (*Resource, error) {
 		Logger:               gormlogger.Default.LogMode(gormlogger.Silent),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("open seekdb database")
+		return nil, fmt.Errorf("open seekdb database: %w", err)
 	}
 
 	sqlDB, err := gormDB.DB()
 	if err != nil {
-		return nil, fmt.Errorf("get seekdb connection pool")
+		return nil, fmt.Errorf("get seekdb connection pool: %w", err)
 	}
 	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
 	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
@@ -65,7 +65,7 @@ func EnsureDatabase(ctx context.Context, cfg config.DatabaseConfig) error {
 
 	connector, err := mysqldriver.NewConnector(driverCfg)
 	if err != nil {
-		return fmt.Errorf("build seekdb server connection")
+		return fmt.Errorf("build seekdb server connection: %w", err)
 	}
 	db := sql.OpenDB(connector)
 	defer db.Close()
@@ -76,7 +76,7 @@ func EnsureDatabase(ctx context.Context, cfg config.DatabaseConfig) error {
 		cfg.Name, cfg.Charset, cfg.Collation,
 	)
 	if _, err := db.ExecContext(ctx, query); err != nil {
-		return fmt.Errorf("ensure database exists: %w", err)
+		return fmt.Errorf("create database %q: %w", cfg.Name, err)
 	}
 	return nil
 }

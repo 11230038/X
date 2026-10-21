@@ -87,17 +87,17 @@ func main() {
 	// it points at changes nothing about the two tables below, and it keeps this
 	// command's first line the same as the migration command's.
 	if err := data.EnsureDatabase(ctx, cfg.Database); err != nil {
-		log.Fatal("ensure database exists")
+		log.Fatalf("ensure database exists: %v", err)
 	}
 
 	resource, err := data.Open(cfg.Database)
 	if err != nil {
-		log.Fatal("open database")
+		log.Fatalf("open database: %v", err)
 	}
 	defer resource.Close()
 
 	if err := resource.Ping(ctx); err != nil {
-		log.Fatal("database is unavailable")
+		log.Fatalf("database is unavailable: %v", err)
 	}
 
 	auditLog, err := audit.NewService(audit.NewGORMStore(resource.GORM()), audit.Options{
@@ -105,11 +105,11 @@ func main() {
 		RetentionDays: cfg.Audit.RetentionDays,
 	})
 	if err != nil {
-		log.Fatal("initialize audit")
+		log.Fatalf("initialize audit: %v", err)
 	}
 	calls, err := usage.NewService(usage.NewGORMLedger(resource.GORM()), cfg.Usage.RetentionDays)
 	if err != nil {
-		log.Fatal("initialize the usage record")
+		log.Fatalf("initialize the usage record: %v", err)
 	}
 
 	// One table at a time, and a failure stops the run: the two windows are

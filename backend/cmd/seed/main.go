@@ -53,17 +53,17 @@ func main() {
 	}
 	resource, err := data.Open(cfg.Database)
 	if err != nil {
-		log.Fatal("open database")
+		log.Fatalf("open database: %v", err)
 	}
 	defer resource.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	if err := resource.Ping(ctx); err != nil {
-		log.Fatal("database is unavailable")
+		log.Fatalf("database is unavailable: %v", err)
 	}
 	if err := migration.CheckLatest(ctx, resource.SQLDB()); err != nil {
-		log.Fatal("database schema is not current")
+		log.Fatalf("database schema is not current: %v", err)
 	}
 
 	if err := resource.GORM().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
