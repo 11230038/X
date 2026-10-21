@@ -87,7 +87,7 @@ func TestRequireSuperAdminRefusesAnAdministratorWhoIsNotListed(t *testing.T) {
 // the kind no case above would notice.
 func TestRequireSuperAdminRefusesARequestWithNoAccount(t *testing.T) {
 	for _, user := range []auth.User{
-		{},                          // nothing set at all
+		{},                            // nothing set at all
 		{UserID: 0, SuperAdmin: true}, // a zero id, which is not an account
 	} {
 		router := newSuperAdminRouter(user, user != (auth.User{}))

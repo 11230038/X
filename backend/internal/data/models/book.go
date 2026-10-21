@@ -8,21 +8,21 @@ import "time"
 // deliberately not part of any API projection: the shelf and the detail read
 // name the source, never its copy. Only the generation path selects this column.
 type Book struct {
-	BookID            string     `gorm:"column:book_id;primaryKey;autoIncrement:false"`
-	OwnerID           int64      `gorm:"column:owner_id;not null"`
-	Title             string     `gorm:"column:title;not null"`
-	SourceKind        string     `gorm:"column:source_kind;not null"`
-	SourceID          string     `gorm:"column:source_id;not null;default:''"`
-	SourceTitle       string     `gorm:"column:source_title;not null;default:''"`
-	SourceText        string     `gorm:"column:source_text;not null"`
-	SourceChars       int        `gorm:"column:source_chars;not null;default:0"`
-	SourceTruncated   bool       `gorm:"column:source_truncated;not null;default:false"`
-	OutlineConfirmed  bool       `gorm:"column:outline_confirmed;not null;default:false"`
-	OutlineRevision   int        `gorm:"column:outline_revision;not null;default:0"`
-	LastOrdinal       int        `gorm:"column:last_ordinal;not null;default:0"`
+	BookID             string     `gorm:"column:book_id;primaryKey;autoIncrement:false"`
+	OwnerID            int64      `gorm:"column:owner_id;not null"`
+	Title              string     `gorm:"column:title;not null"`
+	SourceKind         string     `gorm:"column:source_kind;not null"`
+	SourceID           string     `gorm:"column:source_id;not null;default:''"`
+	SourceTitle        string     `gorm:"column:source_title;not null;default:''"`
+	SourceText         string     `gorm:"column:source_text;not null"`
+	SourceChars        int        `gorm:"column:source_chars;not null;default:0"`
+	SourceTruncated    bool       `gorm:"column:source_truncated;not null;default:false"`
+	OutlineConfirmed   bool       `gorm:"column:outline_confirmed;not null;default:false"`
+	OutlineRevision    int        `gorm:"column:outline_revision;not null;default:0"`
+	LastOrdinal        int        `gorm:"column:last_ordinal;not null;default:0"`
 	ProgressUpdateTime *time.Time `gorm:"column:progress_update_time"`
-	CreatedAt         time.Time  `gorm:"column:creat_time;autoCreateTime"`
-	UpdatedAt         time.Time  `gorm:"column:update_time;autoCreateTime;autoUpdateTime"`
+	CreatedAt          time.Time  `gorm:"column:creat_time;autoCreateTime"`
+	UpdatedAt          time.Time  `gorm:"column:update_time;autoCreateTime;autoUpdateTime"`
 }
 
 // TableName fixes the books table name.

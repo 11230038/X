@@ -69,8 +69,8 @@ const (
 	// would tell somebody their capability is missing when their persona was
 	// deleted in another tab.
 	CodePersonaNotFound = "persona_not_found"
-	CodeSlowConsumer               = "slow_consumer"
-	CodeInternal                   = "internal_error"
+	CodeSlowConsumer    = "slow_consumer"
+	CodeInternal        = "internal_error"
 )
 
 // eventFrame is one event of a turn, on the wire.
