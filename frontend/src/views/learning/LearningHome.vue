@@ -478,20 +478,22 @@ onMounted(() => {
   background-size: 20px 20px;
   box-shadow: var(--glass-shadow), var(--inset-light);
   backdrop-filter: blur(28px);
-  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-}
-
-.glass-brick:hover {
-  transform: translateY(-4px);
-  box-shadow:
-    0 32px 64px -12px rgb(0 0 0 / 6%),
-    inset 0 2px 4px rgb(255 255 255 / 100%);
 }
 
 /* 整块是链接的砖：抹掉链接自己的颜色与下划线，剩下的就是原来那张砖。 */
 .brick-link {
   color: inherit;
   text-decoration: none;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+/* 只有**整块能点**的砖才上浮。另外几张砖（统计、进度、在场时长）是展示面
+   板，自己没有去处 —— 鼠标划过时它们不动，会动的只有砖里那几行真链接。 */
+.brick-link:hover {
+  transform: translateY(-4px);
+  box-shadow:
+    0 32px 64px -12px rgb(0 0 0 / 6%),
+    inset 0 2px 4px rgb(255 255 255 / 100%);
 }
 
 .brick-span-2 {

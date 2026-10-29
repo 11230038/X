@@ -158,20 +158,16 @@ import { RINNEX_ABOUT } from '../../copy/about'
   list-style: none;
 }
 
+/* 这排图标只是画面，不是控件 —— 它们没有去处，所以鼠标划过时不动。
+   高低错开的一点点位移是静态排版，用来让这排笔画看起来像随手排的。 */
 .about__icons li {
   display: flex;
   --icon-size: 26px;
   opacity: 0.85;
-  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease;
 }
 
 .about__icons li:nth-child(even) {
   transform: translateY(3px);
-}
-
-.about__icons li:hover {
-  opacity: 1;
-  transform: translateY(-4px);
 }
 
 .about__foot {

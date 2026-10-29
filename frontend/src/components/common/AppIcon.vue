@@ -34,6 +34,7 @@ export type AppIconName =
   | 'search'
   | 'tag'
   | 'eye'
+  | 'eyeOff'
   | 'calendar'
   | 'check'
   | 'target'
@@ -304,6 +305,12 @@ const ink = computed(() => (brand.value ? `url(#${id})` : 'currentColor'))
       <template v-else-if="name === 'eye'">
         <path d="M 3.6 12.2 C 5.4 9.0 8.4 7.2 12 7.2 C 15.6 7.2 18.6 9.0 20.4 12.2 C 18.6 15.4 15.6 17.2 12 17.2 C 8.4 17.2 5.4 15.4 3.6 12.2 Z"/>
         <circle cx="12" cy="12.2" r="2.8"/>
+      </template>
+
+      <template v-else-if="name === 'eyeOff'">
+        <path d="M 3.6 12.2 C 5.4 9.0 8.4 7.2 12 7.2 C 15.6 7.2 18.6 9.0 20.4 12.2 C 18.6 15.4 15.6 17.2 12 17.2 C 8.4 17.2 5.4 15.4 3.6 12.2 Z"/>
+        <circle cx="12" cy="12.2" r="2.8"/>
+        <path d="M 5.3 4.9 C 7.3 7.1 9.3 9.3 11.3 11.5 C 13.3 13.7 15.3 15.9 17.3 18.1 C 17.8 18.6 18.3 19.1 18.7 19.5"/>
       </template>
 
       <template v-else-if="name === 'calendar'">

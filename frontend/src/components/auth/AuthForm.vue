@@ -19,6 +19,7 @@
 
 import { computed, ref } from 'vue'
 
+import AppIcon from '../common/AppIcon.vue'
 import logo from '../../assets/logo-rinnex-color.png'
 
 const props = defineProps<{
@@ -97,9 +98,10 @@ function submit(): void {
             class="auth__reveal"
             :aria-pressed="revealed"
             :aria-label="revealed ? '隐藏密码' : '显示密码'"
+            :title="revealed ? '隐藏密码' : '显示密码'"
             @click="revealed = !revealed"
           >
-            {{ revealed ? '隐藏' : '显示' }}
+            <AppIcon :name="revealed ? 'eyeOff' : 'eye'" tone="ink" />
           </button>
         </span>
       </label>
@@ -134,6 +136,8 @@ function submit(): void {
     radial-gradient(circle at 90% 90%, rgb(177 140 255 / 20%) 0%, transparent 50%);
 }
 
+/* 卡片是**安静的**：鼠标划过时不上浮、不缩放、不改阴影。整张卡片是这一页
+   的"纸"，不是可以点的控件 —— 会动的只有里面的输入框、眼睛与按钮。 */
 .auth__card {
   display: flex;
   flex-direction: column;
@@ -147,11 +151,6 @@ function submit(): void {
   text-align: center;
   backdrop-filter: blur(30px);
   -webkit-backdrop-filter: blur(30px);
-  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.auth__card:hover {
-  transform: translateY(-4px);
 }
 
 /* 品牌标志：`.product/Rinnex logo 初版方案.pdf` 的手绘稿，只裁掉四周纸白，
@@ -225,19 +224,26 @@ function submit(): void {
 }
 
 .auth__password .auth__input {
-  padding-right: 62px;
+  padding-right: 48px;
 }
 
+/* 显示 / 隐藏密码：一枚手绘眼睛（`AppIcon` 的 `eye` / `eyeOff`）。这里用墨色
+   而不是品牌渐变 —— 它在输入框里，颜色要跟着 `color` 变化（悬停变深），和
+   输入框本身是一个层级。 */
 .auth__reveal {
   position: absolute;
   top: 50%;
   right: 8px;
-  padding: 5px 8px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   border: 0;
   border-radius: 8px;
   background: none;
-  color: var(--text-muted);
-  font-size: 14px;
+  color: var(--text-faint);
+  --icon-size: 20px;
   transform: translateY(-50%);
   cursor: pointer;
 }
