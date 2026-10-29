@@ -174,6 +174,44 @@ func TestTheLimitIsTheSameWindowForEveryCategory(t *testing.T) {
 	}
 }
 
+func TestAPathCarriesItsProgressAsNumbersAsWellAsASentence(t *testing.T) {
+	sessions, paths, reviews := empty()
+	paths.rows = []mastery.Summary{summary("mp_a", "学会闭包", 2, 5, atNine, time.Time{})}
+
+	view, err := dashboard(t, 10, sessions, paths, reviews).Read(context.Background(), testCaller)
+	if err != nil {
+		t.Fatalf("read the dashboard: %v", err)
+	}
+	if len(view.Paths) != 1 {
+		t.Fatalf("the listing carries %d paths, want 1", len(view.Paths))
+	}
+	// The same two numbers the sentence is made of, so a surface that draws a bar
+	// does not have to read them back out of the sentence.
+	progress := view.Paths[0].Progress
+	if progress == nil || progress.Done != 2 || progress.Total != 5 {
+		t.Errorf("the path's progress is %+v, want 2 of 5", progress)
+	}
+}
+
+func TestACategoryThatCountsNothingCarriesNoProgress(t *testing.T) {
+	sessions, paths, reviews := empty()
+	sessions.rows = []session.Session{{ID: "s_1", Title: "第一次对话", UpdatedAt: atNine}}
+	reviews.rows = []practice.QueueItem{
+		{Question: notebook.Question{QuestionID: "qn_1", Text: "什么是闭包"}, Reason: practice.ReasonDue},
+	}
+
+	view, err := dashboard(t, 10, sessions, paths, reviews).Read(context.Background(), testCaller)
+	if err != nil {
+		t.Fatalf("read the dashboard: %v", err)
+	}
+	// nil and "0 of 0" are different answers: a conversation has nothing to count,
+	// and a bar of zero length would say it had counted and found nothing.
+	if view.Sessions[0].Progress != nil || view.Reviews[0].Progress != nil {
+		t.Errorf("a conversation or a question carries progress: %+v / %+v",
+			view.Sessions[0].Progress, view.Reviews[0].Progress)
+	}
+}
+
 func TestAnEntryThatCannotBeOpenedIsDroppedAndTheRestAreKept(t *testing.T) {
 	sessions, paths, reviews := empty()
 	sessions.rows = []session.Session{

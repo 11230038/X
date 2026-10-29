@@ -4,61 +4,216 @@
   height: 100%;
 }
 
-/*
- * 写作页的「对话模块框」：同一套工作台，但收成一块有边的模块，和左边那份
- * 写作历史分开看。它只是框住已有内容，不改任何行为。
- */
-.main--writing {
-  height: calc(100% - 32px);
-  margin: 14px 18px 18px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: 0 1px 3px rgb(20 26 38 / 5%);
-}
-
+/* 顶栏照演示稿的 `.chat-topbar`：左边模式胶囊，右边人格选择与能力。
+   外边距取演示稿 `.page` 的 32px 40px —— 主列本身就是那一页的玻璃面。 */
 .main__head {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 13px;
   align-items: center;
   justify-content: space-between;
-  padding: 13px 24px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  padding: 32px 40px 16px;
 }
 
-.main__title {
-  overflow: hidden;
-  font-size: 15px;
-  font-weight: 650;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+/* 顶栏左侧：返回上一级（只有二级页面有）与模式胶囊/能力标签。 */
+.main__head-left {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 13px;
 }
 
-.main__capability {
+/* 返回上一级。与右侧「结束写作」同一个视觉层级，但它是链接不是动作。 */
+.main__back {
+  display: inline-flex;
   flex: none;
-  padding: 4px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  gap: 6px;
+  align-items: center;
+  padding: 9px 18px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--text);
   font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.main__back:hover {
+  border-color: var(--text);
+}
+
+.chat-modes {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* 胶囊里多了一枚图标（`AppIcon`）：图标按字号取 1em，左右内边距收到 12px
+   —— 顶栏是 600px 一栏，三枚胶囊加右边的人格选择原本就刚好铺满，图标多出来
+   的宽度只能从这两处让。 */
+.mode-btn {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 8px 9px;
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: 15px;
+  font-weight: 600;
+  /* 演示稿三枚胶囊都是单行；窄下来时宁可挤右边，也不要折成两行。 */
+  white-space: nowrap;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.mode-btn .app-icon {
+  --icon-size: 1em;
+}
+
+.mode-btn:hover {
+  color: var(--text);
+}
+
+.mode-btn--active {
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
+}
+
+/* 路径对话顶栏的只读能力标签；演示稿里也是一枚灰底小标签。 */
+.chat-mode-tag {
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: rgb(0 0 0 / 5%);
+  color: var(--text-faint);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.main__head-right {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+/* 能力选择，排在输入框上方那一排 chip 里（演示稿的顶栏装不下三样）。 */
+.cap-tool {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 14px;
+  border: 1px solid rgb(0 0 0 / 6%);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.cap-tool__label {
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+.cap-tool__select {
+  min-width: 0;
+  max-width: 12em;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* 人格选择，照演示稿的 `.partner-selector`。 */
+.partner-selector {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 14px;
+  border: 1px solid rgb(0 0 0 / 3%);
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 5%);
+}
+
+.partner-selector--locked {
+  cursor: default;
+}
+
+.partner-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-yellow), var(--color-pink));
+  font-size: 16px;
+}
+
+.partner-name {
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.partner-select {
+  max-width: 12em;
+  border: 0;
+  outline: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.partner-select:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.partner-manage {
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.partner-manage:hover {
+  color: var(--text);
 }
 
 /* 写作会话右上角的退出动作。标题用 space-between 顶开，这里再靠一次右。 */
 .main__end {
   flex: none;
   margin-left: auto;
-  padding: 5px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 9px 18px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 999px;
+  background: #fff;
   color: var(--text);
   font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .main__end:hover {
-  background: var(--surface-sunken);
+  border-color: var(--text);
 }
 
 .main__body {
@@ -67,7 +222,7 @@
 }
 
 .earlier {
-  padding: 8px 24px 0;
+  padding: 8px 40px 0;
 }
 
 .earlier__button {
@@ -77,7 +232,7 @@
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
 }
 

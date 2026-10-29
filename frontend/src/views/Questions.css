@@ -1,155 +1,233 @@
-/* ── 列表栏 ───────────────────────────────────────────────────────────── */
+/* ── 选择题目：能力标签 + 大搜索条 + 错题卡片 ─────────────────────────── */
+/* 尺寸照演示稿 `#page-mistakes` 的「全部错题」：药丸标签、16/24 的搜索框、
+   24 内边距的白卡片。 */
 
-.bank {
+/* 页内间距是 18，演示稿这一段是 24 —— 补 6px，节奏照它。 */
+.feature-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 6px;
+}
+
+.f-pill {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 16px;
+  border: 1px solid #eef2f5;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(51 68 85 / 4%);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* 搜索条与筛选行是一组工具：自己占一整行，下面四个下拉一行。 */
+.m-tools {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  border-right: 1px solid var(--border);
-  background: var(--surface);
+  gap: 16px;
+  margin-bottom: 6px;
 }
 
-.bank__head {
-  padding: 12px 12px 8px;
-}
-
-.bank__search {
+.m-input {
   width: 100%;
-  padding: 6px 9px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 13px;
+  padding: 16px 24px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #fff;
+  font-size: 15px;
+  outline: none;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 2%);
+  transition: 0.2s;
 }
 
-.bank__filters {
+.m-input:focus {
+  border-color: var(--color-purple);
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 10%);
+}
+
+.m-filters {
   display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 0 12px 10px;
-  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  gap: 16px;
 }
 
-.bank__select {
-  width: 100%;
-  padding: 4px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  font-size: 12px;
+.m-select {
+  padding: 16px 24px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #fff;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  outline: none;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 2%);
 }
 
-.bank__body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 8px;
-}
-
-.bank__stale {
+.question-stale {
   display: flex;
   gap: 8px;
   align-items: center;
   justify-content: space-between;
-  margin: 0 2px 8px;
-  padding: 6px 9px;
+  margin: 0;
+  padding: 8px 12px;
   border: 1px solid var(--warning);
   border-radius: var(--radius-sm);
   background: var(--warning-soft);
-  font-size: 11px;
+  font-size: 14px;
 }
 
-.bank__retry {
+.question-retry {
   border: 1px solid var(--border-strong);
   border-radius: 4px;
   background: transparent;
-  font-size: 11px;
+  font-size: 14px;
   cursor: pointer;
 }
 
-.bank__list {
+.m-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 20px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.qrow {
+/* 一行一道题：白底卡片，悬停抬起，右端一个 › 说明这行是入口。 */
+.m-card {
   display: flex;
-  flex-direction: column;
-  gap: 5px;
+  gap: 20px;
+  align-items: center;
+  justify-content: space-between;
   width: 100%;
-  padding: 9px 10px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
+  padding: 24px;
+  border: 1px solid #eef2f5;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgb(51 68 85 / 3%);
   text-align: left;
   cursor: pointer;
+  transition: 0.2s;
 }
 
-.qrow:hover {
-  background: var(--surface-sunken);
+.m-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-purple);
+  box-shadow: 0 8px 24px rgb(177 140 255 / 8%);
 }
 
-.qrow--active {
-  background: var(--accent-soft);
+.m-card__main {
+  min-width: 0;
 }
 
-.qrow__text {
-  display: -webkit-box;
-  overflow: hidden;
+.m-card__text {
+  display: block;
+  margin-bottom: 12px;
   color: var(--text);
-  font-size: 13px;
+  font-size: 16px;
+  font-weight: 600;
   line-height: 1.5;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
-.qrow__meta {
+.m-card__tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
+  gap: 8px;
 }
 
-.qrow__star {
-  color: var(--warning);
-  font-size: 11px;
+/* 演示稿 `.m-tag`：灰底、6 圆角；危险与警告只是换底色，文字始终在。 */
+.m-tag {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: #f0f4f8;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-/* ── 内容区 ───────────────────────────────────────────────────────────── */
-
-.page {
-  height: 100%;
-  overflow-y: auto;
-  background: var(--surface-sunken);
+.m-tag--warning {
+  background: #fef3c7;
+  color: #d97706;
 }
 
-.page__inner {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 26px 30px 48px;
+.m-tag--success {
+  background: rgb(167 243 208 / 45%);
+  color: var(--success);
+}
+
+.m-tag--accent {
+  background: rgb(177 140 255 / 15%);
+  color: var(--accent-ink);
+}
+
+.m-card__go {
+  flex: none;
+  color: #e2e8f0;
+  font-size: 20px;
+  line-height: 1;
+}
+
+/* ── 详情 ─────────────────────────────────────────────────────────────── */
+
+.back {
+  align-self: flex-start;
+  padding: 7px 15px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 78%);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.back:hover {
+  border-color: var(--accent);
+  background: #fff;
+  color: var(--text);
 }
 
 .primary {
-  padding: 6px 14px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
-  background: var(--accent);
+  padding: 8px 18px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--accent-gradient);
   color: #fff;
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 4px 12px rgb(177 140 255 / 30%);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgb(177 140 255 / 40%);
 }
 
 .ghost {
-  padding: 5px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text);
-  font-size: 12px;
+  padding: 7px 15px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 78%);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ghost:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: #fff;
+  color: var(--text);
 }
 
 .ghost:disabled,
@@ -164,24 +242,26 @@
   border-radius: var(--radius-sm);
   background: var(--danger-soft);
   color: var(--danger);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .detail {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  margin-top: 18px;
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  gap: 22px;
+  padding: 24px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .detail__head {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 14px;
   align-items: center;
   justify-content: space-between;
 }
@@ -215,9 +295,10 @@
   display: flex;
   gap: 9px;
   align-items: baseline;
-  padding: 8px 11px;
-  border: 1px solid var(--border);
+  padding: 9px 13px;
+  border: 1px solid rgb(255 255 255 / 72%);
   border-radius: var(--radius-sm);
+  background: rgb(255 255 255 / 40%);
 }
 
 .option--correct {
@@ -227,18 +308,18 @@
 
 .option__key {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
 }
 
 .option__text {
   flex: 1;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .option__mark {
   color: var(--success);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .block {
@@ -249,13 +330,13 @@
 .block__title {
   margin: 0 0 6px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .block__text {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.75;
   white-space: pre-wrap;
 }
@@ -263,10 +344,10 @@
 .block__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 16px;
   margin: 6px 0 0;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .verdict {
@@ -285,7 +366,7 @@
 .muted {
   margin: 0;
   color: var(--text-faint);
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .meta {
@@ -295,7 +376,7 @@
   margin: 0;
   padding-top: 12px;
   border-top: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .meta dt {
@@ -313,14 +394,18 @@
   width: min(720px, calc(100vw - 48px));
   max-height: calc(100vh - 80px);
   padding: 0;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: rgb(255 255 255 / 92%);
   color: var(--text);
+  box-shadow: 0 24px 64px -12px rgb(51 68 85 / 20%);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
 }
 
 .import::backdrop {
-  background: rgb(20 26 38 / 35%);
+  background: rgb(20 26 38 / 25%);
+  backdrop-filter: blur(6px);
 }
 
 .import__head {
@@ -347,7 +432,7 @@
   margin: 0;
   padding: 0 18px 10px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .import__text {
@@ -358,7 +443,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
   resize: vertical;
 }
@@ -366,13 +451,13 @@
 .import__error {
   margin: 10px 18px 0;
   color: var(--danger);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .import__loading {
   margin: 10px 18px 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .import__report {
@@ -387,7 +472,7 @@
 
 .import__summary {
   margin: 0 0 8px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -405,7 +490,7 @@
   flex-wrap: wrap;
   gap: 8px;
   align-items: baseline;
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .import__line {

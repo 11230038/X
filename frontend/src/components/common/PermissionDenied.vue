@@ -76,7 +76,7 @@ const kindLabel = computed(() => {
     <details class="denied__why">
       <summary>如何调整</summary>
       <p>
-        权限由账号角色、预设、单独授权和监护关系共同决定。管理台可以逐项打开或关闭；
+        权限由账号角色、预设、单独授权和监护关系共同决定。用户管理页可以逐项打开或关闭；
         其中标记为底线的项目不能被关闭。如果这不是你能改的，请联系管理员。
       </p>
     </details>
@@ -108,7 +108,7 @@ const kindLabel = computed(() => {
 .denied__item {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -118,19 +118,26 @@ const kindLabel = computed(() => {
 
 .denied__back {
   margin-top: 8px;
-  padding: 5px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 7px 16px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 78%);
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.denied__back:hover {
+  border-color: var(--accent);
+  background: #fff;
 }
 
 .denied__why {
   margin-top: 4px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .denied__why summary {

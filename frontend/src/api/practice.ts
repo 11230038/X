@@ -129,3 +129,21 @@ export function getPracticeStats(options: {
     query: { from: options.from, to: options.to, bucket: options.bucket },
   })
 }
+
+/**
+ * 错题集的进度：窗口内复习过的错题道数 / 错题集现在有多少道。
+ *
+ * 两个数都返回，不返回百分比：进度条要除，旁边那行字要写出分子分母。
+ * 错题的标记不会被清掉，所以“现在”的集合一定包含窗口里存在过的每一道，
+ * 分子不会大于分母。
+ */
+export interface MistakeProgress {
+  reviewed: number
+  total: number
+}
+
+export function getMistakeProgress(from: string, to: string): Promise<MistakeProgress> {
+  return request<MistakeProgress>('/practice/mistakes', {
+    query: { from, to },
+  })
+}

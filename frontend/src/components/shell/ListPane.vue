@@ -67,25 +67,34 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
+/* 演示稿 `.sidebar`：240px 玻璃栏，28px 24px 内边距，标题 18/800。 */
 .list {
   display: flex;
   flex-direction: column;
   height: 100%;
-  border-right: 1px solid var(--border);
-  background: var(--surface);
+  overflow: hidden;
+  padding: 28px 24px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
 }
 
+/* 演示稿 `.sidebar-header`：标题与操作同行，下面留 24px。 */
 .list__head {
   display: flex;
   gap: 8px;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 12px 8px;
+  margin-bottom: 24px;
 }
 
+/* 演示稿 `.sidebar-header` 只有字号与字重，没有字距调整。 */
 .list__title {
-  font-size: 15px;
-  font-weight: 650;
+  font-size: 21px;
+  font-weight: 800;
 }
 
 .list__actions {
@@ -94,31 +103,42 @@ const emit = defineEmits<{
   align-items: center;
 }
 
+/* 搜索是这一版多出来的：演示稿的历史会话没有搜索框。 */
 .list__search {
-  padding: 0 12px 8px;
+  margin-bottom: 16px;
 }
 
 .list__input {
   width: 100%;
-  padding: 6px 9px;
-  border: 1px solid var(--border);
+  padding: 8px 12px;
+  border: 1px solid rgb(28 28 30 / 6%);
   border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
+  background: rgb(255 255 255 / 62%);
   font-size: 13px;
+  outline: none;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 .list__input:focus {
   border-color: var(--accent);
-  background: var(--surface);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 14%);
 }
 
 .list__body {
   flex: 1;
   overflow-y: auto;
-  padding: 0 6px 12px;
+  /* 行自己带 12px 16px 的内边距（演示稿 `.sidebar-item`），外面不再加。 */
+  padding: 0;
+  margin-right: -8px;
+  padding-right: 8px;
 }
 
+/* 演示稿 `.sidebar-list`：行与行间隔 8px。 */
 .list__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;

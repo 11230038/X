@@ -25,6 +25,7 @@ import {
   formatNumber,
 } from '../../shared/format'
 import { toFailure } from '../../shared/resource'
+import AppIcon from '../../components/common/AppIcon.vue'
 
 const GROUP_OPTIONS: Array<{ value: UsageGroupBy; label: string }> = [
   { value: 'day', label: SETTINGS.days },
@@ -113,41 +114,51 @@ onMounted(() => {
 
 <template>
   <div class="usage">
-    <div class="filters">
-      <label class="field">
-        <span class="field__label">{{ SETTINGS.usageWindow }}（开始）</span>
-        <input v-model="since" type="date" class="field__input" />
-      </label>
-      <label class="field">
-        <span class="field__label">{{ SETTINGS.usageWindow }}（结束）</span>
-        <input v-model="until" type="date" class="field__input" />
-      </label>
-      <label class="field">
-        <span class="field__label">{{ SETTINGS.groupBy }}</span>
-        <select v-model="groupBy" class="field__input">
-          <option v-for="option in GROUP_OPTIONS" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
-        </select>
-      </label>
-      <label class="field">
-        <span class="field__label">模型（可选）</span>
-        <input v-model="model" type="text" class="field__input" />
-      </label>
-      <label class="field">
-        <span class="field__label">供应商（可选）</span>
-        <input v-model="provider" type="text" class="field__input" />
-      </label>
-      <label class="field">
-        <span class="field__label">来源（可选）</span>
-        <input v-model="source" type="text" class="field__input" />
-      </label>
-      <label class="field">
-        <span class="field__label">会话（可选）</span>
-        <input v-model="sessionId" type="text" class="field__input" />
-      </label>
-      <button type="button" class="primary" @click="load">查询</button>
-    </div>
+    <section class="set-panel">
+      <div class="set-panel__head">
+        <span class="set-panel__icon" aria-hidden="true"><AppIcon name="search" /></span>
+        <h2 class="set-panel__title">时间与筛选</h2>
+      </div>
+
+      <div class="filters">
+        <label class="set-field">
+          <span class="set-field__label">{{ SETTINGS.usageWindow }}（开始）</span>
+          <input v-model="since" type="date" class="set-field__input" />
+        </label>
+        <label class="set-field">
+          <span class="set-field__label">{{ SETTINGS.usageWindow }}（结束）</span>
+          <input v-model="until" type="date" class="set-field__input" />
+        </label>
+        <label class="set-field">
+          <span class="set-field__label">{{ SETTINGS.groupBy }}</span>
+          <select v-model="groupBy" class="set-field__input">
+            <option v-for="option in GROUP_OPTIONS" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <label class="set-field">
+          <span class="set-field__label">模型（可选）</span>
+          <input v-model="model" type="text" class="set-field__input" />
+        </label>
+        <label class="set-field">
+          <span class="set-field__label">供应商（可选）</span>
+          <input v-model="provider" type="text" class="set-field__input" />
+        </label>
+        <label class="set-field">
+          <span class="set-field__label">来源（可选）</span>
+          <input v-model="source" type="text" class="set-field__input" />
+        </label>
+        <label class="set-field">
+          <span class="set-field__label">会话（可选）</span>
+          <input v-model="sessionId" type="text" class="set-field__input" />
+        </label>
+      </div>
+
+      <div class="filters__actions">
+        <button type="button" class="set-btn" @click="load">查询</button>
+      </div>
+    </section>
 
     <p v-if="rangeInvalid" class="error">{{ rangeInvalid }}</p>
 
@@ -207,10 +218,15 @@ onMounted(() => {
         「未完成的调用」不是失败：它可能是进程退出、连接断开，或者还在进行。
       </p>
 
-      <section class="groups">
-        <h2 class="groups__title">按{{ GROUP_OPTIONS.find((item) => item.value === groupBy)?.label }}分组</h2>
+      <section class="set-panel">
+        <div class="set-panel__head">
+          <span class="set-panel__icon set-panel__icon--ok" aria-hidden="true"><AppIcon name="chart" /></span>
+          <h2 class="set-panel__title">
+            按{{ GROUP_OPTIONS.find((item) => item.value === groupBy)?.label }}分组
+          </h2>
+        </div>
         <p v-if="report.groups.length === 0" class="empty">这个时间范围内没有调用</p>
-        <table v-else class="table">
+        <table v-else class="set-table">
           <thead>
             <tr>
               <th>分组</th>
@@ -247,113 +263,65 @@ onMounted(() => {
 .usage {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 20px;
 }
 
+/* 筛选栏在面板里排成自动换行的格子；按钮另起一行靠右，与"改完再确认"的
+   表单同一处收口。 */
 .filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 12px 14px;
+}
+
+.filters__actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: flex-end;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.field__label {
-  color: var(--text-faint);
-  font-size: 10px;
-}
-
-.field__input {
-  min-width: 110px;
-  padding: 5px 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  font-size: 12px;
-}
-
+/* 总数：一排小瓷砖，数字比标签大两档，读的时候先看见数。 */
 .totals {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .totals__item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 9px 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  gap: 4px;
+  padding: 16px 18px;
+  border: 1px solid rgb(255 255 255 / 70%);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 55%);
+  box-shadow: var(--inset-light);
 }
 
 .totals__item--warn {
-  border-color: var(--warning);
+  border-color: rgb(154 103 0 / 22%);
   background: var(--warning-soft);
 }
 
 .totals__label {
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .totals__value {
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 .hint {
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
-}
-
-.groups {
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-.groups__title {
-  margin: 0 0 9px;
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 11px;
-}
-
-.table th,
-.table td {
-  padding: 5px 7px;
-  border-bottom: 1px solid var(--border);
-  text-align: right;
-  white-space: nowrap;
-}
-
-.table th:first-child,
-.table td:first-child {
-  text-align: left;
-}
-
-.table th {
-  color: var(--text-faint);
-  font-weight: 500;
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 .key {
@@ -366,22 +334,12 @@ onMounted(() => {
 .empty {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .error {
   margin: 0;
   color: var(--danger);
-  font-size: 11px;
-}
-
-.primary {
-  padding: 5px 13px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: #fff;
-  font-size: 12px;
-  cursor: pointer;
+  font-size: 14px;
 }
 </style>

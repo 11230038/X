@@ -13,12 +13,12 @@ import type { ApiFailure } from '../../api/client'
 import type { AdminGuardianLink, GuardianPermission } from '../../api/admin'
 import { getLearnerReport, listLearners } from '../../api/guardian'
 import type { DashboardView } from '../../api/dashboard'
-import EmptyState from '../../components/common/EmptyState.vue'
 import FailureState from '../../components/common/FailureState.vue'
 import SkeletonBlock from '../../components/common/SkeletonBlock.vue'
 import { SETTINGS } from '../../copy/settings'
 import { formatDateTime } from '../../shared/format'
 import { toFailure } from '../../shared/resource'
+import AppIcon from '../../components/common/AppIcon.vue'
 
 const PERMISSION_LABELS: Record<GuardianPermission, string> = {
   view_reports: '查看学习报告',
@@ -111,14 +111,21 @@ onMounted(() => {
       @retry="load"
     />
 
-    <EmptyState
-      v-else-if="learners.length === 0"
-      :title="SETTINGS.learners"
-      hint="当前账号还没有登记监护关系。"
-    />
+    <!-- 没有监护关系时也给一张卡：这里没有本页能做的动作，但要说清该去哪儿。 -->
+    <section v-else-if="learners.length === 0" class="set-panel">
+      <div class="set-panel__head">
+        <span class="set-panel__icon" aria-hidden="true"><AppIcon name="heart" /></span>
+        <h2 class="set-panel__title">{{ SETTINGS.learners }}</h2>
+      </div>
+      <p class="hint">
+        当前账号还没有登记监护关系。监护关系由管理员在
+        <RouterLink class="link" :to="{ name: 'profile-users' }">用户管理</RouterLink>
+        的用户详情里建立。
+      </p>
+    </section>
 
     <template v-else>
-      <p class="hint">{{ SETTINGS.learners }}</p>
+      <p class="label">{{ SETTINGS.learners }}</p>
       <ul class="learners">
         <li v-for="link in learners" :key="link.link_id">
           <button
@@ -127,25 +134,31 @@ onMounted(() => {
             :class="{ 'learner--active': link.learner_id === selectedId }"
             @click="select(link)"
           >
-            <span class="learner__name">学习者 #{{ link.learner_id }}</span>
-            <span class="learner__permissions">{{ permissionLabels(link) }}</span>
+            <span class="learner__icon" aria-hidden="true"><AppIcon name="user" /></span>
+            <span class="learner__text">
+              <span class="learner__name">学习者 #{{ link.learner_id }}</span>
+              <span class="learner__permissions">{{ permissionLabels(link) }}</span>
+            </span>
           </button>
         </li>
       </ul>
 
-      <section v-if="current" class="report">
-        <header class="report__head">
-          <h2 class="report__title">{{ SETTINGS.reports }}</h2>
-          <button
-            v-if="canViewSelected"
-            type="button"
-            class="ghost"
-            :disabled="reportStatus === 'loading'"
-            @click="reloadSelectedReport"
-          >
-            {{ reportStatus === 'loading' ? '正在读取…' : '重新读取' }}
-          </button>
-        </header>
+      <section v-if="current" class="set-panel">
+        <div class="set-panel__head">
+          <span class="set-panel__icon" aria-hidden="true"><AppIcon name="space" /></span>
+          <h2 class="set-panel__title">{{ SETTINGS.reports }}</h2>
+          <div class="set-panel__actions">
+            <button
+              v-if="canViewSelected"
+              type="button"
+              class="set-btn set-btn--ghost set-btn--sm"
+              :disabled="reportStatus === 'loading'"
+              @click="reloadSelectedReport"
+            >
+              {{ reportStatus === 'loading' ? '正在读取…' : '重新读取' }}
+            </button>
+          </div>
+        </div>
 
         <p v-if="!canViewSelected" class="missing">
           {{ SETTINGS.viewReportsMissing }}：这条监护关系没有 `view_reports`，所以这里
@@ -240,19 +253,23 @@ onMounted(() => {
 .guardian {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
-.hint {
+/* 分区小标题：比正文小一档、比说明重一档。 */
+.label {
   margin: 0;
-  color: var(--text-muted);
-  font-size: 11px;
+  color: var(--text-faint);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
+/* 学习者是一排可选的卡片：图标块 + 名字 + 权限。 */
 .learners {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 10px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -260,85 +277,93 @@ onMounted(() => {
 
 .learner {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: baseline;
-  width: 100%;
-  padding: 9px 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  gap: 12px;
+  align-items: center;
+  min-width: 240px;
+  padding: 12px 20px 12px 12px;
+  border: 1px solid rgb(255 255 255 / 70%);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 55%);
   text-align: left;
   cursor: pointer;
+  transition: background 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.learner:hover {
+  background: #fff;
 }
 
 .learner--active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  border-color: rgb(177 140 255 / 45%);
+  background: #fff;
+  box-shadow: 0 8px 20px -10px rgb(177 140 255 / 60%);
+}
+
+.learner__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgb(177 140 255 / 18%), rgb(102 210 245 / 18%));
+  font-size: 19px;
+  line-height: 1;
+}
+
+.learner__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .learner__name {
-  font-size: 12px;
-  font-weight: 600;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
 }
 
 .learner__permissions {
   color: var(--text-muted);
-  font-size: 10px;
-}
-
-.report {
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-.report__head {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.report__title {
-  margin: 0;
   font-size: 13px;
-  font-weight: 650;
 }
 
 .report__meta {
-  margin: 0 0 10px;
+  margin: 0 0 14px;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 13px;
 }
 
 .missing {
   margin: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--warning);
-  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  border-radius: 12px;
   background: var(--warning-soft);
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
 }
 
+/* 报告里的四块：第一条不画分隔线，其余每条一条浅线。 */
 .group {
-  margin-top: 12px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgb(0 0 0 / 5%);
 }
 
 .group__title {
-  margin: 0 0 5px;
-  font-size: 12px;
-  font-weight: 600;
+  margin: 0 0 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .entries {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -353,38 +378,47 @@ onMounted(() => {
 
 .entry {
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
   text-decoration: none;
 }
 
+a.entry {
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
 a.entry:hover {
-  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .entry__reason,
 .entry__meta {
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 13px;
 }
 
 .empty {
   margin: 0;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
 }
 
-.ghost {
-  padding: 4px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+.hint {
+  margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
-  cursor: pointer;
+  font-size: 14px;
+  line-height: 1.7;
 }
 
-.ghost:disabled {
-  cursor: default;
-  opacity: 0.55;
+.link {
+  color: var(--accent-ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 </style>

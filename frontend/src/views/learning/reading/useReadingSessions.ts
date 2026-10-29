@@ -1,103 +1,43 @@
 /**
  * 阅读会话。
  *
- * 批注与阅读位置都必须挂在一条会话上。从导航直接进来时没有会话，页面不会
- * 偷偷写一条无主的批注，而是先让用户选一条。
+ * 批注与阅读位置都必须挂在一条会话上（后端强制）。页面不再让人挑会话：
+ * 从对话进入时用 URL 上那条，从导航直接进入时用最近的一条。两条都没有时，
+ * 写操作会说明原因 —— 不偷偷写一条无主的批注。
  */
 
-import { computed, ref, type Ref } from 'vue'
-import type { RouteLocationNormalizedLoaded, Router } from 'vue-router'
+import { ref } from 'vue'
+import type { RouteLocationNormalizedLoaded } from 'vue-router'
 
-import type { ApiFailure } from '../../../api/client'
-import { listSessions, type SessionSummary } from '../../../api/sessions'
-import { toFailure } from '../../../shared/resource'
+import { listSessions } from '../../../api/sessions'
+import { READING } from '../../../copy/reading'
+import { notify } from '../../../shared/toast'
 
-type Status = 'idle' | 'loading' | 'ready' | 'failed'
-
-export function useReadingSessions(
-  route: RouteLocationNormalizedLoaded,
-  router: Router,
-  currentId: Ref<string>,
-  reloadOutline: () => Promise<void>,
-) {
-  const sessions = ref<SessionSummary[]>([])
-  const sessionsStatus = ref<Status>('idle')
-  const sessionsFailure = ref<ApiFailure | null>(null)
+export function useReadingSessions(route: RouteLocationNormalizedLoaded) {
   const sessionId = ref(typeof route.query.session === 'string' ? route.query.session : '')
-  const pendingSession = ref(sessionId.value)
-  const sessionHint = ref(false)
-
-  const sessionTitle = computed(() => {
-    if (!sessionId.value) return ''
-    const found = sessions.value.find((item) => item.session_id === sessionId.value)
-    return found?.title ?? '当前阅读会话'
-  })
-
-  const sessionMissing = computed(
-    () =>
-      sessionId.value !== '' &&
-      !sessions.value.some((item) => item.session_id === sessionId.value),
-  )
 
   async function loadSessions(): Promise<void> {
-    sessionsStatus.value = 'loading'
-    sessionsFailure.value = null
     try {
       const loaded = await listSessions({ limit: 50 })
-      sessions.value = loaded.sessions
-      sessionsStatus.value = 'ready'
-    } catch (cause) {
-      sessionsFailure.value = toFailure(cause)
-      sessionsStatus.value = 'failed'
+      // 没有指定会话时落到最近一条：批注需要一个落点，而用户没有在页面上
+      // 选过任何东西。列表按更新时间倒序，所以第一条就是最近用过的。
+      if (sessionId.value === '' && loaded.sessions.length > 0) {
+        sessionId.value = loaded.sessions[0].session_id
+      }
+    } catch {
+      // 读不出来就保持没有会话：写操作会提示先建一个，正文照旧能读。
     }
-  }
-
-  function applySession(): void {
-    if (pendingSession.value === '' || pendingSession.value === sessionId.value) return
-    sessionId.value = pendingSession.value
-    sessionHint.value = false
-    void router.replace({
-      name: 'reading',
-      query: {
-        material: currentId.value,
-        session: sessionId.value,
-      },
-    })
-    void reloadOutline()
-  }
-
-  function clearSession(): void {
-    sessionId.value = ''
-    pendingSession.value = ''
-    sessionHint.value = false
-    void router.replace({ name: 'reading', query: { material: currentId.value } })
-    void reloadOutline()
   }
 
   function needSession(): boolean {
     if (sessionId.value !== '') return true
-    sessionHint.value = true
+    notify(READING.sessionRequired, 'error')
     return false
   }
 
   function setSession(next: string): void {
     sessionId.value = next
-    pendingSession.value = next
   }
 
-  return {
-    sessions,
-    sessionsStatus,
-    sessionsFailure,
-    sessionId,
-    pendingSession,
-    sessionHint,
-    sessionTitle,
-    sessionMissing,
-    loadSessions,
-    applySession,
-    clearSession,
-    needSession,
-    setSession,
-  }
+  return { sessionId, loadSessions, needSession, setSession }
 }

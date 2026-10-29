@@ -66,6 +66,39 @@ func TestRouterRegistersTheKnowledgeBaseAndReadRoutes(t *testing.T) {
 	}
 }
 
+// TestRouterRegistersTheDirectChatRoute pins the one-shot route: one question
+// in, one answer out, behind the token like every other model call.
+//
+// The body is what pins the other half — a request that reaches this handler
+// answers with the direct chat stub's own sentence, which a route mounted
+// against a neighboring handler could not produce.
+func TestRouterRegistersTheDirectChatRoute(t *testing.T) {
+	router := newTestRouter(t, readyChecker{})
+	const path = "/api/v1/chat/complete"
+
+	t.Run("without a token", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, path, nil))
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
+		}
+	})
+
+	t.Run("with a token", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, path,
+			strings.NewReader(`{"question":"1+2 等于几"}`))
+		request.Header.Set("Authorization", "Bearer "+routerAcceptedToken)
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+		}
+		if !strings.Contains(recorder.Body.String(), `"answer":"直接回答"`) {
+			t.Fatalf("body = %s", recorder.Body.String())
+		}
+	})
+}
+
 // TestRouterRegistersTheBookRoutes pins the ten routes a book is read and
 // written through.
 //

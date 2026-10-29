@@ -1,73 +1,121 @@
-.meta {
-  margin-top: 10px;
-  color: var(--text-faint);
-  font-size: 11px;
-}
-
 .units {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 10px;
+  gap: 16px;
 }
 
+/* 正文在一个白色阅读卡里连续排下來，单元不再各自成卡 —— 演示稿的
+   `.reader-main` 就是一篇连续的文章。 */
 .unit {
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
 }
 
-.unit__head {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 8px;
+.unit + .unit {
+  margin-top: 12px;
 }
 
-.unit__ordinal {
-  color: var(--text-faint);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-}
-
-.unit__chars {
-  color: var(--text-faint);
-  font-size: 10px;
-}
-
+/* 纯文本材料：一整段，保留原文的换行。 */
 .unit__text {
   margin: 0;
-  color: var(--text);
-  font-size: 15px;
-  line-height: 1.95;
+  color: #2b3648;
+  font-size: 16px;
+  line-height: 2;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.hl {
-  padding: 0 1px;
-  border-radius: 2px;
-  background: var(--warning-soft);
-  color: inherit;
+/* ── markdown 正文 ─────────────────────────────────────────────────────── */
+
+/* 演示稿的 `.reader-text`：16px、行高 2、段间距 24。 */
+.unit__body {
+  color: #2b3648;
+  font-size: 16px;
+  line-height: 2;
+  word-break: break-word;
 }
 
-.hl--noted {
-  border-bottom: 1px solid var(--warning);
+.unit__body > :first-child {
+  margin-top: 0;
 }
 
-.hl--deep {
-  background: var(--accent-soft);
-  box-shadow: inset 0 -2px 0 var(--accent);
+.unit__body > :last-child {
+  margin-bottom: 0;
+}
+
+.md-heading {
+  margin: 36px 0 16px;
+  color: var(--text);
+  font-weight: 800;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+
+.md-heading--1 {
+  font-size: 26px;
+}
+
+.md-heading--2 {
+  font-size: 23px;
+}
+
+.md-heading--3 {
+  font-size: 20px;
+}
+
+.md-heading--4,
+.md-heading--5,
+.md-heading--6 {
+  font-size: 17px;
+}
+
+.md-p {
+  margin: 0 0 24px;
+}
+
+.md-list {
+  margin: 0 0 24px;
+  padding-left: 26px;
+}
+
+.md-list li {
+  margin: 6px 0;
+}
+
+.md-quote {
+  margin: 0 0 24px;
+  padding: 8px 20px;
+  border-left: 3px solid var(--color-purple);
+  border-radius: 0 8px 8px 0;
+  background: #f8fafc;
+  color: var(--text-muted);
+}
+
+.md-code {
+  margin: 0 0 24px;
+  padding: 16px 20px;
+  border-radius: 12px;
+  background: #f4f7f9;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.md-hr {
+  margin: 32px 0;
+  border: 0;
+  border-top: 1px solid rgb(0 0 0 / 8%);
 }
 
 .unit__pending,
 .unit__failed-text {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .unit__failed {

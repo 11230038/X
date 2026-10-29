@@ -101,6 +101,7 @@ func newTestRouterWithGates(
 		LibraryLifecycle: handler.NewLibraryLifecycleHandler(
 			routerLibraryLifecycleStub{}, routerOpenerStub{}, logger),
 		Auth:        handler.NewAuthHandler(authenticator, logger),
+		DirectChat:  handler.NewDirectChatHandler(routerDirectChatStub{}, logger),
 		Book:        handler.NewBookHandler(routerBookStub{}, logger),
 		Questions:   handler.NewQuestionHandler(routerQuestionsStub{}, logger),
 		Practice:    handler.NewPracticeHandler(routerPracticeStub{err: practiceErr}, routerQueueSize, logger),
@@ -131,6 +132,15 @@ func newTestRouterWithGates(
 }
 
 type routerFileStub struct{}
+
+// routerDirectChatStub is the one-shot model call as the router cases need it:
+// an answer with this route's own name on it, so a request answered by another
+// handler is a failing assertion rather than a plausible body.
+type routerDirectChatStub struct{}
+
+func (routerDirectChatStub) Ask(context.Context, string) (string, error) {
+	return "直接回答", nil
+}
 
 // routerAuthorizerStub is the policy as most cases in this file need it: every
 // request allowed. A case about a route being registered is not also a case

@@ -195,6 +195,25 @@ export function listMarks(materialId: string): Promise<{ marks: ReadingMark[] }>
   )
 }
 
+/** 一条收藏：书签本身、它所在的材料，以及服务端读出来的那一段原文。 */
+export interface ReadingBookmark {
+  mark: ReadingMark
+  material: {
+    material_id: string
+    filename: string
+  }
+  /** 材料没有正文、或坐标已经超出时缺席 —— 卡片改显示段号。 */
+  text?: string
+}
+
+/**
+ * 收藏夹。与「一份材料的批注」不同，这一读跨材料：收藏是读者整架书上的
+ * 书签，不是某一本里的批注。顺序由服务端定（新的在前）。
+ */
+export function listBookmarks(): Promise<{ bookmarks: ReadingBookmark[] }> {
+  return request<{ bookmarks: ReadingBookmark[] }>('/reading/bookmarks')
+}
+
 export function addMark(
   materialId: string,
   mark: { session_id: string; kind: MarkKind; locator: ReadingLocator; body: string },

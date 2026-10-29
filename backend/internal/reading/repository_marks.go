@@ -48,6 +48,56 @@ func (r *GORMRepository) Marks(ctx context.Context, materialID string, caller au
 	return marks, nil
 }
 
+// Bookmarks lists every bookmark the caller has saved, newest first.
+//
+// Neither the marks nor the materials they hang off are read one at a time: the
+// marks come back in one query narrowed through the material, and the materials
+// in a second one for the ids that query found. A bookmark whose material
+// disappeared between the two — the schema cascades, so this would be a race,
+// not a state — comes back with an empty material rather than dropping the row,
+// because the mark is the reader's own filing and saying it was saved somewhere
+// is truer than pretending it was never saved.
+func (r *GORMRepository) Bookmarks(ctx context.Context, caller authz.Caller) ([]Bookmark, error) {
+	if err := r.ready(); err != nil {
+		return nil, err
+	}
+	var records []models.ReadingMark
+	err := r.db.WithContext(ctx).
+		Where("kind = ?", string(MarkBookmark)).
+		Where("material_id IN (?)", ownedMaterials(ctx, r.db, caller)).
+		Order("creat_time DESC, mark_id DESC").
+		Find(&records).Error
+	if err != nil {
+		return nil, fmt.Errorf("list the bookmarks: %w", err)
+	}
+	bookmarks := make([]Bookmark, 0, len(records))
+	if len(records) == 0 {
+		return bookmarks, nil
+	}
+
+	ids := make([]string, 0, len(records))
+	for _, record := range records {
+		ids = append(ids, record.MaterialID)
+	}
+	var rows []materialRow
+	if err := r.materialQuery(ctx, caller).Where("material_id IN (?)", ids).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("read the materials of the bookmarks: %w", err)
+	}
+	materials := make(map[string]Material, len(rows))
+	for _, row := range rows {
+		materials[row.MaterialID] = row.material()
+	}
+
+	for _, record := range records {
+		mark, err := markOf(record)
+		if err != nil {
+			return nil, err
+		}
+		bookmarks = append(bookmarks, Bookmark{Mark: mark, Material: materials[mark.MaterialID]})
+	}
+	return bookmarks, nil
+}
+
 // Mark reads one mark by its id.
 //
 // A mark hangs off its material, so the id is narrowed by the material being the

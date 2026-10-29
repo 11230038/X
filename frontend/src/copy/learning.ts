@@ -1,31 +1,56 @@
 /** 学习首页的文案。 */
 
 export const LEARNING = {
-  title: '学习首页',
-  description: '继续上次的对话、查看掌握路径、处理待复习的内容，并按理由选择下一步。',
+  /** 顶栏。用户给的两句原话，不另加问候或按钮。 */
+  homeTitle: '今天，你想探索点什么？',
+  homeSubtitle: '在这里，所有的知识都为你无缝连接。',
 
-  sessions: '继续对话',
-  sessionsEmpty: '还没有对话',
-  sessionsAction: '开始一段对话',
-  paths: '掌握路径',
-  pathsEmpty: '还没有掌握路径',
-  pathsHint: '掌握路径由一次对话生成，不是在这里新建的。',
-  pathsAction: '去掌握路径看看',
-  reviews: '待复习',
-  reviewsEmpty: '现在没有到期的复习',
-  reviewsAction: '去练习',
-  next: '下一步',
+  /**
+   * 五块砖都有出处：路径完成率是第一条掌握路径自己的已掌握 / 总数；快照三行
+   * 分别是本周练习统计、证据回放出来的掌握知识点数、在线心跳的连续天数；
+   * 本周任务进度两行见下面 `weekTasks`；今日时长来自心跳。读不到的格子画横线。
+   */
+  pathCompletion: '路径完成率',
+  pathSubtitle: (goal: string) => `${goal} · 掌握路径`,
+  noPath: '还没有掌握路径',
 
-  nextLearn: '去学习',
-  nextReview: '去复习',
-  nextDone: '这一部分已经完成',
-  nextEvidence: (count: number) => `证据 ${count} 条`,
-  nextEvidenceHint: '证据在掌握路径里按知识点列出。',
-  nextEmpty: '暂时没有建议',
-  nextEmptyHint: '先和自己聊一段，或者挑一条掌握路径看看。',
+  weekSnapshot: '本周学习快照',
+  accuracy: '练习正确率',
+  weekMastered: '本周掌握知识点',
+  points: '个',
+  streak: '连续打卡',
+  days: '天',
+  snapshotNote: '正确率按本周判过的题计算，还没有练习时画横线。',
 
-  updatedAt: '更新于',
+  moduleProgress: '当前模块进度',
+  learningNow: (title: string) => `正在学习：${title}`,
+  moduleNote: '这条路径还没有可以显示进度的模块。',
+
+  /*
+   * 本周任务进度两根条，两个都是真的：
+   * - 掌握路径模块：`GET /mastery/paths/:id/progress` 给本周完成的模块数 /
+   *   模块总数（模块里每个知识点都 mastered 才算完成）；
+   * - 复习错题集：`GET /practice/mistakes` 给本周复习过的错题数 / 错题集
+   *   现在的题数。
+   * 演示稿里这条叫「完成课程任务」，后端没有"课程"这个概念，换成了路径模块。
+   */
+  weekTasks: '本周任务进度',
+  taskModules: '掌握路径模块',
+  taskReview: '复习错题集',
+
+  todayTime: '今日学习时长',
+  minutes: 'min',
+  /**
+   * 演示稿里这句是「比昨天多学了 15 分钟」。现在这比较有出处了：昨天也是心跳
+   * 记出来的分钟数，所以照实写多、少、持平三种。
+   */
+  timeHint: (today: number, yesterday: number): string => {
+    if (today === 0) return '今天还没有学习记录。'
+    const diff = today - yesterday
+    if (diff > 0) return `比昨天多学了 ${diff} 分钟`
+    if (diff < 0) return `比昨天少学了 ${-diff} 分钟`
+    return '和昨天学了一样久'
+  },
+
   loadFailed: '学习首页没能读出来',
-  sectionFailed: '这一段没有读出来',
-  retry: '重试',
 } as const

@@ -76,7 +76,8 @@ export function useReadingPosition(options: {
 
   function jumpToPosition(): void {
     const saved = options.outline.value?.position?.locator.ordinal
-    if (saved === undefined || saved <= 0) return
+    // 第 0 段是合法的第一段：单单元的材料永远停在这里。
+    if (saved === undefined || saved < 0) return
     void options.jumpToOrdinal(saved)
   }
 

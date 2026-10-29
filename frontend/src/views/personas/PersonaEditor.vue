@@ -17,6 +17,7 @@ import { describeFailure } from '../../api/errors'
 import { createPersona, updatePersona, type Persona, type PersonaInput } from '../../api/personas'
 import { PERSONAS } from '../../copy/personas'
 import { notify } from '../../shared/toast'
+import AppIcon from '../../components/common/AppIcon.vue'
 
 const MAX_NAME = 64
 const MAX_DESCRIPTION = 500
@@ -141,7 +142,7 @@ async function submit(): Promise<void> {
       <header class="editor__head">
         <h2 class="editor__title">{{ title }}</h2>
         <button type="button" class="editor__close" :aria-label="PERSONAS.close" @click="close">
-          ✕
+          <AppIcon name="close" />
         </button>
       </header>
 
@@ -200,20 +201,24 @@ async function submit(): Promise<void> {
   width: min(620px, calc(100vw - 40px));
   max-height: min(760px, calc(100vh - 60px));
   padding: 0;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: rgb(255 255 255 / 92%);
   color: var(--text);
+  box-shadow: 0 24px 64px -12px rgb(51 68 85 / 20%);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
 }
 
 .editor::backdrop {
-  background: rgb(20 26 38 / 35%);
+  background: rgb(20 26 38 / 25%);
+  backdrop-filter: blur(6px);
 }
 
 .editor__form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
   padding: 16px 18px 18px;
 }
 
@@ -251,20 +256,22 @@ async function submit(): Promise<void> {
 
 .field__label {
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .field__input,
 .field__text {
   width: 100%;
-  padding: 7px 9px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 9px 12px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 80%);
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .field__text {
@@ -274,13 +281,14 @@ async function submit(): Promise<void> {
 
 .field__input:focus,
 .field__text:focus {
-  border-color: var(--accent);
-  outline: none;
+  border-color: var(--color-purple);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
 }
 
 .field__hint {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
@@ -291,7 +299,7 @@ async function submit(): Promise<void> {
   border-radius: var(--radius-sm);
   background: var(--danger-soft);
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .editor__foot {
@@ -306,7 +314,7 @@ async function submit(): Promise<void> {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
 }
 
@@ -316,7 +324,7 @@ async function submit(): Promise<void> {
   border-radius: var(--radius-sm);
   background: var(--accent);
   color: #fff;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
 }

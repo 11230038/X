@@ -30,7 +30,23 @@ const titleExcerptRunes = 400
 const titlePrompt = `You name conversations. Given the user's first question and the assistant's reply, reply with a title for the conversation.
 Rules: at most 24 characters, in the language the user wrote in, no quotes, no trailing punctuation, no explanation. Reply with the title alone.`
 
-// Titler names a session after its first exchange.
+// descriptionMaxRunes bounds the sentence under a path's name. The card that
+// shows it clamps to two lines, so a sentence that runs longer is cut
+// mid-thought rather than read to the end.
+const descriptionMaxRunes = 60
+
+// descriptionPrompt asks the task model what a path is for, in one sentence.
+//
+// It is a second prompt rather than a second field in the title's reply: a
+// title and a description have different shapes and budgets, and one reply
+// holding both is a reply that has to be split — which is where a model's
+// formatting starts deciding what a path is called.
+const descriptionPrompt = `You describe learning paths. Given the user's first question and the assistant's reply, reply with one sentence about what the learner will study on this path.
+Rules: at most 60 characters, in the language the user wrote in, no quotes, no trailing punctuation, no explanation. Reply with the sentence alone.`
+
+// Titler names a session after its first exchange — and, in a second call, the
+// path that exchange opened: its name is the session's title, and its
+// description is a sentence from the same exchange (Claimed.Name).
 //
 // It calls the task model rather than the conversation's model, because naming
 // is a short call with a small budget and no tools: falling back to the bigger
@@ -60,30 +76,55 @@ func NewTitler(provider llm.Provider, model string, maxTokens int) (*Titler, err
 // Everything it returns has already been trimmed to something the session
 // accepts, so a caller does not have to clean it again before storing it.
 func (t *Titler) Title(ctx context.Context, question, answer string) (string, error) {
+	title, err := t.ask(ctx, titlePrompt, question, answer, titleMaxRunes)
+	if err != nil {
+		return "", fmt.Errorf("name the conversation: %w", err)
+	}
+	if title == "" {
+		return "", fmt.Errorf("turn: the model named the conversation with nothing")
+	}
+	return title, nil
+}
+
+// Describe writes the sentence a path opened by this exchange is shown under
+// its name, from the same question and answer.
+//
+// It is a second call rather than a second field in the title's reply: a title
+// and a description have different shapes and budgets, and asking one reply for
+// both makes the reply's formatting decide what a path is called.
+func (t *Titler) Describe(ctx context.Context, question, answer string) (string, error) {
+	description, err := t.ask(ctx, descriptionPrompt, question, answer, descriptionMaxRunes)
+	if err != nil {
+		return "", fmt.Errorf("describe the path: %w", err)
+	}
+	if description == "" {
+		return "", fmt.Errorf("turn: the model described the path with nothing")
+	}
+	return description, nil
+}
+
+// ask sends one naming prompt over the exchange and returns the reply as the
+// line a label is allowed to be.
+func (t *Titler) ask(ctx context.Context, prompt, question, answer string, limit int) (string, error) {
 	if t == nil {
 		return "", fmt.Errorf("turn: no titler is configured")
 	}
-	var named strings.Builder
+	var written strings.Builder
 	request := llm.Request{
 		Model: t.model,
 		Messages: []llm.Message{
-			{Role: llm.RoleSystem, Content: titlePrompt},
+			{Role: llm.RoleSystem, Content: prompt},
 			{Role: llm.RoleUser, Content: exchange(question, answer)},
 		},
 		MaxTokens: t.maxTokens,
 	}
 	if _, err := t.provider.Stream(ctx, request, func(delta llm.Delta) error {
-		named.WriteString(delta.Content)
+		written.WriteString(delta.Content)
 		return nil
 	}); err != nil {
-		return "", fmt.Errorf("name the conversation: %w", err)
+		return "", err
 	}
-
-	title := cleanTitle(named.String())
-	if title == "" {
-		return "", fmt.Errorf("turn: the model named the conversation with nothing")
-	}
-	return title, nil
+	return cleanLine(written.String(), limit), nil
 }
 
 // exchange is what the namer is shown: the question whole, and as much of the
@@ -95,30 +136,36 @@ func exchange(question, answer string) string {
 
 // cleanTitle reduces a model's reply to a title: one line, no wrapping quotes,
 // no trailing full stop, and within the bound.
+func cleanTitle(reply string) string {
+	return cleanLine(reply, titleMaxRunes)
+}
+
+// cleanLine reduces a model's reply to a line a label may be: one line, no
+// wrapping quotes, no trailing full stop, and within the bound.
 //
 // Models answer a request for "the title alone" with an explanation or a quoted
 // phrase often enough that leaving it to the caller would put those in a
-// session list. Everything here is about making the reply fit the shape a title
-// has, and nothing here guesses at what the title should say.
-func cleanTitle(reply string) string {
-	title := strings.TrimSpace(reply)
+// session list. Everything here is about making the reply fit the shape a label
+// has, and nothing here guesses at what it should say.
+func cleanLine(reply string, limit int) string {
+	line := strings.TrimSpace(reply)
 
-	// A multi-line reply is a reply that says more than the title, so the title
+	// A multi-line reply is a reply that says more than the label, so the label
 	// is the first line of it.
-	if line, _, found := strings.Cut(title, "\n"); found {
-		title = strings.TrimSpace(line)
+	if first, _, found := strings.Cut(line, "\n"); found {
+		line = strings.TrimSpace(first)
 	}
 	// Straight quotes and the bracketing marks a Chinese title is wrapped in
-	// are all the same thing here: something the model put around the title.
-	title = strings.Trim(title, `"'`+"`"+`「」『』《》`)
-	title = strings.TrimRightFunc(title, func(r rune) bool {
+	// are all the same thing here: something the model put around the label.
+	line = strings.Trim(line, `"'`+"`"+`「」『』《》`)
+	line = strings.TrimRightFunc(line, func(r rune) bool {
 		return unicode.IsSpace(r) || strings.ContainsRune(".。!！?？", r)
 	})
-	title = strings.TrimSpace(title)
-	if utf8.RuneCountInString(title) > titleMaxRunes {
-		title = strings.TrimSpace(string([]rune(title)[:titleMaxRunes]))
+	line = strings.TrimSpace(line)
+	if utf8.RuneCountInString(line) > limit {
+		line = strings.TrimSpace(string([]rune(line)[:limit]))
 	}
-	return title
+	return line
 }
 
 // excerpt returns the first limit runes of a text, marking it when it was cut.

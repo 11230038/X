@@ -95,10 +95,12 @@ type View struct {
 // Create is a request to start a path.
 //
 // Tree is the tree to start with, and an empty one is the ordinary case: a path
-// created from a goal begins as a goal and is built by the turn that follows,
-// one `mastery_map` call at a time. A path created from a material may arrive
-// with modules already in it, which is why this is a field rather than "always
-// empty".
+// created from a goal begins with that goal as its name and is built by the
+// turn that follows, one `mastery_map` call at a time. The name is provisional
+// — the opening turn replaces it with the summary it gives the conversation
+// once it has an answer (turn.Claimed.Name). A path created from a material may
+// arrive with modules already in it, which is why this is a field rather than
+// "always empty".
 type Create struct {
 	PathID string
 	Goal   string

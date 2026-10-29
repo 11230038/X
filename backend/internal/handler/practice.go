@@ -25,6 +25,9 @@ type Practice interface {
 	Review(context.Context, practice.Review, authz.Caller) (practice.ReviewResult, error)
 	Recorded(context.Context, string, authz.Caller) (practice.ReviewResult, error)
 	Stats(context.Context, practice.StatsQuery) (practice.Stats, error)
+	// Mistakes reads the wrong-answer set for a window: how many of its
+	// questions were reviewed in it, and how many are in it now.
+	Mistakes(context.Context, time.Time, time.Time, authz.Caller) (practice.MistakeProgress, error)
 }
 
 // PracticeHandler handles reviewing: the queue, one submission, the record of
@@ -207,6 +210,55 @@ func (h *PracticeHandler) Stats(c *gin.Context) {
 		Sources:    toDistributions(stats.Sources),
 		Categories: toDistributions(stats.Categories),
 	})
+}
+
+// mistakesView is the wrong-answer set as the home page's bar draws it: what was
+// reviewed in the window over what the set holds now.
+//
+// Both numbers are present and neither is a percentage, because the bar has to
+// divide and the sentence beside it has to be able to print the terms.
+type mistakesView struct {
+	Reviewed int `json:"reviewed"`
+	Total    int `json:"total"`
+}
+
+// Mistakes counts the wrong-answer set for a window.
+//
+// Both ends are required for the same reason the mastery window's are: the page
+// counts "this week", and the server does not get to guess which calendar that
+// is. The total is the set now, not at the window's start — a mistake is never
+// un-marked, so every question that was in the set during the window is still in
+// it, and the two numbers stay comparable.
+func (h *PracticeHandler) Mistakes(c *gin.Context) {
+	if !h.ready(c) {
+		return
+	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	from, ok := instantParam(c, "from")
+	if !ok {
+		return
+	}
+	to, ok := instantParam(c, "to")
+	if !ok {
+		return
+	}
+	if from.IsZero() || to.IsZero() {
+		httpx.WriteError(c, http.StatusBadRequest, "invalid_query", "from and to are required")
+		return
+	}
+	progress, err := h.reviews.Mistakes(c.Request.Context(), from, to, account)
+	if err != nil {
+		if errors.Is(err, practice.ErrInvalidStats) {
+			httpx.WriteError(c, http.StatusBadRequest, "invalid_query", "from must be before to")
+			return
+		}
+		h.fail(c, "read_mistakes_failed", err)
+		return
+	}
+	httpx.WriteSuccess(c, http.StatusOK, mistakesView{Reviewed: progress.Reviewed, Total: progress.Total})
 }
 
 // statsQuery reads the window a statistics request names. A parameter that is

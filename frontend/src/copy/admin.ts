@@ -1,8 +1,12 @@
-/** 管理台与审计文案。 */
+/** 个人中心下的用户管理与日志统计文案。 */
 
 export const ADMIN = {
   users: '用户管理',
-  audit: '审计',
+  usersDescription: '创建、停用、重置密码与逐项授权。所有改动立即生效，并记入审计。',
+  usersHint: '账号、授权与监护关系',
+  audit: '日志统计',
+  auditDescription: '审计事件：谁、何时、对什么、做了什么、结果如何。',
+  auditHint: '操作记录与筛选',
   searchUsers: '搜索用户',
   userId: '用户编号',
   username: '用户名',

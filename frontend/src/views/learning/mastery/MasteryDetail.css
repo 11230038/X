@@ -1,30 +1,33 @@
 /* 知识点详情 */
 
 .point-detail {
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 20px 22px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .point-detail__description {
   margin: 0 0 8px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
 .stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 14px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .point-detail__subtitle {
   margin: 12px 0 6px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -53,7 +56,7 @@
 
 .evidence-item__time {
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .result--correct {
@@ -74,19 +77,19 @@
 .evidence-item__meta {
   margin: 4px 0 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .evidence-item__detail {
   margin: 6px 0 0;
-  padding: 7px;
+  padding: 9px 11px;
   overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--surface);
+  border: 1px solid rgb(255 255 255 / 60%);
+  border-radius: var(--radius-sm);
+  background: rgb(255 255 255 / 45%);
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 14px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;

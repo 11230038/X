@@ -77,6 +77,7 @@ func TestRouterMountsTheLimiterOnTheFourClassesAndNowhereElse(t *testing.T) {
 		"GET /api/v1/ws":                                              limit.Model,
 		"POST /api/v1/library/files":                                  limit.Upload,
 		"POST /api/v1/knowledge-bases/:kbID/search":                   limit.Retrieval,
+		"POST /api/v1/chat/complete":                                  limit.Model,
 		"POST /api/v1/practice/reviews":                               limit.Model,
 		"POST /api/v1/reading/materials/:materialID/extensions/:name": limit.Model,
 		"POST /api/v1/books/:bookID/outline":                          limit.Model,

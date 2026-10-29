@@ -63,7 +63,7 @@ const homeName = computed(() => {
     case 'writing':
       return 'co-writer'
     case 'mastery':
-      return 'mastery-chat'
+      return 'mastery-conversations'
     case 'question_bank':
       return 'question-chat'
     default:
@@ -369,55 +369,63 @@ onMounted(() => {
 .page {
   height: 100%;
   overflow-y: auto;
-  background: var(--surface-sunken);
+  background: transparent;
 }
 
 .page__inner {
   max-width: 960px;
   margin: 0 auto;
-  padding: 28px 32px 48px;
 }
 
 .back {
-  padding: 5px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 7px 15px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 78%);
   color: var(--text);
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
   text-decoration: none;
+  transition: all 0.2s ease;
 }
 
 .back:hover {
   border-color: var(--accent);
+  background: #fff;
   color: var(--accent);
 }
 
 .kinds {
   display: flex;
   gap: 4px;
+  width: fit-content;
   margin-top: 16px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 55%);
+  box-shadow: var(--inset-light);
 }
 
 .kind {
-  padding: 5px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 7px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .kind:hover {
-  border-color: var(--border-strong);
   color: var(--text);
 }
 
 .kind--on {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: #fff;
+  color: var(--accent-ink);
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgb(15 23 42 / 8%);
 }
 
 .stale {
@@ -429,7 +437,7 @@ onMounted(() => {
   border: 1px solid var(--warning);
   border-radius: var(--radius-sm);
   background: var(--warning-soft);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .stale__retry {
@@ -439,7 +447,7 @@ onMounted(() => {
   border-radius: 4px;
   background: transparent;
   color: var(--text);
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -457,10 +465,11 @@ onMounted(() => {
   gap: 16px;
   align-items: flex-start;
   justify-content: space-between;
-  padding: 13px 16px;
-  border: 1px solid var(--border);
+  padding: 16px 18px;
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow);
 }
 
 .bin__main {
@@ -479,13 +488,13 @@ onMounted(() => {
 .bin__meta {
   margin: 3px 0 0;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .bin__error {
   margin: 6px 0 0;
   color: var(--danger);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .bin__actions {
@@ -496,21 +505,27 @@ onMounted(() => {
 
 .bin__restore,
 .bin__purge {
-  padding: 5px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
+  padding: 7px 15px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
 }
 
 .bin__restore {
-  border: 1px solid var(--accent);
-  background: var(--surface);
-  color: var(--accent);
+  border: 1px solid rgb(177 140 255 / 35%);
+  background: rgb(255 255 255 / 78%);
+  color: var(--accent-ink);
+}
+
+.bin__restore:hover {
+  background: #fff;
+  border-color: var(--accent);
 }
 
 .bin__purge {
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
+  border: 1px solid rgb(0 0 0 / 8%);
+  background: rgb(255 255 255 / 78%);
   color: var(--text-muted);
 }
 

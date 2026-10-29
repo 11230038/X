@@ -1,151 +1,111 @@
+/* 日志统计。筛选面板与事件列表的尺度跟用户管理、设置页一致。 */
 .audit {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-
-.filters {
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-.filters__title {
-  margin: 0 0 8px;
-  font-size: 12px;
-  font-weight: 650;
+  gap: 20px;
 }
 
 .filters__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 8px 12px;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.field__label {
-  color: var(--text-faint);
-  font-size: 10px;
-}
-
-.field__input {
-  min-width: 0;
-  padding: 4px 7px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  font-size: 11px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px 14px;
 }
 
 .filters__error {
-  margin: 8px 0 0;
+  margin: 12px 0 0;
   color: var(--danger);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .filters__actions {
   display: flex;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 10px;
+  margin-top: 16px;
 }
 
+/* 条数是列表上方的一句提示，压到与卡片同样的左边距。 */
 .count {
   margin: 0;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 13px;
+  font-weight: 600;
 }
 
+/* 一条事件一张白卡：动作与结果在上，谁/对什么在下，时间贴在右上。 */
 .events {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .event {
-  padding: 8px 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 14px 20px;
+  border: 1px solid rgb(255 255 255 / 70%);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 55%);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.event:hover {
+  background: #fff;
+  box-shadow: 0 6px 16px -8px rgb(51 68 85 / 25%);
 }
 
 .event__head {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
-  align-items: baseline;
+  gap: 8px;
+  align-items: center;
 }
 
 .event__action {
-  font-size: 12px;
-  font-weight: 600;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
 }
 
 .event__time {
   margin-left: auto;
   color: var(--text-faint);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .event__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
+  gap: 4px 14px;
   align-items: baseline;
-  margin-top: 4px;
+  margin-top: 6px;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 13px;
   line-height: 1.6;
 }
 
 .event__request {
-  max-width: 180px;
+  max-width: 200px;
   overflow: hidden;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 4%);
   color: var(--text-faint);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chip {
-  padding: 0 6px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 9px;
-  line-height: 16px;
-}
-
-.chip--ok {
-  border-color: var(--success);
-  color: var(--success);
-}
-
-.chip--denied {
-  border-color: var(--warning);
-  color: var(--warning);
-}
-
-.chip--failed {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-
+/* 对象是一次筛选的入口，不是链接 —— 下划线说清它能点，点了会改写筛选栏。 */
 .target {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--accent);
-  font-size: 10px;
+  color: var(--accent-ink);
+  font-size: 13px;
+  font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
@@ -154,52 +114,47 @@
 .hint {
   margin: 0;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 13px;
   line-height: 1.6;
 }
 
 .stuck {
-  padding: 9px 11px;
-  border: 1px solid var(--warning);
-  border-radius: var(--radius-sm);
+  padding: 14px 18px;
+  border-radius: 14px;
   background: var(--warning-soft);
 }
 
 .stuck__text {
   margin: 0;
   color: var(--text);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.7;
 }
 
 .stuck__actions {
   display: flex;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 .ghost {
-  padding: 4px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text-muted);
-  font-size: 11px;
+  padding: 8px 16px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.primary {
-  padding: 5px 14px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: #fff;
-  font-size: 11px;
-  cursor: pointer;
+.ghost:hover:not(:disabled) {
+  border-color: rgb(0 0 0 / 18%);
+  box-shadow: 0 4px 12px rgb(51 68 85 / 6%);
 }
 
-.ghost:disabled,
-.primary:disabled {
+.ghost:disabled {
   cursor: default;
   opacity: 0.55;
 }

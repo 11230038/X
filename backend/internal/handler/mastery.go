@@ -29,8 +29,20 @@ import (
 // to the 404 it already maps every absent path to.
 type Mastery interface {
 	List(context.Context, mastery.ListRequest) ([]mastery.Summary, error)
+	// Conversations is the path-chat history: each mastery conversation with
+	// the path it created, one row per path.
+	Conversations(context.Context, authz.Caller) ([]mastery.Conversation, error)
 	Load(context.Context, string, authz.Caller) (mastery.View, error)
 	Insight(context.Context, string, authz.Caller) (mastery.Insight, error)
+	// MasteredBetween counts the knowledge points that became mastered inside a
+	// window. It is a read of the evidence rather than of the tree's cache,
+	// because the cache says how many are mastered now and not when they got
+	// there.
+	MasteredBetween(context.Context, time.Time, time.Time, authz.Caller) (int, error)
+	// PathProgressBetween counts how many of one path's modules were finished
+	// inside a window. A module is finished when all its knowledge points are
+	// mastered; the count is over the tree as it stands now.
+	PathProgressBetween(context.Context, string, time.Time, time.Time, authz.Caller) (mastery.PathProgress, error)
 	UpdateMeta(context.Context, mastery.MetaRequest, authz.Caller) (mastery.TopicMeta, error)
 	// Holder reports who is writing a path. ErrNotFound when nobody ever has,
 	// which is the ordinary state of a path nobody is on rather than a failure.
@@ -91,6 +103,25 @@ type summaryView struct {
 
 type pathListView struct {
 	Paths []summaryView `json:"paths"`
+}
+
+// conversationView is one row of the path-chat history: a mastery conversation
+// and the path it created.
+//
+// The two ids are both present because the row opens a conversation but is
+// labelled by its path: the address is the session, the label is the goal.
+type conversationView struct {
+	SessionID  string    `json:"session_id"`
+	Title      string    `json:"title"`
+	PathID     string    `json:"path_id"`
+	Goal       string    `json:"goal"`
+	Emoji      string    `json:"emoji"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type conversationListView struct {
+	Conversations []conversationView `json:"conversations"`
 }
 
 // pointView is one knowledge point as the insight reports it: its level, what
@@ -196,6 +227,39 @@ func (h *MasteryHandler) List(c *gin.Context) {
 	httpx.WriteSuccess(c, http.StatusOK, pathListView{Paths: listed})
 }
 
+// Conversations returns the path-chat history, most recently active first.
+//
+// An empty list is 200 for the same reason the path list's is: a person who has
+// not started a path conversation has none, which is an answer rather than a
+// missing resource (§2.12).
+func (h *MasteryHandler) Conversations(c *gin.Context) {
+	if !h.ready(c) {
+		return
+	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	found, err := h.paths.Conversations(c.Request.Context(), account)
+	if err != nil {
+		h.fail(c, "list_conversations_failed", err)
+		return
+	}
+	listed := make([]conversationView, 0, len(found))
+	for _, conversation := range found {
+		listed = append(listed, conversationView{
+			SessionID:  conversation.SessionID,
+			Title:      conversation.Title,
+			PathID:     conversation.PathID,
+			Goal:       conversation.Goal,
+			Emoji:      conversation.Emoji,
+			LastSeenAt: conversation.LastSeenAt,
+			UpdatedAt:  conversation.UpdatedAt,
+		})
+	}
+	httpx.WriteSuccess(c, http.StatusOK, conversationListView{Conversations: listed})
+}
+
 // Get returns one path and what it is for.
 func (h *MasteryHandler) Get(c *gin.Context) {
 	if !h.ready(c) {
@@ -284,6 +348,98 @@ func (h *MasteryHandler) Insight(c *gin.Context) {
 		return
 	}
 	httpx.WriteSuccess(c, http.StatusOK, toInsightView(insight))
+}
+
+// masteredView is the answer to "how much was learned in this window": one
+// number, because the window is the question and the count is the whole answer.
+type masteredView struct {
+	Mastered int `json:"mastered"`
+}
+
+// Mastered counts the knowledge points that became mastered inside a window.
+//
+// Both ends are required, and that is the caller's business rather than this
+// route's: the home page counts "this week", which is a boundary only the
+// client's calendar knows. A window that is unnamed is refused here instead of
+// being defaulted to a server-side week that might not be the week the page is
+// drawing.
+func (h *MasteryHandler) Mastered(c *gin.Context) {
+	if !h.ready(c) {
+		return
+	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	from, ok := instantParam(c, "from")
+	if !ok {
+		return
+	}
+	to, ok := instantParam(c, "to")
+	if !ok {
+		return
+	}
+	if from.IsZero() || to.IsZero() {
+		httpx.WriteError(c, http.StatusBadRequest, "invalid_query", "from and to are required")
+		return
+	}
+	count, err := h.paths.MasteredBetween(c.Request.Context(), from, to, account)
+	if err != nil {
+		if errors.Is(err, mastery.ErrInvalidRequest) {
+			httpx.WriteError(c, http.StatusBadRequest, "invalid_query", "from must be before to")
+			return
+		}
+		h.fail(c, "count_mastered_failed", err)
+		return
+	}
+	httpx.WriteSuccess(c, http.StatusOK, masteredView{Mastered: count})
+}
+
+// pathProgressView is one path's window as the home page's task bar draws it:
+// modules finished in the window over the modules the path has.
+type pathProgressView struct {
+	ModulesDone  int `json:"modules_done"`
+	ModulesTotal int `json:"modules_total"`
+}
+
+// PathProgress counts the modules one path finished inside a window.
+//
+// The window's two ends are required for the same reason the other windowed
+// reads require them: "this week" is the caller's calendar.
+func (h *MasteryHandler) PathProgress(c *gin.Context) {
+	if !h.ready(c) {
+		return
+	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	from, ok := instantParam(c, "from")
+	if !ok {
+		return
+	}
+	to, ok := instantParam(c, "to")
+	if !ok {
+		return
+	}
+	if from.IsZero() || to.IsZero() {
+		httpx.WriteError(c, http.StatusBadRequest, "invalid_query", "from and to are required")
+		return
+	}
+	progress, err := h.paths.PathProgressBetween(
+		c.Request.Context(), c.Param("pathID"), from, to, account)
+	if err != nil {
+		if errors.Is(err, mastery.ErrInvalidRequest) {
+			httpx.WriteError(c, http.StatusBadRequest, "invalid_query", "from must be before to")
+			return
+		}
+		h.fail(c, "read_path_progress_failed", err)
+		return
+	}
+	httpx.WriteSuccess(c, http.StatusOK, pathProgressView{
+		ModulesDone:  progress.ModulesDone,
+		ModulesTotal: progress.ModulesTotal,
+	})
 }
 
 // Lease returns who is writing a path.

@@ -59,24 +59,28 @@ const emit = defineEmits<{
 
 .start__item {
   width: 100%;
-  padding: 11px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 13px 16px;
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
   text-align: left;
   cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 .start__item:hover {
   border-color: var(--accent);
   color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: var(--glass-shadow-hover), var(--inset-light);
 }
 
 .start__hint {
   max-width: 460px;
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.6;
   text-align: center;
 }

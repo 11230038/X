@@ -3,16 +3,21 @@
 
 import { READING } from '../../../copy/reading'
 import { truncate } from '../../../shared/format'
+import AppIcon from '../../../components/common/AppIcon.vue'
 
 defineProps<{
   text: string
   saving: boolean
+  /** 助手还在答上一问。 */
+  explaining: boolean
 }>()
 
 defineEmits<{
   copy: []
   highlight: []
+  favorite: []
   note: []
+  explain: []
   ask: []
   clear: []
 }>()
@@ -25,11 +30,17 @@ defineEmits<{
       <span class="selectionbar__snippet">{{ truncate(text, 60) }}</span>
     </span>
     <div class="selectionbar__actions">
+      <button type="button" class="ghost ghost--accent" :disabled="explaining" @click="$emit('explain')">
+        <AppIcon name="sparkle" /> {{ READING.explainSelection }}
+      </button>
       <button type="button" class="ghost" @click="$emit('copy')">
         {{ READING.copySelection }}
       </button>
       <button type="button" class="ghost" :disabled="saving" @click="$emit('highlight')">
         {{ READING.addHighlight }}
+      </button>
+      <button type="button" class="ghost" :disabled="saving" @click="$emit('favorite')">
+        {{ READING.addFavorite }}
       </button>
       <button type="button" class="ghost" :disabled="saving" @click="$emit('note')">
         {{ READING.addNote }}

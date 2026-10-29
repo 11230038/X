@@ -3,7 +3,7 @@
  *
  * 三条规矩：
  * 1. **有后端的页面才有真路由**；没有后端的占位页已全部移除，未实现的
- *    路径落到 404。技能与工具共用 `/skills` / `/tools` 的只读目录，不算占位。
+ *    路径落到 404。技能与工具是设置下的只读目录，不算占位。
  * 2. 认不出的路径落到 404，**不再静默重定向到对话**——静默重定向会让一个写错
  *    的链接看起来"能用"，也会把用户刚敲的地址悄悄换掉。
  * 3. 权限不在守卫里判。守卫只看本地登录态；某个面能不能进由页面里的
@@ -38,6 +38,14 @@ const routes: RouteRecordRaw[] = [
     meta: { signedOutOnly: true },
   },
 
+  // 彩蛋：点主图标栏顶上的品牌标志翻到这一页。它不在导航里，也不进应用
+  // 外壳（页面自己是一整屏），所以位置放在外壳之外最前面。
+  {
+    path: '/about-rinnex',
+    name: 'about-rinnex',
+    component: () => import('./views/about/RinnexAbout.vue'),
+  },
+
   // ── 对话 ────────────────────────────────────────────────────────────────
   {
     path: '/chat',
@@ -54,19 +62,15 @@ const routes: RouteRecordRaw[] = [
     name: 'conversation',
     component: () => import('./views/Chat.vue'),
   },
-  // 人格是对话这一轮的一项选择，管理页挨着对话放；入口在输入区。
-  {
-    path: '/personas',
-    name: 'personas',
-    component: () => import('./views/Personas.vue'),
-  },
-  // 伙伴与协同写作读的是同一份人格：前者选人开始对话，后者选人并带一句
-  // 开场白进对话。两个页面都没有独立的数据表。
+  // 伙伴就是一份保存下来的人格设定：选人、编辑、删除都在这一页（原来分成
+  // 「伙伴」与「人格」两页，读的是同一份数据）。入口在设置与对话输入区。
   {
     path: '/partners',
     name: 'partners',
     component: () => import('./views/Partners.vue'),
   },
+  // 旧地址保留重定向，书签不会失效。
+  { path: '/personas', name: 'personas', redirect: { name: 'partners' } },
   {
     // 写作页自己就是工作台：没有 sessionId 时是准备表，有 sessionId 时是那段
     // 写作。一条可选参数记录就够了，不再跳去对话页。
@@ -82,10 +86,15 @@ const routes: RouteRecordRaw[] = [
     name: 'mastery',
     component: () => import('./views/MasteryPage.vue'),
   },
-  // 路径自己的对话页：能力固定 `mastery_path`，会话按 `kind=mastery` 分区。
-  // 一条可选参数记录同时承担首页与某一段对话，与写作页同一种写法。
+  // 路径对话分两级：一级列对话历史（每行标出它创建的路径），二级是那段对话
+  // 本身。二级的能力固定 `mastery_path`，会话按 `kind=mastery` 分区。
   {
-    path: '/mastery/chat/:sessionId?',
+    path: '/mastery/chat',
+    name: 'mastery-conversations',
+    component: () => import('./views/MasteryConversationsPage.vue'),
+  },
+  {
+    path: '/mastery/chat/:sessionId',
     name: 'mastery-chat',
     component: () => import('./views/MasteryChatPage.vue'),
   },
@@ -218,17 +227,51 @@ const routes: RouteRecordRaw[] = [
     component: () => import('./views/PracticePage.vue'),
   },
 
+  // ── 个人中心（头像进入） ───────────────────────────────────────────────
+  // 账号与安全是它的子页：改密与退出登录都在那里。这一块原来挂在 `/settings`
+  // 下面，头像改指个人中心之后从设置里搬了出来，设置侧栏不再有"账号"。
+  {
+    path: '/profile',
+    name: 'profile',
+    component: () => import('./views/profile/ProfilePage.vue'),
+  },
+  {
+    path: '/profile/account',
+    name: 'profile-account',
+    component: () => import('./views/profile/ProfileAccount.vue'),
+  },
+  // 收藏夹挂在个人中心下：入口是个人中心那张「我的收藏」卡，打开之后侧栏
+  // 仍是个人中心那一列（`sectionFor` 对它返回 PROFILE）。
+  {
+    path: '/profile/favorites',
+    name: 'profile-favorites',
+    component: () => import('./views/profile/ProfileFavorites.vue'),
+  },
+  // 管理入口也挂在个人中心下：原来的「管理台」拆成用户管理与日志统计两页，
+  // 各自带标题，不再有单独的管理台外壳。侧栏仍是个人中心那一列，只对管理员
+  // 多出这两项；页面里的 `SurfaceGate` 仍按 `admin` 面看门。
+  {
+    path: '/profile/users',
+    name: 'profile-users',
+    component: () => import('./views/admin/AdminUsers.vue'),
+  },
+  {
+    path: '/profile/logs',
+    name: 'profile-logs',
+    component: () => import('./views/admin/AdminAudit.vue'),
+  },
+  // 旧地址保留重定向，书签不会失效。
+  { path: '/admin', redirect: { name: 'profile-users' } },
+  { path: '/admin/users', redirect: { name: 'profile-users' } },
+  { path: '/admin/audit', redirect: { name: 'profile-logs' } },
+
   // ── 设置 ────────────────────────────────────────────────────────────────
   {
     path: '/settings',
     component: () => import('./views/settings/SettingsLayout.vue'),
     children: [
-      { path: '', redirect: { name: 'settings-account' } },
-      {
-        path: 'account',
-        name: 'settings-account',
-        component: () => import('./views/settings/SettingsAccount.vue'),
-      },
+      // 侧栏第一项是工作区；"账号"不在设置里了，见上面的个人中心。
+      { path: '', redirect: { name: 'settings-workspace' } },
       {
         path: 'workspace',
         name: 'settings-workspace',
@@ -245,11 +288,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('./views/settings/SettingsSystem.vue'),
       },
       {
-        path: 'knowledge-bases',
-        name: 'settings-knowledge-bases',
-        component: () => import('./views/settings/SettingsKnowledgeBases.vue'),
-      },
-      {
         path: 'guardian',
         name: 'settings-guardian',
         component: () => import('./views/settings/SettingsGuardian.vue'),
@@ -259,40 +297,25 @@ const routes: RouteRecordRaw[] = [
         name: 'settings-about',
         component: () => import('./views/settings/SettingsAbout.vue'),
       },
-    ],
-  },
-
-  // ── 管理台（头像菜单进入，不在导航入口里） ─────────────────────────────
-  {
-    path: '/admin',
-    component: () => import('./views/admin/AdminLayout.vue'),
-    children: [
-      { path: '', redirect: { name: 'admin-users' } },
+      // 原来的「扩展」拆成技能与工具两块，都收在设置下。工具由能力声明，
+      // 没有独立的工具接口；两页共用 `SettingsCatalog.vue`，由 `view` 分。
       {
-        path: 'users',
-        name: 'admin-users',
-        component: () => import('./views/admin/AdminUsers.vue'),
+        path: 'skills',
+        name: 'settings-skills',
+        component: () => import('./views/settings/SettingsCatalog.vue'),
+        props: { view: 'skills' },
       },
       {
-        path: 'audit',
-        name: 'admin-audit',
-        component: () => import('./views/admin/AdminAudit.vue'),
+        path: 'tools',
+        name: 'settings-tools',
+        component: () => import('./views/settings/SettingsCatalog.vue'),
+        props: { view: 'tools' },
       },
     ],
   },
-
-  // ── 扩展 ────────────────────────────────────────────────────────────────
-  // 技能与工具共用一页：工具由能力声明，没有独立的工具接口。
-  {
-    path: '/skills',
-    name: 'skills',
-    component: () => import('./views/extensions/CapabilityCatalog.vue'),
-  },
-  {
-    path: '/tools',
-    name: 'tools',
-    component: () => import('./views/extensions/CapabilityCatalog.vue'),
-  },
+  // 旧地址保留重定向，书签不会失效。
+  { path: '/skills', redirect: { name: 'settings-skills' } },
+  { path: '/tools', redirect: { name: 'settings-tools' } },
   { path: '/', redirect: { name: 'chat' } },
   {
     path: '/:pathMatch(.*)*',

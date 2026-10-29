@@ -19,6 +19,7 @@ import { toFailure } from '../../../shared/resource'
 import { notify } from '../../../shared/toast'
 
 import { ACTION_LABELS, REASON_LABELS, jobStateLabel, kindLabel } from './labels'
+import AppIcon from '../../../components/common/AppIcon.vue'
 
 const importFile = ref<File | null>(null)
 const preview = ref<WorkspacePreview | null>(null)
@@ -84,7 +85,10 @@ async function runRecover(): Promise<void> {
 
 <template>
   <section class="card">
-    <h2 class="card__title">{{ SETTINGS.import }}</h2>
+    <div class="card__head">
+      <span class="card__icon card__icon--warm" aria-hidden="true"><AppIcon name="inbox" /></span>
+      <h2 class="card__title">{{ SETTINGS.import }}</h2>
+    </div>
     <p class="hint">先上传 ZIP 预览；预览通过后提交才会真正写入。</p>
 
     <div class="import-row">

@@ -34,7 +34,7 @@ import AppShell from '../components/shell/AppShell.vue'
 .notfound__code {
   color: var(--text-faint);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .notfound__title {
@@ -44,7 +44,7 @@ import AppShell from '../components/shell/AppShell.vue'
 
 .notfound__hint {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .notfound__links {
@@ -54,11 +54,18 @@ import AppShell from '../components/shell/AppShell.vue'
 }
 
 .notfound__link {
-  padding: 5px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  font-size: 12px;
+  padding: 7px 16px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 78%);
+  font-size: 14px;
+  font-weight: 600;
   text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.notfound__link:hover {
+  border-color: var(--accent);
+  background: #fff;
 }
 </style>

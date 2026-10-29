@@ -173,7 +173,7 @@ onMounted(() => {
   border-radius: 999px;
   background: var(--surface-sunken);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
 }
 

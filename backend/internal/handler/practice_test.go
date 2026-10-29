@@ -33,15 +33,17 @@ var handlerPracticeTime = time.Unix(1_800_000_000, 0).UTC()
 
 // practiceStub is the reviewing use case, recording what it was asked for.
 type practiceStub struct {
-	items  []practice.QueueItem
-	result practice.ReviewResult
-	stats  practice.Stats
-	err    error
+	items    []practice.QueueItem
+	result   practice.ReviewResult
+	stats    practice.Stats
+	mistakes practice.MistakeProgress
+	err      error
 
-	sizes      []int
-	submitted  []practice.Review
-	readIDs    []string
-	statsAsked []practice.StatsQuery
+	sizes          []int
+	submitted      []practice.Review
+	readIDs        []string
+	statsAsked     []practice.StatsQuery
+	mistakeWindows [][2]time.Time
 }
 
 func (s *practiceStub) Queue(_ context.Context, size int, _ authz.Caller) ([]practice.QueueItem, error) {
@@ -62,6 +64,11 @@ func (s *practiceStub) Recorded(_ context.Context, requestID string, _ authz.Cal
 func (s *practiceStub) Stats(_ context.Context, query practice.StatsQuery) (practice.Stats, error) {
 	s.statsAsked = append(s.statsAsked, query)
 	return s.stats, s.err
+}
+
+func (s *practiceStub) Mistakes(_ context.Context, from, to time.Time, _ authz.Caller) (practice.MistakeProgress, error) {
+	s.mistakeWindows = append(s.mistakeWindows, [2]time.Time{from, to})
+	return s.mistakes, s.err
 }
 
 // sampleResult is one recorded review with every part filled in, so that a case

@@ -244,7 +244,7 @@ onMounted(() => {
 .graph-page {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
 .head__title {
@@ -256,7 +256,7 @@ onMounted(() => {
 .head__description {
   margin: 4px 0 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -264,7 +264,7 @@ onMounted(() => {
   margin: 0;
   color: var(--text-faint);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .legend {
@@ -273,7 +273,7 @@ onMounted(() => {
   align-items: center;
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .legend__line {
@@ -285,15 +285,16 @@ onMounted(() => {
 .tree {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
 }
 
 .surface {
-  padding: 12px 14px 12px 20px;
-  border: 1px solid var(--border);
+  padding: 16px 18px 16px 22px;
+  border: 1px solid var(--glass-border);
   border-left: 2px solid var(--accent);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow);
 }
 
 .surface__head {
@@ -318,13 +319,13 @@ onMounted(() => {
 }
 
 .surface__name {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 650;
 }
 
 .count {
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .branches {
@@ -339,7 +340,7 @@ onMounted(() => {
 .branch-group__label {
   margin: 0 0 5px;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .branch {
@@ -361,7 +362,7 @@ onMounted(() => {
 .branch__name {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .facts {
@@ -385,7 +386,7 @@ onMounted(() => {
   border-radius: 4px;
   background: transparent;
   color: var(--text);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.5;
   text-align: left;
   cursor: pointer;

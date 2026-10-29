@@ -331,13 +331,13 @@ onMounted(() => {
 .l2 {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
 }
 
 .head {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 14px;
   align-items: flex-start;
   justify-content: space-between;
 }
@@ -351,19 +351,22 @@ onMounted(() => {
 .head__description {
   margin: 4px 0 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
 .filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 18px;
   align-items: flex-end;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
+  padding: 16px 18px;
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .statuses {
@@ -384,7 +387,7 @@ onMounted(() => {
   gap: 4px;
   align-items: center;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
   cursor: pointer;
 }
 
@@ -400,16 +403,25 @@ onMounted(() => {
 
 .field__label {
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .field__input,
 .field__area {
-  padding: 5px 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  font-size: 12px;
+  padding: 6px 10px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 80%);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.field__input:focus,
+.field__area:focus {
+  border-color: var(--color-purple);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
 }
 
 .field__area {
@@ -421,19 +433,19 @@ onMounted(() => {
 .field__hint {
   margin: 0;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .field__error {
   margin: 0 0 8px;
   color: var(--danger);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .note {
   margin: 0;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -445,15 +457,19 @@ onMounted(() => {
 
 .dialog {
   width: min(520px, calc(100vw - 32px));
-  padding: 20px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 24px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: rgb(255 255 255 / 92%);
   color: var(--text);
+  box-shadow: 0 24px 64px -12px rgb(51 68 85 / 20%);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
 }
 
 .dialog::backdrop {
-  background: rgb(0 0 0 / 35%);
+  background: rgb(20 26 38 / 25%);
+  backdrop-filter: blur(6px);
 }
 
 .dialog__title {
@@ -470,23 +486,39 @@ onMounted(() => {
 }
 
 .ghost {
-  padding: 4px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 5px 14px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 78%);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ghost:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: #fff;
+  color: var(--text);
 }
 
 .primary {
-  padding: 5px 13px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
-  background: var(--accent);
+  padding: 6px 16px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--accent-gradient);
   color: #fff;
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 4px 12px rgb(177 140 255 / 30%);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgb(177 140 255 / 40%);
 }
 
 .primary:disabled {

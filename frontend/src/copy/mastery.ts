@@ -3,19 +3,46 @@
 export const MASTERY = {
   title: '掌握路径',
   description: '每个知识点分未接触、薄弱、学习中、已掌握四态；下一步都带理由与证据。',
+  /** 一级页（选路径）的说明。二级页沿用路径自己的说明。 */
+  indexDescription: '选一条路径进入总览；路径由一次路径对话生成。',
+  backToPaths: '回到路径',
+  pathNoDescription: '这条路径还没有说明。',
 
   paths: '路径',
   pathsEmpty: '还没有掌握路径',
   pathsEmptyHint: '掌握路径由一次对话生成。',
   pathsFailed: '路径列表没能读出来',
-  noPath: '选一条路径',
-  noPathHint: '左边选一条路径，这里会显示知识点、证据与下一步。',
+  /** 掌握路径页的动作按结果命名：按下之后得到的就是一条路径。 */
+  newPath: '新建路径',
+  /** 学习地图的空态仍按去处命名：它就在地图上，说的是下一步去哪。 */
   goChat: '去路径对话新建',
   goChatHint: '在路径对话里说明想学什么，使用 mastery_path 能力生成一条路径。',
   capabilityMissing: '当前能力清单里没有 mastery_path，暂时不能在路径对话里生成新路径。',
 
+  /**
+   * 路径对话的第一级：对话历史。
+   *
+   * 这一页是只读的历史，不提供「新建」：新路径从「掌握路径」与「学习地图」
+   * 的「去路径对话新建」直接开一段会话，第一句落进去时后端才建路径。
+   */
+  chatHistoryTitle: '路径对话',
+  chatHistoryDescription:
+    '每段对话创建一条路径，路径名和名字下那句说明都由第一轮对话总结出来。点一行回到那段对话继续；要新开一条，从「掌握路径」或「学习地图」进。',
+  chatHistoryEmpty: '还没有路径对话',
+  chatHistoryEmptyHint: '到「掌握路径」点「去路径对话新建」，说一句想学什么，第一轮会生成一条路径。',
+  chatHistoryFailed: '路径对话没能读出来',
+  chatHistoryRetry: '重试',
+  chatHistoryPath: '路径',
+  chatHistoryUntitled: '还没有标题',
+  chatHistoryOpen: '继续这段对话',
+  /** 开新对话与回到旧对话失败时留在页面上的话（`shared/masteryChat.ts`）。 */
+  chatCreateFailed: '新对话没能建起来，请重试',
+  chatOpenFailed: '这段路径对话没能打开，请重试',
+  chatOpenMissing: '这条路径还没有对话，回路径对话历史看看',
+
   /** 路径对话页（挂在掌握路径下）。 */
   chatTitle: '掌握路径对话',
+  chatBackToHistory: '返回对话历史',
   chatLead: '说说你想学什么。这一页只跑掌握路径：把内容拆成知识点，出题判卷，按证据推进。',
   chatPrompts: [
     '我想系统学离散数学',
@@ -70,6 +97,11 @@ export const MASTERY = {
 
   modulesTitle: '模块与知识点',
   moduleEmpty: '这条路径还没有知识点',
+  /** 模块在时间线上的三态，按它自己的知识点算出来。 */
+  moduleDone: '已完成',
+  moduleActive: '进行中',
+  moduleTodo: '未开始',
+  progress: (percent: number) => `进度 ${percent}%`,
   pointEmpty: '选一个知识点，这里会显示它的观察记录与证据。',
   pointStats: '观察统计',
   totalObservations: (count: number) => `共 ${count} 次观察`,
@@ -106,7 +138,6 @@ export const MASTERY = {
   evidenceVisit: '看这个知识点',
 
   leaseTitle: '写权限',
-  leaseFree: '现在没有其他会话在修改这条路径。',
   leaseHeld: '另一个会话正在修改这条路径。',
   leaseHolder: (sessionId: string) => `会话 ${sessionId}`,
   leaseTurn: (turnId: string) => `轮次 ${turnId}`,

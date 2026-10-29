@@ -197,14 +197,21 @@ type Path struct {
 	UpdatedAt time.Time
 }
 
-// TopicMeta is what a path is for: the goal the learner stated and how the
-// surface should draw it.
+// TopicMeta is a path's name, the sentence under it, and how the surface should
+// draw it.
 //
-// It is a table of its own and not a corner of state_json because it is written
-// by a different act: the tree changes when the learner works, and this changes
-// when they say what they are working towards.
+// The goal is a name, not the sentence that opened the conversation. A path is
+// created before the turn that created it has an answer to summarise, so its
+// goal starts as the learner's own words and the opening turn replaces it with
+// the summary it gives the conversation (turn.Claimed.Name); the description is
+// a sentence the same exchange produces. The learner can reword either
+// afterwards. Both are "what they are working towards", which is why this is a
+// table of its own and not a corner of state_json: the tree changes when the
+// learner works, and this changes when the path is named.
 type TopicMeta struct {
-	PathID      string
+	PathID string
+	// Goal is the path's name, and Description is the sentence a path card
+	// shows under it. Both are written by the turn that opened the path.
 	Goal        string
 	Description string
 	Emoji       string

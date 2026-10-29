@@ -4,12 +4,15 @@
  * 清单里的名字是**数据，不是枚举**：对话页的能力选择器只画服务端返回的名
  * 字；"新建掌握路径"的入口也只在清单里真有 `mastery_path` 时出现。写死一份
  * 名单会在后端增删能力时悄悄变成谎话。
+ *
+ * 同一次请求还带回一份工具描述：能力只声明它挂载哪些工具（名字），"这个工具
+ * 是干什么的"由工具自己给出，所以目录里那句话与模型看到的是同一句。
  */
 
 import { computed, ref } from 'vue'
 
 import { isApiFailure, type ApiFailure } from '../api/client'
-import { listCapabilities, type CapabilityManifest } from '../api/capabilities'
+import { listCapabilities, type CapabilityManifest, type CapabilityTool } from '../api/capabilities'
 
 export type CapabilityStatus = 'idle' | 'loading' | 'ready' | 'failed'
 
@@ -25,6 +28,7 @@ export interface Capability extends Omit<CapabilityManifest, 'stages' | 'tools'>
 }
 
 const capabilities = ref<Capability[]>([])
+const tools = ref<CapabilityTool[]>([])
 const status = ref<CapabilityStatus>('idle')
 const failure = ref<ApiFailure | null>(null)
 
@@ -33,6 +37,16 @@ let inFlight: Promise<void> | null = null
 export const capabilityList = computed(() => capabilities.value)
 export const capabilityStatus = computed(() => status.value)
 export const capabilityFailure = computed(() => failure.value)
+
+/**
+ * 工具名 → 那句描述。工具页按能力反查工具名，再用这张表补上"它是干什么的"。
+ *
+ * 清单里没有名字时不给兜底句子：宁可这一行不写描述，也不编一句服务端没说过
+ * 的话。
+ */
+export const toolDescriptions = computed(
+  () => new Map(tools.value.map((tool) => [tool.name, tool.description])),
+)
 
 export function refreshCapabilities(): Promise<void> {
   if (inFlight) return inFlight
@@ -49,6 +63,7 @@ export function refreshCapabilities(): Promise<void> {
           tools: capability.tools ?? [],
         }),
       )
+      tools.value = result.tools ?? []
       status.value = 'ready'
       failure.value = null
     } catch (cause) {
@@ -71,6 +86,7 @@ export function refreshCapabilities(): Promise<void> {
 
 export function resetCapabilities(): void {
   capabilities.value = []
+  tools.value = []
   status.value = 'idle'
   failure.value = null
   inFlight = null
@@ -80,7 +96,7 @@ export function hasCapability(name: string): boolean {
   return capabilities.value.some((capability) => capability.name === name)
 }
 
-/** 去重后的工具名，供管理台的授权选择器使用。 */
+/** 去重后的工具名，供用户管理页的授权选择器使用。 */
 export function knownTools(): string[] {
   const tools = new Set<string>()
   for (const capability of capabilities.value) {

@@ -95,11 +95,18 @@ function surfaceLabel(surface: string): string {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 11px 13px;
-  border: 1px solid var(--border);
+  padding: 13px 16px;
+  border: 1px solid var(--glass-border);
   border-left: 3px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: rgb(255 255 255 / 55%);
+  box-shadow: var(--inset-light);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.fact:hover {
+  background: #fff;
+  box-shadow: 0 6px 16px -8px rgb(51 68 85 / 25%);
 }
 
 .fact--retracted {
@@ -122,7 +129,7 @@ function surfaceLabel(surface: string): string {
 .chip {
   padding: 0 6px;
   border-radius: 8px;
-  font-size: 9px;
+  font-size: 14px;
   line-height: 16px;
 }
 
@@ -156,12 +163,12 @@ function surfaceLabel(surface: string): string {
 .fact__confidence {
   margin-left: auto;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .fact__statement {
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
@@ -183,7 +190,7 @@ function surfaceLabel(surface: string): string {
 
 .fact__meta {
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .fact__actions {
@@ -197,7 +204,7 @@ function surfaceLabel(surface: string): string {
   border: 0;
   background: transparent;
   color: var(--accent);
-  font-size: 11px;
+  font-size: 14px;
   cursor: pointer;
 }
 

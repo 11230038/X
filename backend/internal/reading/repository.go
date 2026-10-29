@@ -71,6 +71,10 @@ type Repository interface {
 
 	// Marks lists the marks on one material, oldest first.
 	Marks(ctx context.Context, materialID string, caller authz.Caller) ([]Mark, error)
+	// Bookmarks lists every bookmark the caller has saved, newest first, with the
+	// material each was saved in. Marks are otherwise reached one material at a
+	// time; a favourites page crosses materials, and this is the read that does.
+	Bookmarks(ctx context.Context, caller authz.Caller) ([]Bookmark, error)
 	// Mark reads one mark by its id, ErrNotFound when there is none the caller
 	// may see.
 	Mark(ctx context.Context, markID string, caller authz.Caller) (Mark, error)

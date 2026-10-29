@@ -89,41 +89,52 @@ const TABS: readonly { key: PanelTab; label: string }[] = [
   display: flex;
   flex-direction: column;
   height: 100%;
-  border-left: 1px solid var(--border);
-  background: var(--surface);
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
 }
 
 .panel__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 8px 8px 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 20px 14px 12px 20px;
+  border-bottom: 1px solid rgb(28 28 30 / 5%);
 }
 
 .panel__tabs {
   display: flex;
-  gap: 2px;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 45%);
 }
 
 .panel__tab {
-  padding: 5px 10px;
+  padding: 7px 14px;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: 999px;
   background: none;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 18px;
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .panel__tab:hover {
-  background: var(--surface-sunken);
+  color: var(--text);
 }
 
 .panel__tab--active {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
+  background: #fff;
+  color: var(--text);
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 7%);
 }
 
 .panel__collapse {
@@ -155,7 +166,7 @@ const TABS: readonly { key: PanelTab; label: string }[] = [
 .panel__body {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: 16px 20px;
 }
 
 .panel-rail {
@@ -163,17 +174,20 @@ const TABS: readonly { key: PanelTab; label: string }[] = [
   flex-direction: column;
   gap: 10px;
   align-items: center;
-  width: 40px;
+  width: 100%;
   height: 100%;
-  padding: 14px 0;
-  border: 0;
-  border-left: 1px solid var(--border);
-  background: var(--surface);
+  padding: 18px 0;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
   cursor: pointer;
 }
 
 .panel-rail:hover {
-  background: var(--surface-sunken);
+  background: var(--glass-bg-strong);
 }
 
 .panel-rail__dot {

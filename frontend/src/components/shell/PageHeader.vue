@@ -5,15 +5,19 @@ withDefaults(
   defineProps<{
     title: string
     description?: string
+    /** 标题用衬线体。演示稿的错题本页是唯一这样写的一页，题库照它。 */
+    serif?: boolean
   }>(),
-  { description: '' },
+  { description: '', serif: false },
 )
 </script>
 
 <template>
   <header class="page-header">
     <div class="page-header__text">
-      <h1 class="page-header__title">{{ title }}</h1>
+      <h1 class="page-header__title" :class="{ 'page-header__title--serif': serif }">
+        {{ title }}
+      </h1>
       <p v-if="description" class="page-header__description">{{ description }}</p>
     </div>
     <div v-if="$slots.actions" class="page-header__actions">
@@ -25,11 +29,10 @@ withDefaults(
 <style scoped>
 .page-header {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 16px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--border);
+  gap: 20px;
+  padding: 4px 0 6px;
 }
 
 .page-header__text {
@@ -39,17 +42,25 @@ withDefaults(
 .page-header__title {
   margin: 0;
   color: var(--text);
-  font-size: 18px;
-  font-weight: 650;
-  line-height: 1.35;
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.035em;
 }
 
+.page-header__title--serif {
+  font-family: var(--font-serif);
+}
+
+/* 标题与说明之间的间距、说明自身的行距，统一照知识库页：16px + 1.7。
+   各页不要再在 scoped 样式里单独覆盖这两个值。 */
 .page-header__description {
-  max-width: 60em;
-  margin: 4px 0 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.6;
+  max-width: 62em;
+  margin: 16px 0 0;
+  color: var(--text-faint);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.7;
 }
 
 .page-header__actions {
@@ -57,6 +68,7 @@ withDefaults(
   flex: none;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  padding-bottom: 4px;
 }
 </style>

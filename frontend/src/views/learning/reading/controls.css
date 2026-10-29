@@ -5,18 +5,26 @@
   border: 0;
   background: transparent;
   color: var(--accent);
-  font-size: 11px;
+  font-size: 14px;
   cursor: pointer;
 }
 
 .ghost {
-  padding: 4px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 5px 13px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 78%);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ghost:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: #fff;
+  color: var(--text);
 }
 
 .ghost:disabled {
@@ -25,13 +33,21 @@
 }
 
 .primary {
-  padding: 6px 13px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
-  background: var(--accent);
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--accent-gradient);
   color: #fff;
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 4px 12px rgb(177 140 255 / 30%);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgb(177 140 255 / 40%);
 }
 
 .primary:disabled {
@@ -43,7 +59,7 @@
 .inline-error {
   margin: 7px 0 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -54,6 +70,6 @@
 .req {
   margin-left: 5px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 14px;
 }
 

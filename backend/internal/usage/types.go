@@ -41,6 +41,10 @@ const (
 	SourceMasteryJudge     = "mastery.judge"
 	SourceReadingExtension = "reading.extension"
 	SourceBook             = "book.generation"
+	// SourceDirectChat is the one-shot route: a question with no session, no
+	// history and no turn around it. It is named apart from a capability's own
+	// "chat" so that direct questions do not read as conversations.
+	SourceDirectChat = "chat.direct"
 )
 
 // Call is one model call as the code making it knows it: on whose behalf, in

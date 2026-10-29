@@ -83,7 +83,7 @@ function locatorText(source: SourceItem): string {
 
 .preview__index {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .preview__back {
@@ -92,7 +92,7 @@ function locatorText(source: SourceItem): string {
   border-radius: 4px;
   background: transparent;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -106,7 +106,7 @@ function locatorText(source: SourceItem): string {
 .preview__locator {
   margin: 0;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .preview__snippet {

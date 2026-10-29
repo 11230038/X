@@ -1,6 +1,11 @@
 <script setup lang="ts">
 /**
- * 学习地图。
+ * 学习地图，两级：
+ *
+ * - **一级**（地址里没有 `?path=`）：选一条路径。用横排条目 + 知识点小格，
+ *   与掌握路径一级页的卡片网格刻意区分开。
+ * - **二级**（`?path=<id>`，可带 `?point=`）：这条路径的地图，版面照演示稿的
+ *   `mastery-map` —— 标题区 → 图例 → 按模块铺开的知识点胶囊 → 选中项详情。
  *
  * 一条掌握路径的总体地图：模块是区域，知识点是四态节点。数据只来自
  * `GET /mastery/paths` 与 `GET /mastery/paths/{id}/insight`，不新增接口。
@@ -16,7 +21,7 @@
  */
 
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 
 import type { ApiFailure } from '../../api/client'
 import {
@@ -36,7 +41,10 @@ import { LEVEL_LABELS, LEVEL_ORDER, LEARNING_MAP, STEP_LABELS } from '../../copy
 import { MASTERY } from '../../copy/mastery'
 import { capabilityStatus, hasCapability, refreshCapabilities } from '../../shared/capabilities'
 import { formatDateTime } from '../../shared/format'
+import { openMasteryChat, openNewMasteryChat } from '../../shared/masteryChat'
 import { toFailure } from '../../shared/resource'
+
+import MapChooser from './MapChooser.vue'
 
 type Status = 'idle' | 'loading' | 'ready' | 'failed'
 
@@ -64,15 +72,40 @@ interface MapModule {
 const route = useRoute()
 const router = useRouter()
 
-/* ── 路径列表 ────────────────────────────────────────────────────────── */
+/** 没能开成路径对话时留在页头下面的那句话（`shared/masteryChat.ts`）。 */
+const chatError = ref<string | null>(null)
+
+/** 有 `?path=` 就是二级；没有就是一级。 */
+const currentId = computed(() =>
+  typeof route.query.path === 'string' ? route.query.path : '',
+)
+
+/* ── 一级：路径列表 ──────────────────────────────────────────────────── */
 
 const paths = ref<MasterySummary[]>([])
 const pathsStatus = ref<Status>('idle')
 const pathsFailure = ref<ApiFailure | null>(null)
 
-/* ── 当前路径的地图 ──────────────────────────────────────────────────── */
+async function loadPaths(): Promise<void> {
+  pathsStatus.value = 'loading'
+  pathsFailure.value = null
+  try {
+    const loaded = await listMasteryPaths()
+    paths.value = loaded.paths
+    pathsStatus.value = 'ready'
+  } catch (cause) {
+    pathsFailure.value = toFailure(cause)
+    pathsStatus.value = 'failed'
+  }
+}
 
-const currentId = ref('')
+/** 一级卡片点进二级；地址仍是这个路由加 `?path=`，既有深链接不用改。 */
+function mapLink(item: MasterySummary): RouteLocationRaw {
+  return { name: 'learning-map', query: { path: item.path_id } }
+}
+
+/* ── 二级：当前路径的地图 ────────────────────────────────────────────── */
+
 const insight = ref<MasteryInsight | null>(null)
 const insightStatus = ref<Status>('idle')
 const insightFailure = ref<ApiFailure | null>(null)
@@ -84,6 +117,15 @@ function replaceRoute(pathId: string, pointId: string): void {
   if (pathId !== '') query.path = pathId
   if (pointId !== '') query.point = pointId
   void router.replace({ name: 'learning-map', query })
+}
+
+/** 回到一级时清掉二级的状态；在路上的响应靠 token 作废。 */
+function resetMap(): void {
+  insightToken += 1
+  insight.value = null
+  insightStatus.value = 'idle'
+  insightFailure.value = null
+  selectedPointId.value = ''
 }
 
 function chooseInitialPoint(loaded: MasteryInsight, hint: string): string {
@@ -118,56 +160,12 @@ async function loadInsight(pathId: string, pointHint: string): Promise<void> {
   }
 }
 
-async function loadPaths(): Promise<void> {
-  pathsStatus.value = 'loading'
-  pathsFailure.value = null
-  try {
-    const loaded = await listMasteryPaths()
-    paths.value = loaded.paths
-    pathsStatus.value = 'ready'
-    if (paths.value.length === 0) {
-      currentId.value = ''
-      insight.value = null
-      insightStatus.value = 'idle'
-      selectedPointId.value = ''
-      if (route.query.path !== undefined || route.query.point !== undefined) replaceRoute('', '')
-      return
-    }
-
-    const requested = typeof route.query.path === 'string' ? route.query.path : ''
-    const chosen = paths.value.some((item) => item.path_id === requested)
-      ? requested
-      : (paths.value[0]?.path_id ?? '')
-    currentId.value = chosen
-    const hint = typeof route.query.point === 'string' ? route.query.point : ''
-    await loadInsight(chosen, hint)
-  } catch (cause) {
-    pathsFailure.value = toFailure(cause)
-    pathsStatus.value = 'failed'
-  }
-}
-
 function retryInsight(): void {
   const hint = typeof route.query.point === 'string' ? route.query.point : ''
   void loadInsight(currentId.value, hint)
 }
 
-/* ── 选择 ────────────────────────────────────────────────────────────── */
-
-function selectPath(pathId: string): void {
-  if (pathId === '' || pathId === currentId.value) return
-  currentId.value = pathId
-  selectedPointId.value = ''
-  insight.value = null
-  insightStatus.value = 'loading'
-  replaceRoute(pathId, '')
-  void loadInsight(pathId, '')
-}
-
-function onPathChange(event: Event): void {
-  const target = event.target
-  if (target instanceof HTMLSelectElement) selectPath(target.value)
-}
+/* ── 选择与跳转 ──────────────────────────────────────────────────────── */
 
 function selectPoint(pointId: string): void {
   if (pointId === '' || pointId === selectedPointId.value) return
@@ -206,10 +204,6 @@ const modules = computed<MapModule[]>(() => {
 })
 
 const allNodes = computed(() => modules.value.flatMap((module) => module.nodes))
-
-const currentSummary = computed(
-  () => paths.value.find((item) => item.path_id === currentId.value) ?? null,
-)
 
 const selectedNode = computed(
   () => allNodes.value.find((node) => node.id === selectedPointId.value) ?? null,
@@ -263,8 +257,26 @@ function canCreate(): boolean {
   return hasCapability('mastery_path')
 }
 
-function goChat(): void {
-  void router.push({ name: 'chat' })
+/** 开一条新路径：建一段空会话进二级，路径由第一句到达时创建。 */
+async function goNewChat(): Promise<void> {
+  chatError.value = null
+  chatError.value = await openNewMasteryChat(router)
+}
+
+/** 继续这条路径自己的那段对话（「下一步：学」）。 */
+async function continueChat(): Promise<void> {
+  chatError.value = null
+  chatError.value = await openMasteryChat(router, currentId.value)
+}
+
+/** 回到一级：换一条路径。 */
+function backToPicker(): void {
+  void router.push({ name: 'learning-map' })
+}
+
+/** 回到这条路径的总览（演示稿的「回到路径」）。 */
+function backToPath(): void {
+  void router.push({ name: 'mastery', query: { path: currentId.value } })
 }
 
 function goPractice(): void {
@@ -279,7 +291,7 @@ function goNext(): void {
     return
   }
   if (step.kind === 'learn') {
-    goChat()
+    void continueChat()
     return
   }
   void router.push({ name: 'mastery', query: { path: currentId.value } })
@@ -297,14 +309,14 @@ function isRealTime(value: string | null | undefined): boolean {
 watch(
   () => route.query.path,
   (value) => {
-    if (typeof value !== 'string' || value === '' || value === currentId.value) return
-    if (!paths.value.some((item) => item.path_id === value)) return
+    if (typeof value !== 'string' || value === '') {
+      // 回到一级：清掉上一条路径的地图，重新读列表。
+      resetMap()
+      void loadPaths()
+      return
+    }
     // 外部链接可能同时带 `?point=`；先把它当提示，加载后再校验，别在这里抹掉。
     const hint = typeof route.query.point === 'string' ? route.query.point : ''
-    currentId.value = value
-    selectedPointId.value = ''
-    insight.value = null
-    insightStatus.value = 'loading'
     void loadInsight(value, hint)
   },
 )
@@ -321,66 +333,85 @@ watch(
 onMounted(() => {
   if (canSurface('mastery') === false) return
   if (capabilityStatus.value === 'idle') void refreshCapabilities()
-  void loadPaths()
+  if (currentId.value === '') {
+    void loadPaths()
+    return
+  }
+  const hint = typeof route.query.point === 'string' ? route.query.point : ''
+  void loadInsight(currentId.value, hint)
+})
+
+/* ── 标题 ────────────────────────────────────────────────────────────── */
+
+const headerTitle = computed(() => {
+  if (currentId.value === '' || !insight.value) return LEARNING_MAP.title
+  return `${LEARNING_MAP.title} · ${insight.value.path.goal}`
+})
+
+const headerDescription = computed(() => {
+  if (currentId.value === '') return LEARNING_MAP.indexDescription
+  return insight.value?.path.description || LEARNING_MAP.description
 })
 </script>
 
 <template>
   <SurfaceGate surface="mastery">
-    <PageHeader :title="LEARNING_MAP.title" :description="LEARNING_MAP.description" />
+    <PageHeader :title="headerTitle" :description="headerDescription">
+      <template #actions>
+        <template v-if="currentId !== ''">
+          <button type="button" class="back-to-path" @click="backToPath">
+            {{ LEARNING_MAP.backToPath }}
+          </button>
+          <button type="button" class="back-to-path" @click="backToPicker">
+            {{ LEARNING_MAP.chooseAnother }}
+          </button>
+        </template>
+      </template>
+    </PageHeader>
 
-    <FailureState
-      v-if="pathsStatus === 'failed' && pathsFailure"
-      :failure="pathsFailure"
-      :title="MASTERY.pathsFailed"
-      @retry="loadPaths"
-    />
+    <p v-if="chatError" class="chat-error" role="alert">{{ chatError }}</p>
 
-    <template v-else>
-      <SkeletonBlock v-if="pathsStatus !== 'ready'" :lines="5" :line-height="32" />
-
-      <EmptyState
-        v-else-if="paths.length === 0"
-        :title="MASTERY.pathsEmpty"
-        :hint="canCreate() ? MASTERY.goChatHint : MASTERY.capabilityMissing"
-        :action-label="MASTERY.goChat"
-        @action="goChat"
+    <!-- 一级：选路径 -->
+    <template v-if="currentId === ''">
+      <FailureState
+        v-if="pathsStatus === 'failed' && pathsFailure"
+        :failure="pathsFailure"
+        :title="MASTERY.pathsFailed"
+        @retry="loadPaths"
       />
 
       <template v-else>
-        <section class="toolbar">
-          <span class="toolbar__label">{{ MASTERY.paths }}</span>
-          <select
-            v-if="paths.length > 1"
-            class="toolbar__select"
-            :value="currentId"
-            :aria-label="MASTERY.paths"
-            @change="onPathChange"
-          >
-            <option v-for="item in paths" :key="item.path_id" :value="item.path_id">
-              {{ item.emoji }} {{ item.goal }}
-            </option>
-          </select>
-          <p v-else-if="currentSummary" class="toolbar__goal">
-            {{ currentSummary.emoji }} {{ currentSummary.goal }}
-          </p>
-        </section>
-
-        <FailureState
-          v-if="insightStatus === 'failed' && insightFailure"
-          :failure="insightFailure"
-          :title="MASTERY.insightFailed"
-          @retry="retryInsight"
-        />
-
-        <SkeletonBlock v-else-if="insightStatus !== 'ready'" :lines="8" :line-height="44" />
+        <SkeletonBlock v-if="pathsStatus === 'loading'" :lines="5" :line-height="32" />
 
         <EmptyState
-          v-else-if="insight && modules.length === 0"
-          :title="MASTERY.moduleEmpty"
+          v-else-if="paths.length === 0"
+          :title="MASTERY.pathsEmpty"
+          :hint="canCreate() ? MASTERY.goChatHint : MASTERY.capabilityMissing"
+          :action-label="MASTERY.goChat"
+          @action="goNewChat"
         />
 
-        <template v-else-if="insight">
+        <MapChooser v-else :paths="paths" :to="mapLink" />
+      </template>
+    </template>
+
+    <!-- 二级：这条路径的地图，照演示稿 -->
+    <template v-else>
+      <FailureState
+        v-if="insightStatus === 'failed' && insightFailure"
+        :failure="insightFailure"
+        :title="MASTERY.insightFailed"
+        @retry="retryInsight"
+      />
+
+      <SkeletonBlock v-else-if="insightStatus !== 'ready'" :lines="8" :line-height="44" />
+
+      <EmptyState
+        v-else-if="insight && modules.length === 0"
+        :title="MASTERY.moduleEmpty"
+      />
+
+      <template v-else-if="insight">
           <section class="summary">
             <p class="summary__counts">{{ summaryText }}</p>
             <p class="summary__next">
@@ -391,46 +422,45 @@ onMounted(() => {
 
           <div class="legend" role="group" :aria-label="LEARNING_MAP.legend">
             <span class="legend__label">{{ LEARNING_MAP.legend }}</span>
-            <span v-for="level in LEVEL_ORDER" :key="level" class="legend__item">
-              <span
-                class="legend__swatch"
-                :class="`legend__swatch--${level}`"
-                aria-hidden="true"
-              ></span>
+            <span
+              v-for="level in LEVEL_ORDER"
+              :key="level"
+              class="legend__item"
+              :class="`legend__item--${level}`"
+            >
               {{ LEVEL_LABELS[level] }}
             </span>
           </div>
 
-          <div class="board">
-            <div class="map">
-              <section v-for="module in modules" :key="module.id" class="region">
-                <header class="region__head">
-                  <h3 class="region__name">{{ module.name }}</h3>
-                  <span class="region__count">{{ MASTERY.points(module.nodes.length) }}</span>
-                </header>
-                <p v-if="module.description" class="region__description">
-                  {{ module.description }}
-                </p>
+          <div class="map">
+            <section v-for="module in modules" :key="module.id" class="map-section">
+              <header class="map-section__head">
+                <h3 class="map-section__title">{{ module.name }}</h3>
+                <span class="map-section__count">{{ MASTERY.points(module.nodes.length) }}</span>
+              </header>
+              <p v-if="module.description" class="map-section__description">
+                {{ module.description }}
+              </p>
 
-                <ul class="nodes">
-                  <li v-for="node in module.nodes" :key="node.id">
-                    <button
-                      type="button"
-                      class="node"
-                      :class="[`node--${node.level}`, { 'node--on': node.id === selectedPointId }]"
-                      :aria-pressed="node.id === selectedPointId"
-                      aria-controls="learning-map-detail"
-                      @click="selectPoint(node.id)"
-                    >
-                      <span class="node__name">{{ node.name }}</span>
-                      <span class="node__badge">{{ LEVEL_LABELS[node.level] }}</span>
-                    </button>
-                  </li>
-                </ul>
-              </section>
-            </div>
+              <ul class="nodes">
+                <li v-for="node in module.nodes" :key="node.id">
+                  <button
+                    type="button"
+                    class="node"
+                    :class="[`node--${node.level}`, { 'node--on': node.id === selectedPointId }]"
+                    :aria-pressed="node.id === selectedPointId"
+                    :aria-label="`${node.name}，${LEVEL_LABELS[node.level]}`"
+                    aria-controls="learning-map-detail"
+                    @click="selectPoint(node.id)"
+                  >
+                    {{ node.name }}
+                  </button>
+                </li>
+              </ul>
+            </section>
+          </div>
 
-            <aside id="learning-map-detail" class="detail" aria-live="polite">
+          <aside id="learning-map-detail" class="detail" aria-live="polite">
               <template v-if="selectedNode">
                 <header class="detail__head">
                   <h2 class="detail__title">{{ selectedNode.name }}</h2>
@@ -486,10 +516,8 @@ onMounted(() => {
                 </section>
               </template>
 
-              <p v-else class="detail__empty">{{ LEARNING_MAP.pointEmpty }}</p>
-            </aside>
-          </div>
-        </template>
+            <p v-else class="detail__empty">{{ LEARNING_MAP.pointEmpty }}</p>
+          </aside>
       </template>
     </template>
   </SurfaceGate>

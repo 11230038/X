@@ -17,6 +17,7 @@ type Handlers struct {
 	Auth             *handler.AuthHandler
 	Sessions         *handler.SessionHandler
 	Personas         *handler.PersonaHandler
+	DirectChat       *handler.DirectChatHandler
 	Questions        *handler.QuestionHandler
 	Practice         *handler.PracticeHandler
 	Mastery          *handler.MasteryHandler
@@ -24,6 +25,7 @@ type Handlers struct {
 	Book             *handler.BookHandler
 	Video            *handler.VideoHandler
 	Dashboard        *handler.DashboardHandler
+	Presence         *handler.PresenceHandler
 	Memory           *handler.MemoryHandler
 	Capabilities     *handler.CapabilityHandler
 	Permissions      *handler.PermissionsHandler

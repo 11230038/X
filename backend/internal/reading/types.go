@@ -293,6 +293,22 @@ type Mark struct {
 	UpdatedAt time.Time
 }
 
+// Bookmark is one saved place in a material, with the material it was saved in.
+//
+// The mark carries the coordinate and the material carries the name a
+// favourites card shows; Text is the words at that coordinate, filled by the
+// service when the list is drawn. It is read from the document rather than
+// copied into the row: the text at a coordinate belongs to the document, and a
+// bookmark is the reader's pointer at it, not a second copy of it.
+type Bookmark struct {
+	Mark     Mark
+	Material Material
+	// Text is the beginning of the saved passage, and empty when its words
+	// cannot be read — a material with no document behind it, or one whose text
+	// has since moved. The card then shows the paragraph the coordinate names.
+	Text string
+}
+
 // MarkRequest is one mark to write.
 type MarkRequest struct {
 	MaterialID string

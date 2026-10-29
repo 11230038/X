@@ -5,35 +5,7 @@
  * 台布局，不能直接复用，所以这里只重复四组颜色，不复制布局。
  */
 
-/* ── 路径选择 ─────────────────────────────────────────────────────────── */
-
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-
-.toolbar__label {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.toolbar__select {
-  padding: 5px 9px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text);
-  font-size: 13px;
-}
-
-.toolbar__goal {
-  margin: 0;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
-}
+/* 一级页的路径条目见 `MapChooser.css`；这里只剩二级的地图。 */
 
 /* ── 摘要与图例 ───────────────────────────────────────────────────────── */
 
@@ -41,16 +13,17 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
+  padding: 16px 18px;
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow);
 }
 
 .summary__counts {
   margin: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -61,7 +34,7 @@
   align-items: baseline;
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -71,213 +44,196 @@
   border: 1px solid var(--border-strong);
   border-radius: 9px;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .summary__reason {
   min-width: 0;
 }
 
+/* 图例照演示稿：三枚状态胶囊。第四态「薄弱」演示稿没有，但它是设计里真实
+   存在的状态，所以这里一并画出来，形状与另外三枚一致。 */
 .legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 16px;
   align-items: center;
 }
 
 .legend__label {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .legend__item {
   display: inline-flex;
   gap: 5px;
   align-items: center;
-  color: var(--text-muted);
-  font-size: 11px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
 }
 
-.legend__swatch {
-  width: 10px;
-  height: 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 50%;
+.legend__item--mastered {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #1f7a4d;
 }
 
-.legend__swatch--unknown {
-  border-style: dashed;
-  background: var(--surface-sunken);
+.legend__item--learning {
+  background: linear-gradient(135deg, var(--color-purple), var(--color-blue));
+  color: #fff;
 }
 
-.legend__swatch--weak {
-  border-color: var(--danger);
-  background: var(--danger-soft);
+.legend__item--weak {
+  border: 1px solid rgb(192 57 43 / 30%);
+  background: #fff;
+  color: var(--danger);
 }
 
-.legend__swatch--learning {
-  border-color: var(--warning);
-  background: var(--warning-soft);
-}
-
-.legend__swatch--mastered {
-  border-color: var(--success);
-  background: var(--success-soft);
+.legend__item--unknown {
+  border: 1px dashed rgb(0 0 0 / 10%);
+  background: rgb(255 255 255 / 40%);
+  color: var(--text-faint);
 }
 
 /* ── 地图 ─────────────────────────────────────────────────────────────── */
 
-.board {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
-  gap: 18px;
-  align-items: start;
-}
-
 .map {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 24px;
   min-width: 0;
 }
 
-.region {
-  padding: 12px 14px;
-  border: 1px solid var(--border);
+/* 演示稿的 `.map-section`：一块玻璃分区，标题 + 一排知识点胶囊。 */
+.map-section {
+  padding: 24px;
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
-.region__head {
+.map-section__head {
   display: flex;
   gap: 8px;
   align-items: baseline;
   justify-content: space-between;
 }
 
-.region__name {
+.map-section__title {
   margin: 0;
   overflow-wrap: anywhere;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 650;
+  font-size: 16px;
+  font-weight: 800;
   line-height: 1.45;
 }
 
-.region__count {
+.map-section__count {
   flex: none;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
 }
 
-.region__description {
-  margin: 4px 0 0;
+.map-section__description {
+  margin: 6px 0 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
 .nodes {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 7px;
-  margin: 9px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 16px 0 0;
   padding: 0;
   list-style: none;
 }
 
+/* 演示稿的 `.map-pill`。 */
 .node {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  align-items: flex-start;
-  width: 100%;
-  min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  text-align: left;
+  padding: 10px 20px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 40%);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
   cursor: pointer;
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .node:hover {
-  box-shadow: 0 0 0 1px var(--border-strong);
-}
-
-.node__name {
-  overflow-wrap: anywhere;
-  color: var(--text);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.node__badge {
-  padding: 0 5px;
-  border-radius: 7px;
-  font-size: 10px;
-  line-height: 15px;
+  transform: scale(1.1) translateY(-2px);
+  box-shadow: 0 8px 24px -8px rgb(51 68 85 / 25%);
 }
 
 .node--unknown {
-  border-style: dashed;
-  border-color: var(--border-strong);
-  background: var(--surface-sunken);
-}
-
-.node--unknown .node__badge {
-  background: var(--surface);
+  border: 1px dashed rgb(0 0 0 / 10%);
+  background: rgb(255 255 255 / 40%);
   color: var(--text-faint);
 }
 
 .node--weak {
-  border-color: var(--danger);
-  background: var(--danger-soft);
-}
-
-.node--weak .node__badge {
-  background: var(--surface);
+  border: 1px solid rgb(192 57 43 / 30%);
+  background: #fff;
   color: var(--danger);
 }
 
 .node--learning {
-  border-color: var(--warning);
-  background: var(--warning-soft);
-}
-
-.node--learning .node__badge {
-  background: var(--surface);
-  color: var(--warning);
+  background: linear-gradient(135deg, var(--color-purple), var(--color-blue));
+  color: #fff;
+  box-shadow: 0 4px 12px rgb(177 140 255 / 30%);
 }
 
 .node--mastered {
-  border-color: var(--success);
-  background: var(--success-soft);
-}
-
-.node--mastered .node__badge {
-  background: var(--surface);
-  color: var(--success);
+  border: 1px solid rgb(0 0 0 / 5%);
+  background: #fff;
+  color: var(--text);
 }
 
 .node--on {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline-offset: 3px;
 }
 
 /* ── 选中知识点 ───────────────────────────────────────────────────────── */
 
 .detail {
-  position: sticky;
-  top: 16px;
   display: flex;
   flex-direction: column;
   gap: 9px;
   min-width: 0;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
+  padding: 24px;
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+.back-to-path {
+  padding: 10px 20px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: var(--radius-sm);
+  background: rgb(255 255 255 / 70%);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.back-to-path:hover {
+  border-color: var(--text);
+  background: #fff;
 }
 
 .detail__head {
@@ -299,13 +255,13 @@
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .detail__description {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.65;
 }
 
@@ -318,13 +274,13 @@
 
 .detail__level-label {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .detail__badge {
   padding: 0 6px;
   border-radius: 8px;
-  font-size: 10px;
+  font-size: 14px;
   line-height: 17px;
 }
 
@@ -353,19 +309,19 @@
   flex-wrap: wrap;
   gap: 6px 12px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .detail__meta {
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .detail__empty {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -390,27 +346,27 @@
   border: 1px solid var(--border-strong);
   border-radius: 9px;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .detail__next-title {
   margin: 0;
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 650;
 }
 
 .detail__next-reason {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
 .detail__next-meta {
   margin: 0;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .detail__next-go {
@@ -421,6 +377,13 @@
   border-radius: var(--radius-sm);
   background: var(--accent);
   color: #fff;
-  font-size: 11px;
+  font-size: 14px;
   cursor: pointer;
+}
+
+/* 开/继续路径对话失败时，话留在页头下面，不随浮层消失。 */
+.chat-error {
+  margin: 0 0 16px;
+  color: var(--danger, #c0392b);
+  font-size: 14px;
 }

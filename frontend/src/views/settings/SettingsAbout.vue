@@ -16,6 +16,7 @@ import SkeletonBlock from '../../components/common/SkeletonBlock.vue'
 import { SETTINGS } from '../../copy/settings'
 import { formatDateTime } from '../../shared/format'
 import { toFailure } from '../../shared/resource'
+import AppIcon from '../../components/common/AppIcon.vue'
 
 const version = ref<SystemVersion | null>(null)
 const status = ref<'loading' | 'ready' | 'failed'>('loading')
@@ -40,38 +41,45 @@ onMounted(() => {
 
 <template>
   <div class="about">
-    <SkeletonBlock v-if="status === 'loading'" :lines="4" :line-height="24" />
+    <section class="set-panel">
+      <div class="set-panel__head">
+        <span class="set-panel__icon" aria-hidden="true"><AppIcon name="info" /></span>
+        <h2 class="set-panel__title">{{ SETTINGS.versionInfo }}</h2>
+      </div>
 
-    <FailureState
-      v-else-if="status === 'failed' && failure"
-      :failure="failure"
-      :title="SETTINGS.about"
-      @retry="load"
-    />
+      <SkeletonBlock v-if="status === 'loading'" :lines="4" :line-height="24" />
 
-    <template v-else-if="version">
-      <dl class="meta">
-        <dt>{{ SETTINGS.version }}</dt>
-        <dd>{{ version.version }}</dd>
-        <dt>{{ SETTINGS.goVersion }}</dt>
-        <dd>{{ version.go_version }}</dd>
-        <dt>{{ SETTINGS.migration }}</dt>
-        <dd>{{ version.migration_version }}</dd>
-        <template v-if="version.build_time">
-          <dt>{{ SETTINGS.buildTime }}</dt>
-          <dd>{{ formatDateTime(version.build_time) }}</dd>
-        </template>
-      </dl>
+      <FailureState
+        v-else-if="status === 'failed' && failure"
+        :failure="failure"
+        :title="SETTINGS.about"
+        @retry="load"
+      />
 
-      <p class="hint">{{ SETTINGS.noUpdate }}</p>
-      <p class="hint">
-        依赖是否正常、有没有正在跑的索引，在
-        <RouterLink class="link" :to="{ name: 'settings-system' }">
-          {{ SETTINGS.system }}
-        </RouterLink>
-        里。
-      </p>
-    </template>
+      <template v-else-if="version">
+        <dl class="meta">
+          <dt>{{ SETTINGS.version }}</dt>
+          <dd>{{ version.version }}</dd>
+          <dt>{{ SETTINGS.goVersion }}</dt>
+          <dd>{{ version.go_version }}</dd>
+          <dt>{{ SETTINGS.migration }}</dt>
+          <dd>{{ version.migration_version }}</dd>
+          <template v-if="version.build_time">
+            <dt>{{ SETTINGS.buildTime }}</dt>
+            <dd>{{ formatDateTime(version.build_time) }}</dd>
+          </template>
+        </dl>
+
+        <p class="hint">{{ SETTINGS.noUpdate }}</p>
+        <p class="hint">
+          依赖是否正常、有没有正在跑的索引，在
+          <RouterLink class="link" :to="{ name: 'settings-system' }">
+            {{ SETTINGS.system }}
+          </RouterLink>
+          里。
+        </p>
+      </template>
+    </section>
   </div>
 </template>
 
@@ -79,42 +87,53 @@ onMounted(() => {
 .about {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  gap: 20px;
 }
 
+/* 名值表：与运行状态那一页同一套行距与分隔线。 */
 .meta {
   display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 6px 16px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0 20px;
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
+}
+
+.meta dt,
+.meta dd {
+  padding: 11px 0;
+  border-bottom: 1px solid rgb(0 0 0 / 5%);
 }
 
 .meta dt {
   color: var(--text-faint);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .meta dd {
   margin: 0;
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 14px;
   word-break: break-all;
 }
 
 .hint {
-  margin: 0;
+  margin: 12px 0 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
 .link {
-  color: var(--accent);
+  color: var(--accent-ink);
   text-decoration: none;
+  font-weight: 600;
+}
+
+.link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 </style>

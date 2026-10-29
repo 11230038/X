@@ -25,6 +25,22 @@ export interface CapabilityManifest {
   tools: string[] | null
 }
 
-export function listCapabilities(): Promise<{ capabilities: CapabilityManifest[] }> {
-  return request<{ capabilities: CapabilityManifest[] }>('/capabilities')
+/**
+ * 工具清单里的一行。
+ *
+ * 能力声明的是工具**名字**；这句描述来自工具自己的定义，与模型调用时看到的
+ * 是同一句，所以目录不会用一种模型没听过的说法介绍工具。
+ */
+export interface CapabilityTool {
+  name: string
+  description: string
+}
+
+export function listCapabilities(): Promise<{
+  capabilities: CapabilityManifest[]
+  tools: CapabilityTool[] | null
+}> {
+  return request<{ capabilities: CapabilityManifest[]; tools: CapabilityTool[] | null }>(
+    '/capabilities',
+  )
 }

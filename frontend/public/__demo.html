@@ -1,0 +1,1279 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rinnex · 探索你的学习空间</title>
+<style>
+/* =========================================
+   Rinnex 全局 UI 变量与基础
+   ========================================= */
+:root {
+  --color-pink: #F7A9EF; --color-purple: #B18CFF; --color-blue: #66D2F5; --color-yellow: #FEDD76; --color-orange: #FFB07C; --color-green: #A7F3D0;
+  --text-title: #1C1C1E; --text-body: #4A4A4E; --color-gray: #8E8E93;
+  --bg-light: #FCFBF9; 
+  --aurora-1: rgba(247, 169, 239, 0.3); --aurora-2: rgba(176, 233, 248, 0.35); --aurora-3: rgba(177, 140, 255, 0.2);
+  
+  --glass-bg: rgba(255, 255, 255, 0.45); 
+  --glass-border: rgba(255, 255, 255, 0.8); 
+  --glass-shadow: 0 12px 40px -10px rgba(51, 68, 85, 0.08);
+  --glass-shadow-hover: 0 20px 50px -10px rgba(51, 68, 85, 0.15);
+  
+  --radius-card: 24px; --radius-btn: 12px; 
+  --transition-smooth: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  --transition-bounce: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; overflow: hidden; }
+body { 
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif; 
+  color: var(--text-body); background-color: var(--bg-light); 
+  background-image: 
+    radial-gradient(circle at 30% 60%, rgba(247, 169, 239, 0.25) 0%, transparent 50%),
+    radial-gradient(circle at 70% 40%, rgba(254, 221, 118, 0.2) 0%, transparent 50%),
+    radial-gradient(circle at 10% 10%, rgba(102, 210, 245, 0.15) 0%, transparent 40%);
+  background-attachment: fixed; -webkit-font-smoothing: antialiased; 
+}
+
+/* 全局基础按钮 */
+.btn { padding: 10px 20px; border-radius: var(--radius-btn); font-size: 14px; font-weight: 700; cursor: pointer; transition: var(--transition-bounce); border: none; display: inline-flex; align-items: center; gap: 8px; justify-content: center; }
+.btn:active { transform: scale(0.96); }
+.btn-primary { background: linear-gradient(135deg, var(--color-purple), var(--color-blue)); color: white; box-shadow: 0 4px 12px rgba(177,140,255,0.3); }
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(177,140,255,0.4); }
+.btn-outline { background: white; border: 1px solid #E2E8F0; color: var(--text-title); }
+.btn-outline:hover { background: #F8FAFC; border-color: var(--text-title); }
+
+/* 登录页 */
+#login-page { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center; background: var(--bg-light); background-image: radial-gradient(circle at 10% 10%, var(--aurora-1) 0%, transparent 50%), radial-gradient(circle at 90% 90%, var(--aurora-3) 0%, transparent 50%); transition: opacity 0.6s ease, visibility 0.6s; }
+#login-page.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+.login-card { width: 400px; background: var(--glass-bg); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); border: 1px solid var(--glass-border); border-radius: 32px; padding: 48px 40px; box-shadow: 0 24px 64px -12px rgba(51,68,85,0.15); text-align: center; transform: translateY(0); transition: transform 0.4s var(--transition-bounce); }
+.login-card:hover { transform: translateY(-4px); }
+.login-logo-container { width: 120px; height: 80px; margin: 0 auto 24px; display: flex; align-items: center; justify-content: center; }
+.login-logo-container svg { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 8px 16px rgba(51,68,85,0.15)); }
+.login-title { font-size: 28px; font-weight: 800; color: var(--text-title); letter-spacing: -1px; margin: 0 0 8px 0; }
+.login-subtitle { font-size: 15px; color: var(--color-gray); margin-bottom: 32px; font-weight: 500; }
+.login-input-group { margin-bottom: 20px; text-align: left; }
+.login-input-group label { display: block; font-size: 13px; font-weight: 600; color: var(--text-title); margin-bottom: 8px; margin-left: 8px; }
+.login-input { width: 100%; padding: 14px 20px; border-radius: 16px; border: 1px solid rgba(0,0,0,0.06); background: rgba(255,255,255,0.7); font-size: 15px; color: var(--text-title); outline: none; transition: var(--transition-smooth); }
+.login-input:focus { background: white; border-color: var(--color-purple); box-shadow: 0 0 0 4px rgba(177,140,255,0.15); }
+.login-btn { width: 100%; padding: 16px; margin-top: 12px; border-radius: 16px; border: none; background: linear-gradient(135deg, var(--color-purple), var(--color-blue)); color: white; font-size: 16px; font-weight: 700; cursor: pointer; transition: var(--transition-bounce); box-shadow: 0 8px 24px rgba(177,140,255,0.4); display: flex; justify-content: center; align-items: center; gap: 8px; }
+.login-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(177,140,255,0.5); }
+.login-btn:active { transform: scale(0.98); }
+.login-footer { margin-top: 24px; font-size: 13px; color: var(--color-gray); }
+.login-footer a { color: var(--color-purple); font-weight: 600; text-decoration: none; cursor: pointer; }
+
+/* 整体骨架 */
+.shell { display: flex; height: 100vh; padding: 24px; gap: 24px; }
+.nav { width: 72px; flex-shrink: 0; background: var(--glass-bg); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid var(--glass-border); border-radius: var(--radius-card); display: flex; flex-direction: column; align-items: center; padding: 24px 0; box-shadow: var(--glass-shadow); z-index: 10; }
+.nav-logo { width: 40px; height: 40px; margin-bottom: 32px; object-fit: contain; }
+.nav-menu { display: flex; flex-direction: column; gap: 16px; width: 100%; align-items: center; }
+.nav-item { width: 48px; height: 48px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 24px; cursor: pointer; transition: var(--transition-bounce); color: var(--color-gray); border: none; background: transparent; }
+.nav-item:hover { background: rgba(255,255,255,0.6); color: var(--text-title); transform: translateY(-2px) scale(1.05); }
+.nav-item.active { background: white; color: var(--text-title); box-shadow: 0 4px 16px rgba(51,68,85,0.08); }
+.nav-bottom { margin-top: auto; display: flex; flex-direction: column; gap: 16px; }
+
+.sidebar { width: 240px; flex-shrink: 0; background: var(--glass-bg); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid var(--glass-border); border-radius: var(--radius-card); padding: 28px 24px; display: flex; flex-direction: column; box-shadow: var(--glass-shadow); z-index: 10; }
+.sidebar-header { font-size: 18px; font-weight: 800; color: var(--text-title); margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; }
+.sidebar-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1; }
+.sidebar-item { padding: 12px 16px; border-radius: var(--radius-btn); font-size: 14px; color: var(--text-body); cursor: pointer; transition: var(--transition-smooth); border: none; background: transparent; text-align: left; display: flex; align-items: center; gap: 12px; font-weight: 500; }
+.sidebar-item:hover { background: rgba(255,255,255,0.6); }
+.sidebar-item.active { background: white; font-weight: 700; color: var(--text-title); box-shadow: 0 2px 8px rgba(51,68,85,0.06); }
+
+.main-container { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+.page { display: none; height: 100%; animation: fadeIn 0.4s ease-out; overflow-y: auto; padding: 32px 40px; }
+.page.active { display: flex; flex-direction: column; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+.panel { width: 320px; flex-shrink: 0; background: var(--glass-bg); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: 1px solid var(--glass-border); border-radius: var(--radius-card); padding: 24px; display: none; flex-direction: column; box-shadow: var(--glass-shadow); z-index: 10; }
+.panel.active { display: flex; animation: fadeIn 0.3s ease-out; }
+.panel-title { font-size: 16px; font-weight: 800; color: var(--text-title); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+/* =========================================
+   全新首页 (液态玻璃砖块 Bento Grid)
+   ========================================= */
+.home-header { margin-bottom: 40px; margin-top: 8px; }
+.home-title { font-size: 42px; font-weight: 800; letter-spacing: -1.5px; margin: 0 0 12px 0; color: var(--text-title); }
+.home-subtitle { font-size: 16px; color: var(--color-gray); margin: 0; font-weight: 500;}
+
+.home-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; max-width: 1100px; }
+
+.glass-brick {
+  background: var(--glass-bg); backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
+  border: 1px solid var(--glass-border); border-radius: var(--radius-card); padding: 28px;
+  box-shadow: var(--glass-shadow), inset 0 2px 4px rgba(255, 255, 255, 0.8), inset 0 -2px 4px rgba(0, 0, 0, 0.02);
+  transition: var(--transition-smooth); position: relative; overflow: hidden; display: flex; flex-direction: column;
+  background-image: linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px);
+  background-size: 20px 20px; background-position: center;
+}
+.glass-brick:hover { transform: translateY(-4px); box-shadow: 0 32px 64px -12px rgba(0, 0, 0, 0.06), inset 0 2px 4px rgba(255, 255, 255, 1); }
+.brick-span-2 { grid-column: span 2; }
+.brick-title { font-size: 15px; font-weight: 700; color: var(--text-title); margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; }
+
+/* 流体球组件 */
+.flow-ball-card { align-items: center; justify-content: center; }
+.flow-ball-wrapper { position: relative; width: 160px; height: 160px; margin: 10px 0 20px; display: flex; justify-content: center; align-items: center; }
+.flow-ball-shadow { position: absolute; bottom: -5px; width: 100px; height: 20px; background: rgba(177, 140, 255, 0.3); filter: blur(16px); border-radius: 50%; z-index: 0; }
+.flow-ball { position: relative; width: 130px; height: 130px; border-radius: 50%; z-index: 1; background: radial-gradient(circle at 30% 30%, rgba(255,255,255,1) 0%, rgba(255,255,255,0.4) 60%, rgba(200,220,255,0.2) 100%); box-shadow: inset 0 10px 20px rgba(255,255,255,0.9), inset -10px -10px 20px rgba(177,140,255,0.15), 0 10px 20px rgba(177,140,255,0.1); display: flex; justify-content: center; align-items: center; }
+.flow-ball::before { content: ''; position: absolute; inset: -4px; border-radius: 50%; background: conic-gradient(from 180deg, rgba(247, 169, 239, 0.9) 0%, rgba(177, 140, 255, 0.9) 22%, rgba(102, 210, 245, 0.9) 44%, transparent 44%); -webkit-mask: radial-gradient(transparent 64%, black 66%); mask: radial-gradient(transparent 64%, black 66%); filter: blur(2px); opacity: 0.9; }
+.flow-ball-text { position: relative; z-index: 10; font-size: 38px; font-weight: 800; color: var(--text-title); }
+.flow-ball-text span { font-size: 18px; font-weight: 600; }
+.flow-ball-label { font-size: 14px; font-weight: 600; color: var(--color-gray); margin-top: 10px; }
+
+/* 首页数据列表 */
+.stat-list { display: flex; flex-direction: column; gap: 20px; flex: 1; justify-content: center; }
+.stat-row { display: flex; justify-content: space-between; align-items: center; }
+.stat-label { display: flex; align-items: center; gap: 12px; font-size: 15px; font-weight: 600; color: var(--text-body); }
+.stat-dot { width: 8px; height: 8px; border-radius: 50%; }
+.stat-val { font-size: 20px; font-weight: 800; color: var(--text-title); letter-spacing: -0.5px; }
+.steps-container { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; position: relative; padding: 0 10px; }
+.steps-line { position: absolute; top: 50%; left: 20px; right: 20px; height: 3px; background: rgba(0,0,0,0.05); border-radius: 2px; transform: translateY(-50%); z-index: 1; }
+.steps-line-active { position: absolute; top: 0; left: 0; height: 100%; background: var(--color-purple); border-radius: 2px; width: 60%; }
+.step-node { position: relative; z-index: 2; width: 16px; height: 16px; border-radius: 50%; background: white; border: 3px solid #D1D1D6; box-sizing: border-box; }
+.step-node.done { border-color: var(--color-purple); }
+.step-node.active { border-color: var(--color-blue); background: white; box-shadow: 0 0 0 4px rgba(102, 210, 245, 0.2); }
+.step-desc { font-size: 14px; color: var(--color-gray); font-weight: 500; margin-top: 32px; }
+.step-desc strong { color: var(--text-title); font-weight: 700; }
+.progress-group { margin-bottom: 24px; }
+.progress-group:last-child { margin-bottom: 0; }
+.progress-head { display: flex; justify-content: space-between; font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text-body); }
+.progress-bar { height: 12px; background: rgba(255,255,255,0.6); border-radius: 6px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.05); }
+.progress-fill { height: 100%; border-radius: 6px; box-shadow: inset 0 2px 4px rgba(255,255,255,0.3); }
+.fill-pink-purple { background: linear-gradient(90deg, var(--color-pink), var(--color-purple)); }
+.fill-blue-green { background: linear-gradient(90deg, var(--color-blue), var(--color-green)); }
+.time-card { align-items: center; justify-content: center; }
+.time-display { font-size: 48px; font-weight: 800; color: var(--text-title); letter-spacing: -1.5px; display: flex; align-items: baseline; gap: 4px; margin-top: 10px;}
+.time-unit { font-size: 18px; font-weight: 600; color: var(--color-gray); }
+.time-hint { font-size: 13px; color: var(--color-gray); font-weight: 500; margin-top: 24px; text-align: center;}
+
+/* =========================================
+   ★ 全新笔记本页面 (手账风格) ★
+   ========================================= */
+.notebook-wrapper { max-width: 800px; margin: 0 auto; position: relative; padding-left: 20px; }
+.notebook-holes { position: absolute; left: 0; top: 40px; bottom: 40px; display: flex; flex-direction: column; justify-content: space-around; z-index: 10; }
+.notebook-hole { width: 16px; height: 16px; background: #fff; border-radius: 50%; box-shadow: inset 2px 2px 4px rgba(0,0,0,0.1), 0 0 0 2px #E5E9F0; }
+.notebook-paper { background: #fff; border-radius: 20px; padding: 40px 50px; box-shadow: 0 10px 30px rgba(0,0,0,0.03); border: 1px solid #E2E8F0; position: relative; overflow: hidden;}
+.notebook-paper::before { content: ''; position: absolute; top: 0; bottom: 0; left: 30px; width: 2px; background: rgba(247, 169, 239, 0.3); }
+.notebook-paper::after { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-image: linear-gradient(transparent 95%, #F0F4F8 95%); background-size: 100% 32px; pointer-events: none; opacity: 0.5; z-index: 0;}
+.note-item { position: relative; z-index: 2; margin-bottom: 40px; }
+.note-item:last-child { margin-bottom: 0; }
+.note-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.note-title { font-size: 18px; font-weight: 800; color: var(--text-title); }
+.note-tag { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
+.tag-purple { background: rgba(177, 140, 255, 0.15); color: var(--color-purple); }
+.tag-green { background: rgba(167, 243, 208, 0.4); color: #1f7a4d; }
+.tag-blue { background: rgba(102, 210, 245, 0.2); color: #0099CC; }
+.note-content { font-size: 15px; color: var(--color-gray); line-height: 1.8; }
+
+/* =========================================
+   ★ 全新错题本页面 (去除套娃，右侧切换) ★
+   ========================================= */
+.mistake-layout { display: flex; gap: 24px; height: 100%; }
+.mistake-main-area { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.mistake-title { font-size: 32px; font-weight: 800; color: var(--text-title); margin: 0 0 8px 0; letter-spacing: -1px; font-family: "Noto Serif SC", serif; }
+.feature-pills { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+.f-pill { display: flex; align-items: center; gap: 6px; background: white; padding: 8px 16px; border-radius: 999px; box-shadow: 0 2px 8px rgba(51,68,85,0.04); font-size: 13px; font-weight: 600; color: var(--text-title); border: 1px solid #EEF2F5; }
+.m-search-bar { display: flex; gap: 12px; margin-bottom: 24px; }
+.m-input { flex: 1; padding: 16px 24px; border-radius: 16px; border: 1px solid #E2E8F0; background: white; font-size: 15px; outline: none; transition: 0.2s; box-shadow: 0 4px 12px rgba(0,0,0,0.02); }
+.m-input:focus { border-color: var(--color-purple); box-shadow: 0 0 0 4px rgba(177,140,255,0.1); }
+.m-select { padding: 16px 24px; border-radius: 16px; border: 1px solid #E2E8F0; background: white; font-size: 15px; font-weight: 600; color: var(--text-title); outline: none; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.02); }
+
+.m-list { display: flex; flex-direction: column; gap: 16px; }
+.m-card { background: white; border-radius: 16px; padding: 24px; box-shadow: 0 4px 12px rgba(51,68,85,0.03); border: 1px solid #EEF2F5; display: flex; justify-content: space-between; align-items: center; transition: 0.2s; cursor: pointer; }
+.m-card:hover { transform: translateY(-2px); border-color: var(--color-purple); box-shadow: 0 8px 24px rgba(177,140,255,0.08); }
+.m-card-text { font-size: 16px; font-weight: 600; color: var(--text-title); margin-bottom: 12px; line-height: 1.5; }
+.m-card-tags { display: flex; gap: 8px; }
+.m-tag { font-size: 12px; padding: 4px 10px; border-radius: 6px; background: #F0F4F8; color: var(--color-gray); }
+.m-tag.danger { background: #FEE2E2; color: #DC2626; }
+.m-tag.warning { background: #FEF3C7; color: #D97706; }
+
+/* 右侧面板 (复习轨迹 / 错题解析) */
+.mistake-side-panel { width: 320px; flex-shrink: 0; display: flex; flex-direction: column; }
+.tracker-tabs { display: flex; gap: 8px; margin-bottom: 16px; background: rgba(255,255,255,0.5); padding: 4px; border-radius: 12px; border: 1px solid #E2E8F0; }
+.tracker-tab { flex: 1; padding: 10px; border: none; background: transparent; border-radius: 8px; font-size: 14px; font-weight: 600; color: var(--color-gray); cursor: pointer; transition: 0.2s; }
+.tracker-tab.active { background: white; color: var(--text-title); box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+
+.tracker-content-card { background: white; border-radius: 20px; padding: 24px; box-shadow: 0 8px 24px rgba(0,0,0,0.04); flex: 1; border: 1px solid #EEF2F5; display: none; flex-direction: column;}
+.tracker-content-card.active { display: flex; }
+.rt-title { font-size: 16px; font-weight: 800; color: var(--text-title); margin-bottom: 20px; display: flex; align-items: center; gap: 8px;}
+.rt-item { display: flex; justify-content: space-between; align-items: center; padding: 16px 0; border-bottom: 1px dashed #E2E8F0; font-size: 14px; font-weight: 600; }
+.rt-value { color: var(--text-title); font-size: 16px; font-weight: 800; }
+.rt-quote { margin-top: 24px; padding: 16px; background: #F8FAFC; border-radius: 12px; font-size: 13px; line-height: 1.6; color: var(--color-gray); border-left: 3px solid var(--color-purple); }
+
+/* =========================================
+   伴学页面 (Chat) 及其他保留页面样式
+   ========================================= */
+.chat-layout { display: flex; flex-direction: column; height: 100%; padding: 0; }
+.chat-topbar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 16px; }
+.chat-modes { display: flex; gap: 4px; padding: 6px; background: var(--glass-bg); backdrop-filter: blur(20px); border-radius: 999px; border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); }
+.mode-btn { padding: 8px 16px; border: none; background: transparent; border-radius: 999px; font-size: 14px; font-weight: 600; color: var(--color-gray); cursor: pointer; transition: 0.2s; }
+.mode-btn.active { background: white; color: var(--text-title); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.chat-topbar-right { display: flex; align-items: center; gap: 12px; }
+.bookmark-btn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--glass-border); background: white; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: var(--transition-smooth); color: var(--color-gray); box-shadow: var(--glass-shadow); }
+.bookmark-btn:hover { transform: translateY(-2px); color: var(--color-purple); }
+.bookmark-btn.active { color: var(--color-purple); background: #FCFAFF; border-color: rgba(177, 140, 255, 0.3); }
+.bookmark-btn.active svg { fill: var(--color-purple); animation: heartBeat 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); }
+@keyframes heartBeat { 0% { transform: scale(1); } 50% { transform: scale(1.3); } 100% { transform: scale(1); } }
+
+.partner-selector { display: flex; align-items: center; gap: 10px; padding: 8px 16px; background: white; border-radius: 999px; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.05); transition: var(--transition-smooth); border: 1px solid rgba(0,0,0,0.03); position: relative; }
+.partner-selector:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,0.08); }
+.partner-avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--color-yellow), var(--color-pink)); display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.partner-name { font-size: 14px; font-weight: 600; color: var(--text-title); }
+.partner-dropdown { position: absolute; top: 50px; right: 0; width: 220px; background: white; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); padding: 8px; display: none; flex-direction: column; gap: 4px; border: 1px solid rgba(0,0,0,0.05); z-index: 100; }
+.partner-dropdown.show { display: flex; animation: fadeIn 0.2s ease-out; }
+.partner-option { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 10px; cursor: pointer; transition: 0.2s; }
+.partner-option:hover { background: #F7F8FA; }
+.partner-option .avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+
+.chat-stream { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; padding-bottom: 20px; }
+.bubble-user { align-self: flex-end; background: linear-gradient(135deg, #F7A9EF, #B18CFF); color: white; padding: 16px 24px; border-radius: 24px 24px 4px 24px; max-width: 70%; box-shadow: 0 8px 24px rgba(247,169,239,0.3); line-height: 1.6; }
+.bubble-ai { align-self: flex-start; background: var(--glass-bg); backdrop-filter: blur(20px); border: 1px solid var(--glass-border); padding: 20px 24px; border-radius: 24px 24px 24px 4px; max-width: 80%; box-shadow: var(--glass-shadow); line-height: 1.7; }
+.chat-tools { display: flex; gap: 8px; padding: 0 0 16px 0; }
+.tool-chip { display: flex; align-items: center; gap: 6px; padding: 8px 14px; background: white; border: 1px solid rgba(0,0,0,0.06); border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--text-title); cursor: pointer; transition: var(--transition-smooth); }
+.tool-chip:hover { background: var(--glass-bg); border-color: var(--color-purple); color: var(--color-purple); transform: translateY(-1px); }
+.chat-input-area { padding: 0 0 16px 0; }
+.chat-input-box { display: flex; background: var(--glass-bg); backdrop-filter: blur(24px); padding: 12px 12px 12px 24px; border-radius: 999px; box-shadow: var(--glass-shadow); border: 1px solid var(--glass-border); align-items: center; gap: 16px; }
+.chat-input-box input { flex: 1; border: none; outline: none; font-size: 16px; background: transparent; color: var(--text-title); }
+.send-btn { width: 44px; height: 44px; border-radius: 50%; border: none; background: linear-gradient(135deg, #F7A9EF, #B18CFF); color: white; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; box-shadow: 0 8px 24px rgba(177,140,255,0.4); flex-shrink: 0; }
+.ai-3d-card { margin-top: 16px; background: white; border-radius: 16px; padding: 16px 20px; display: flex; align-items: center; gap: 16px; border: 1px solid rgba(177, 140, 255, 0.3); cursor: pointer; transition: var(--transition-smooth); box-shadow: 0 4px 12px rgba(177, 140, 255, 0.08); }
+.ai-3d-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(177, 140, 255, 0.15); border-color: var(--color-purple); }
+.ai-3d-icon { width: 44px; height: 44px; border-radius: 12px; background: linear-gradient(135deg, #FFF0FE, #E8FAFF); display: flex; align-items: center; justify-content: center; font-size: 22px; }
+.ai-actions { display: flex; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.05); }
+.ai-btn { padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(177, 140, 255, 0.3); background: #FCFAFF; color: var(--color-purple); font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+
+/* 掌握路径 */
+.mastery-header { margin-bottom: 32px; display: flex; justify-content: space-between; align-items: flex-end;}
+.mastery-title { font-size: 32px; font-weight: 800; color: var(--text-title); margin: 0 0 8px 0; letter-spacing: -1px; }
+.mastery-subtitle { font-size: 15px; color: var(--color-gray); }
+.mastery-progress-card { background: var(--glass-bg); backdrop-filter: blur(20px); border-radius: 20px; padding: 24px; border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); margin-bottom: 32px; display: flex; align-items: center; gap: 32px; transition: var(--transition-smooth); }
+.mastery-progress-card:hover { box-shadow: var(--glass-shadow-hover); }
+.m-progress-text { font-size: 16px; font-weight: 800; color: var(--text-title); width: 120px; }
+.m-progress-bar-wrap { flex: 1; height: 12px; background: rgba(0,0,0,0.04); border-radius: 6px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.05); }
+.m-progress-bar { height: 100%; background: linear-gradient(90deg, var(--color-purple), var(--color-blue)); border-radius: 6px; width: 0%; transition: width 1.2s cubic-bezier(0.25, 0.8, 0.25, 1); box-shadow: 0 0 10px rgba(177,140,255,0.5); }
+.mastery-list { display: flex; flex-direction: column; gap: 16px; position: relative; padding-left: 24px; }
+.mastery-list::before { content: ''; position: absolute; left: 8px; top: 20px; bottom: 20px; width: 2px; background: rgba(0,0,0,0.05); border-radius: 2px; }
+.mastery-item { background: var(--glass-bg); backdrop-filter: blur(20px); border: 1px solid var(--glass-border); border-radius: 20px; padding: 20px 24px; display: flex; align-items: center; gap: 20px; position: relative; box-shadow: var(--glass-shadow); transition: var(--transition-bounce); cursor: pointer; }
+.mastery-item:hover { transform: translateX(8px) translateY(-2px); box-shadow: var(--glass-shadow-hover); border-color: rgba(177,140,255,0.3); }
+.mastery-item.active { border-left: 4px solid var(--color-purple); background: linear-gradient(90deg, rgba(255,255,255,0.9), rgba(255,255,255,0.6)); }
+.m-node { position: absolute; left: -24px; width: 18px; height: 18px; border-radius: 50%; background: white; border: 4px solid #E0E0E5; box-sizing: border-box; z-index: 2; transition: var(--transition-smooth); }
+.mastery-item.done .m-node { border-color: var(--color-green); background: var(--color-green); }
+.mastery-item.active .m-node { border-color: var(--color-purple); background: var(--color-purple); box-shadow: 0 0 0 4px rgba(177,140,255,0.2); }
+.m-info { flex: 1; }
+.m-title { font-size: 18px; font-weight: 800; color: var(--text-title); margin-bottom: 6px; display: flex; align-items: center; gap: 12px; }
+.m-desc { font-size: 14px; color: var(--color-gray); line-height: 1.5; }
+.m-tag { padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 800; }
+.m-tag.done { background: var(--color-green); color: #1f7a4d; }
+.m-tag.active { background: var(--color-purple); color: white; animation: pulse-purple 2s infinite; }
+.m-tag.todo { background: rgba(0,0,0,0.04); color: var(--color-gray); }
+@keyframes pulse-purple { 0% { box-shadow: 0 0 0 0 rgba(177, 140, 255, 0.4); } 70% { box-shadow: 0 0 0 10px rgba(177, 140, 255, 0); } 100% { box-shadow: 0 0 0 0 rgba(177, 140, 255, 0); } }
+.m-btn { padding: 8px 16px; border-radius: 10px; font-size: 14px; font-weight: 700; border: none; cursor: pointer; transition: var(--transition-bounce); }
+.m-btn:active { transform: scale(0.9); }
+.m-btn.primary { background: var(--text-title); color: white; }
+.m-btn.outline { background: transparent; border: 1px solid rgba(0,0,0,0.1); color: var(--text-title); }
+.mastery-item.active .m-btn.outline { border-color: var(--color-purple); color: var(--color-purple); background: #FFF0FE; }
+.map-section { margin-bottom: 32px; background: var(--glass-bg); padding: 24px; border-radius: 20px; border: 1px solid var(--glass-border); backdrop-filter: blur(20px); }
+.map-section-title { font-size: 16px; font-weight: 800; color: var(--text-title); margin-bottom: 16px; display: flex; align-items: center; gap: 8px;}
+.map-nodes { display: flex; flex-wrap: wrap; gap: 12px; }
+.map-pill { padding: 10px 20px; border-radius: 999px; font-size: 14px; font-weight: 600; cursor: pointer; transition: var(--transition-bounce); border: 1px solid transparent; }
+.map-pill:hover { transform: scale(1.1) translateY(-2px); box-shadow: var(--shadow-glow); }
+.map-pill.done { background: white; color: var(--text-title); border-color: rgba(0,0,0,0.05); }
+.map-pill.active { background: linear-gradient(135deg, var(--color-purple), var(--color-blue)); color: white; box-shadow: 0 4px 12px rgba(177,140,255,0.3); }
+.map-pill.todo { background: rgba(255,255,255,0.4); color: var(--color-gray); border: 1px dashed rgba(0,0,0,0.1); }
+
+/* 学习空间 / 活书 */
+.space-header { margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; }
+.space-title { font-size: 32px; font-weight: 800; color: var(--text-title); margin: 0 0 8px 0; letter-spacing: -1px; }
+.space-subtitle { font-size: 16px; color: var(--color-gray); }
+.bento-grid { display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: 180px; gap: 20px; }
+.bento-card { background: var(--glass-bg); backdrop-filter: blur(20px); border: 1px solid var(--glass-border); border-radius: 28px; padding: 24px; position: relative; overflow: hidden; box-shadow: 0 10px 30px -10px rgba(51, 68, 85, 0.08); transition: var(--transition-bounce); cursor: pointer; display: flex; flex-direction: column; }
+.bento-card:hover { transform: translateY(-6px); box-shadow: 0 20px 40px -10px rgba(51, 68, 85, 0.15); }
+.bento-card h3 { font-size: 18px; font-weight: 700; color: var(--text-title); margin: 0 0 8px 0; z-index: 2; }
+.bento-card p { font-size: 13px; color: var(--text-body); margin: 0; z-index: 2; line-height: 1.5; }
+.b-large { grid-column: span 2; grid-row: span 2; }
+.b-medium { grid-column: span 2; grid-row: span 1; }
+.b-small { grid-column: span 1; grid-row: span 1; }
+.b-tall { grid-column: span 1; grid-row: span 2; }
+.bento-tag { display: inline-block; padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 700; margin-bottom: 12px; align-self: flex-start; z-index: 2; }
+.card-livebook { background: linear-gradient(135deg, rgba(255,255,255,0.8), rgba(232,250,255,0.8)); }
+.book-cover-3d { width: 100px; height: 130px; background: linear-gradient(135deg, #66D2F5, #B18CFF); border-radius: 8px 16px 16px 8px; box-shadow: -4px 4px 12px rgba(0,0,0,0.1); position: absolute; right: 30px; bottom: 20px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 14px; writing-mode: vertical-rl; letter-spacing: 2px; }
+.card-citation { background: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(255,240,254,0.9)); }
+.citation-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; z-index: 2; }
+.citation-item { display: flex; gap: 12px; align-items: center; background: rgba(255,255,255,0.8); padding: 10px 14px; border-radius: 12px; font-size: 13px; font-weight: 600; color: var(--text-title); box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+
+/* 知识库与资料市场 */
+.kb-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+.kb-doc-card { background: white; border-radius: 16px; padding: 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: var(--glass-shadow); border: 1px solid #E2E8F0; margin-bottom: 16px; transition: 0.2s; }
+.kb-doc-card:hover { border-color: var(--color-purple); }
+.kb-doc-info { display: flex; align-items: center; gap: 16px; }
+.kb-icon { width: 48px; height: 48px; border-radius: 12px; background: #FEE2E2; color: #DC2626; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 18px; }
+.market-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 24px; }
+.market-card { background: white; border-radius: 20px; padding: 24px; box-shadow: var(--glass-shadow); border: 1px solid rgba(0,0,0,0.03); display: flex; flex-direction: column; transition: 0.2s; }
+.market-card:hover { transform: translateY(-4px); box-shadow: 0 16px 32px -10px rgba(51,68,85,0.12); }
+.market-cover { width: 100%; height: 140px; border-radius: 12px; background: linear-gradient(135deg, #F4F7F9, #E2E8F0); margin-bottom: 16px; display: flex; align-items: center; justify-content: center; font-size: 40px; }
+
+/* 沉浸阅读 */
+.reading-layout { display: flex; height: 100%; gap: 24px; }
+.reading-toc { width: 240px; background: white; border-radius: var(--radius-card); padding: 24px; display: flex; flex-direction: column; box-shadow: var(--glass-shadow); border: 1px solid #E2E8F0; }
+.toc-back { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: var(--color-purple); cursor: pointer; margin-bottom: 20px; transition: 0.2s; padding: 10px; background: #F8FAFC; border-radius: 8px; }
+.toc-back:hover { background: #FFF0FE; }
+.toc-title { font-size: 15px; font-weight: 800; color: var(--text-title); margin-bottom: 16px; display: flex; justify-content: space-between; border-top: 1px solid rgba(0,0,0,0.05); padding-top: 16px; }
+.toc-item { font-size: 14px; color: var(--text-body); padding: 10px 12px; border-radius: 8px; cursor: pointer; transition: 0.2s; font-weight: 500; }
+.toc-item:hover { background: #F4F7F9; }
+.toc-item.active { background: #E8FAFF; color: #0099CC; font-weight: 700; }
+.toc-sub { padding-left: 24px; font-size: 13px; }
+.reader-main { flex: 1; background: white; border-radius: var(--radius-card); padding: 48px 64px; overflow-y: auto; box-shadow: var(--glass-shadow); position: relative; border: 1px solid #E2E8F0; }
+.reader-title { font-size: 32px; font-weight: 800; color: var(--text-title); margin-bottom: 12px; letter-spacing: -0.5px; }
+.reader-meta { font-size: 14px; color: var(--color-gray); margin-bottom: 32px; padding-bottom: 16px; border-bottom: 1px solid rgba(0,0,0,0.05); display: flex; gap: 16px; }
+.reader-text p { font-size: 16px; line-height: 2; color: #2B3648; margin-bottom: 24px; }
+.reader-text p::selection { background: rgba(177, 140, 255, 0.3); color: var(--text-title); }
+.sel-bubble { position: absolute; background: var(--text-title); color: white; padding: 10px 18px; border-radius: 12px; font-size: 14px; font-weight: 600; box-shadow: 0 10px 24px rgba(51,68,85,0.3); display: none; cursor: pointer; z-index: 100; transition: transform 0.2s; display: flex; gap: 8px; align-items: center; }
+.sel-bubble:hover { transform: translateY(-2px) scale(1.02); background: var(--color-purple); }
+
+/* 收藏夹 */
+.fav-masonry { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; align-items: start; }
+.fav-card { background: white; border-radius: 20px; padding: 24px; box-shadow: 0 8px 24px -8px rgba(51,68,85,0.08); cursor: pointer; transition: var(--transition-bounce); position: relative; border: 1px solid rgba(255,255,255,0.8); }
+.fav-card:hover { transform: translateY(-6px) scale(1.02); box-shadow: 0 20px 40px -10px rgba(51,68,85,0.15); z-index: 2; }
+.fav-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.fav-type { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px; }
+.type-chat { background: #FFF0FE; color: #B18CFF; }
+.type-knowledge { background: #E8FAFF; color: #0099CC; }
+.type-book { background: #FFF9E6; color: #D4A017; }
+.fav-icon { font-size: 20px; opacity: 0.8; }
+.fav-content { font-size: 15px; font-weight: 600; color: var(--text-title); line-height: 1.5; margin-bottom: 16px; }
+.fav-footer { display: flex; justify-content: space-between; font-size: 12px; color: var(--color-gray); }
+.fav-card:nth-child(2) { margin-top: 30px; }
+.fav-card:nth-child(4) { margin-top: -20px; }
+.fav-card:nth-child(5) { margin-top: 40px; }
+
+/* 设置与个人中心 */
+.settings-header { margin-bottom: 32px; }
+.settings-title { font-size: 32px; font-weight: 800; color: var(--text-title); margin: 0 0 8px 0; letter-spacing: -1px; }
+.settings-subtitle { font-size: 15px; color: var(--color-gray); }
+.privacy-banner { display: flex; align-items: center; justify-content: center; gap: 12px; background: rgba(167, 243, 208, 0.3); border: 1px solid rgba(167, 243, 208, 0.6); color: #1f7a4d; padding: 16px; border-radius: 16px; font-size: 16px; font-weight: 700; margin-bottom: 32px; letter-spacing: 1px; box-shadow: 0 4px 12px rgba(52, 211, 153, 0.1); }
+.settings-card { background: var(--glass-bg); backdrop-filter: blur(20px); border: 1px solid var(--glass-border); border-radius: 20px; padding: 24px; margin-bottom: 20px; box-shadow: var(--glass-shadow); display: flex; justify-content: space-between; align-items: center; transition: var(--transition-smooth); }
+.settings-card:hover { box-shadow: var(--glass-shadow-hover); background: rgba(255,255,255,0.8); }
+.settings-card-left h3 { margin: 0 0 6px 0; font-size: 16px; font-weight: 800; color: var(--text-title); }
+.settings-card-left p { margin: 0; font-size: 13px; color: var(--color-gray); line-height: 1.5; max-width: 500px; }
+.settings-card-right { display: flex; gap: 12px; align-items: center; }
+.settings-folder-path { background: rgba(0,0,0,0.03); padding: 8px 12px; border-radius: 8px; font-size: 12px; font-family: monospace; color: var(--color-gray); display: flex; align-items: center; gap: 8px; }
+
+.profile-header-card { background: linear-gradient(135deg, #FFF0FE, #E8FAFF); border-radius: 28px; padding: 40px; border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow); position: relative; overflow: hidden; margin-bottom: 24px; display: flex; align-items: center; gap: 32px; }
+.profile-header-card::before { content: ''; position: absolute; right: -50px; top: -50px; width: 200px; height: 200px; background: radial-gradient(circle, rgba(255,255,255,0.8) 0%, transparent 70%); border-radius: 50%; }
+.profile-avatar-lg { width: 100px; height: 100px; border-radius: 50%; background: linear-gradient(135deg, var(--color-yellow), var(--color-pink)); display: flex; align-items: center; justify-content: center; font-size: 40px; border: 4px solid white; box-shadow: 0 8px 24px rgba(0,0,0,0.1); z-index: 2; }
+.profile-info { z-index: 2; flex: 1; }
+.profile-name-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.profile-name { font-size: 28px; font-weight: 800; color: var(--text-title); }
+.profile-level { background: rgba(255,255,255,0.8); color: var(--color-purple); padding: 4px 10px; border-radius: 8px; font-size: 12px; font-weight: 800; box-shadow: 0 2px 8px rgba(177,140,255,0.2); }
+.profile-bio { font-size: 14px; color: var(--color-gray); margin-bottom: 16px; }
+.profile-stats-row { display: flex; gap: 24px; }
+.p-stat { display: flex; flex-direction: column; }
+.p-stat-val { font-size: 18px; font-weight: 800; color: var(--text-title); }
+.p-stat-label { font-size: 12px; color: var(--color-gray); font-weight: 600; }
+.profile-actions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+.p-action-card { background: white; border-radius: 20px; padding: 20px; box-shadow: var(--glass-shadow); display: flex; align-items: center; gap: 16px; cursor: pointer; transition: var(--transition-bounce); border: 1px solid rgba(0,0,0,0.02); }
+.p-action-card:hover { transform: translateY(-4px); box-shadow: var(--glass-shadow-hover); }
+.p-action-icon { width: 48px; height: 48px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+.p-action-text h4 { margin: 0 0 4px 0; font-size: 16px; color: var(--text-title); font-weight: 700; }
+.p-action-text p { margin: 0; font-size: 12px; color: var(--color-gray); }
+.profile-list { background: white; border-radius: 20px; padding: 8px; box-shadow: var(--glass-shadow); margin-bottom: 24px; }
+.p-list-item { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid rgba(0,0,0,0.04); cursor: pointer; transition: 0.2s; border-radius: 12px; }
+.p-list-item:last-child { border-bottom: none; }
+.p-list-item:hover { background: #F8FAFC; }
+.p-list-left { display: flex; align-items: center; gap: 16px; font-size: 15px; font-weight: 600; color: var(--text-title); }
+.p-list-left span { font-size: 18px; }
+.p-list-right { color: var(--color-gray); font-size: 14px; display: flex; align-items: center; gap: 8px; }
+
+/* 弹窗与通用工具 */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); backdrop-filter: blur(8px); display: none; align-items: center; justify-content: center; z-index: 1000; opacity: 0; transition: opacity 0.3s ease; }
+.modal-overlay.show { display: flex; opacity: 1; }
+.modal-content { background: white; width: 500px; height: 500px; border-radius: 32px; padding: 30px; box-shadow: 0 30px 60px rgba(0,0,0,0.15); position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; transform: scale(0.9); transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); }
+.modal-overlay.show .modal-content { transform: scale(1); }
+.modal-close { position: absolute; top: 20px; right: 20px; width: 36px; height: 36px; border-radius: 50%; background: #F0F0F5; border: none; cursor: pointer; font-size: 18px; color: #888; transition: 0.2s; }
+.modal-close:hover { background: #E0E0E5; color: #333; }
+.modal-title { position: absolute; top: 24px; left: 30px; font-size: 18px; font-weight: 700; margin: 0; color: var(--text-title); }
+.css-3d-scene { width: 200px; height: 200px; perspective: 800px; margin-top: 20px; }
+.css-3d-cube { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; animation: rotateCube 10s infinite linear; }
+.css-3d-face { position: absolute; width: 200px; height: 200px; border: 2px solid rgba(177, 140, 255, 0.6); background: rgba(247, 169, 239, 0.15); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; font-weight: bold; color: var(--color-purple); font-size: 14px; }
+.face-front { transform: translateZ(100px); } .face-back { transform: rotateY(180deg) translateZ(100px); } .face-right { transform: rotateY(90deg) translateZ(100px); } .face-left { transform: rotateY(-90deg) translateZ(100px); } .face-top { transform: rotateX(90deg) translateZ(100px); } .face-bottom { transform: rotateX(-90deg) translateZ(100px); }
+@keyframes rotateCube { from { transform: rotateX(0deg) rotateY(0deg); } to { transform: rotateX(360deg) rotateY(360deg); } }
+#toast-container { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 12px; pointer-events: none; }
+.toast-msg { background: var(--text-title); color: white; padding: 14px 28px; border-radius: 999px; font-size: 15px; font-weight: 500; box-shadow: 0 20px 40px rgba(0,0,0,0.2); animation: toastUp 0.4s forwards; }
+@keyframes toastUp { from { opacity: 0; transform: translateY(30px) scale(0.9); } to { opacity: 1; transform: translateY(0) scale(1); } }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: rgba(51,68,85,0.1); border-radius: 10px; }
+</style>
+<style>#login-page{display:none!important}</style><style>#login-page{display:none!important} *,*::before,*::after{transition:none!important;animation:none!important;opacity:1!important}</style></head>
+<body>
+
+<!-- =========================================
+     登录页
+     ========================================= -->
+<div id="login-page">
+  <div class="login-card">
+    <div class="login-logo-container">
+      <svg viewBox="0 0 100 50" fill="none" stroke="var(--text-title)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M 30,25 C 10,10 10,40 30,25 C 50,10 50,40 70,25 C 90,10 90,40 70,25" />
+        <path d="M 10,25 C 30,40 30,10 50,25 C 70,40 70,10 90,25" stroke-opacity="0.5"/>
+        <path d="M 70,25 L 70,38 M 70,25 C 80,25 80,15 75,15 M 70,15 L 75,38" stroke-width="2.5"/>
+        <path d="M 22,12 L 22,20 M 18,16 L 26,16" stroke-width="1.5" />
+        <circle cx="35" cy="35" r="2" />
+        <path d="M 72,18 L 72,22 M 70,20 L 74,20" stroke-width="1" />
+        <path d="M 85,32 L 85,36 M 83,34 L 87,34" stroke-width="1.5" />
+        <circle cx="55" cy="10" r="1.5" />
+        <circle cx="80" cy="12" r="1.5" />
+      </svg>
+    </div>
+    <h1 class="login-title">欢迎来到 Rinnex</h1>
+    <p class="login-subtitle">你的专属一体化学习空间</p>
+    <div class="login-input-group">
+      <label>账号</label>
+      <input type="text" class="login-input" placeholder="请输入学号或邮箱" value="Alex">
+    </div>
+    <div class="login-input-group">
+      <label>密码</label>
+      <input type="password" class="login-input" placeholder="请输入密码" value="123456">
+    </div>
+    <button class="login-btn" onclick="handleLogin()">
+      <span>开启学习之旅</span>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+    </button>
+    <div class="login-footer">
+      还没有账号？ <a onclick="showToast('注册功能开发中...')">立即注册</a><br><br>
+      <span style="font-size:12px; opacity:0.6;">不登录 · 无云端 · 数据保存在本地</span>
+    </div>
+  </div>
+</div>
+
+<!-- =========================================
+     主应用界面
+     ========================================= -->
+<div class="shell">
+  <nav class="nav">
+    <svg class="nav-logo" viewBox="0 0 100 50" fill="none" stroke="var(--text-title)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 30,25 C 10,10 10,40 30,25 C 50,10 50,40 70,25 C 90,10 90,40 70,25" />
+      <path d="M 10,25 C 30,40 30,10 50,25 C 70,40 70,10 90,25" stroke-opacity="0.5"/>
+      <path d="M 70,25 L 70,38 M 70,25 C 80,25 80,15 75,15 M 70,15 L 75,38" stroke-width="2.5"/>
+      <path d="M 22,12 L 22,20 M 18,16 L 26,16" stroke-width="1.5" />
+      <circle cx="35" cy="35" r="2" />
+      <path d="M 72,18 L 72,22 M 70,20 L 74,20" stroke-width="1" />
+      <path d="M 85,32 L 85,36 M 83,34 L 87,34" stroke-width="1.5" />
+      <circle cx="55" cy="10" r="1.5" />
+      <circle cx="80" cy="12" r="1.5" />
+    </svg>
+    <div class="nav-menu">
+      <button class="nav-item active" onclick="nav('home', this)" title="主页">🏠</button>
+      <button class="nav-item" onclick="nav('chat', this)" title="伴学">💬</button>
+      <button class="nav-item" onclick="nav('livebook', this)" title="学习空间">📚</button>
+      <button class="nav-item" onclick="nav('mastery-main', this)" title="掌握路径">🚀</button>
+    </div>
+    <div class="nav-bottom">
+      <button class="nav-item" onclick="nav('settings', this)" title="设置">⚙️</button>
+      <button class="nav-item" onclick="nav('profile', this)" title="个人中心">👤</button>
+    </div>
+  </nav>
+
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main-container" id="main-area">
+    
+    <!-- 1. 全新首页看板 -->
+    <section id="page-home" class="page active">
+      <div class="home-header">
+        <h1 class="home-title">今天，你想探索点什么？</h1>
+        <p class="home-subtitle">在这里，所有的知识都为你无缝连接。</p>
+      </div>
+
+      <div class="home-grid">
+        <div class="glass-brick flow-ball-card">
+          <div class="brick-title" style="width: 100%;">路径完成率</div>
+          <div class="flow-ball-wrapper">
+            <div class="flow-ball-shadow"></div>
+            <div class="flow-ball">
+              <div class="flow-ball-text">44<span>%</span></div>
+            </div>
+          </div>
+          <div class="flow-ball-label">数据库系统 · 掌握路径</div>
+        </div>
+
+        <div class="glass-brick">
+          <div class="brick-title">本周学习快照</div>
+          <div class="stat-list">
+            <div class="stat-row"><div class="stat-label"><span class="stat-dot" style="background: var(--color-blue);"></span>练习正确率</div><div class="stat-val">78%</div></div>
+            <div class="stat-row"><div class="stat-label"><span class="stat-dot" style="background: var(--color-pink);"></span>任务完成率</div><div class="stat-val">85%</div></div>
+            <div class="stat-row"><div class="stat-label"><span class="stat-dot" style="background: var(--color-purple);"></span>连续打卡</div><div class="stat-val">6 <span style="font-size: 14px; font-weight: 600; color: var(--color-gray);">天</span></div></div>
+          </div>
+        </div>
+
+        <div class="glass-brick">
+          <div class="brick-title">当前模块进度 <span style="color: var(--color-gray); font-size: 13px; font-weight: 600;">6 / 12</span></div>
+          <div class="steps-container">
+            <div class="steps-line"><div class="steps-line-active"></div></div>
+            <div class="step-node done"></div><div class="step-node done"></div><div class="step-node active"></div><div class="step-node"></div><div class="step-node"></div>
+          </div>
+          <p class="step-desc">正在学习：<strong>第 5 章 · 索引优化</strong></p>
+        </div>
+
+        <div class="glass-brick brick-span-2">
+          <div class="brick-title">本周任务进度</div>
+          <div class="progress-group">
+            <div class="progress-head"><span>完成课程任务</span><span>80%</span></div>
+            <div class="progress-bar"><div class="progress-fill fill-pink-purple" style="width: 80%;"></div></div>
+          </div>
+          <div class="progress-group">
+            <div class="progress-head"><span>复习错题集</span><span>45%</span></div>
+            <div class="progress-bar"><div class="progress-fill fill-blue-green" style="width: 45%;"></div></div>
+          </div>
+        </div>
+
+        <div class="glass-brick time-card">
+          <div class="brick-title" style="width: 100%;">今日学习时长</div>
+          <div class="time-display">45<span class="time-unit">min</span></div>
+          <div class="time-hint">比昨天多学了 15 分钟，继续保持！</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. 笔记本 -->
+    <section id="page-notebook" class="page">
+      <div class="space-header"><div><h1 class="space-title">我的笔记本</h1><p class="space-subtitle">按科目记录灵感，梳理学习脉络。</p></div></div>
+      
+      <div class="notebook-wrapper">
+        <div class="notebook-holes">
+          <div class="notebook-hole"></div>
+          <div class="notebook-hole"></div>
+          <div class="notebook-hole"></div>
+        </div>
+        
+        <div class="notebook-paper">
+          <div class="note-item">
+            <div class="note-header">
+              <div class="note-title">北京的初春午后</div>
+              <div class="note-tag tag-purple"># 日常随笔</div>
+            </div>
+            <div class="note-content">窗外的玉兰花已经开始打苞了，渐变的紫色在阳光下显得格外迷人...</div>
+          </div>
+          
+          <div class="note-item">
+            <div class="note-header">
+              <div class="note-title">数据库系统：B+树</div>
+              <div class="note-tag tag-blue"># 专业课笔记</div>
+            </div>
+            <div class="note-content">尝试在理解B+树时结合索引的物理存储结构，不仅仅是视觉上的树状图，更是磁盘I/O读取的优化。</div>
+          </div>
+          
+          <div class="note-item">
+            <div class="note-header">
+              <div class="note-title">阅读《色彩的力量》</div>
+              <div class="note-tag tag-green"># 课外阅读</div>
+            </div>
+            <div class="note-content">蓝色代表宁静，紫色代表神秘，而渐变则是万物变化的本质。</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. 错题本 -->
+    <section id="page-mistakes" class="page">
+      <div class="mistake-layout">
+        <div class="mistake-main-area">
+          <h1 class="mistake-title">全部错题，一次归档清楚</h1>
+          <p class="space-subtitle" style="margin-bottom: 24px;">按考试、科目、错因找回每一道题。</p>
+          
+          <div class="feature-pills">
+            <div class="f-pill">🔍 支持搜索题目</div>
+            <div class="f-pill">🏷️ 可搜答案 / 错因 / 标签</div>
+            <div class="f-pill">📚 分类清楚</div>
+            <div class="f-pill">👁️ 复习状态一目了然</div>
+          </div>
+          
+          <div class="m-search-bar">
+            <input class="m-input" type="text" placeholder="搜索题目、答案、错因或标签...">
+            <select class="m-select"><option>全部错因</option><option>概念模糊</option><option>计算失误</option></select>
+          </div>
+          
+          <div class="m-list">
+            <div class="m-card" onclick="switchTrackerTab('analysis')">
+              <div>
+                <div class="m-card-text">求极限：当 x→0 时，(ln(1+x) - x + x²/2) / x³。</div>
+                <div class="m-card-tags">
+                  <span class="m-tag">考研 / 数学</span>
+                  <span class="m-tag danger">计算失误</span>
+                </div>
+              </div>
+              <span style="color:#E2E8F0; font-size: 20px;">></span>
+            </div>
+            
+            <div class="m-card" onclick="switchTrackerTab('analysis')">
+              <div>
+                <div class="m-card-text">关系型数据库中，哪种索引结构最适合范围查询？</div>
+                <div class="m-card-tags">
+                  <span class="m-tag">数据库 / 索引</span>
+                  <span class="m-tag warning">概念模糊</span>
+                </div>
+              </div>
+              <span style="color:#E2E8F0; font-size: 20px;">></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="mistake-side-panel">
+          <div class="tracker-tabs">
+            <button class="tracker-tab active" id="tab-tracker" onclick="switchTrackerTab('tracker')">复习轨迹</button>
+            <button class="tracker-tab" id="tab-analysis" onclick="switchTrackerTab('analysis')">错题解析</button>
+          </div>
+
+          <div class="tracker-content-card active" id="content-tracker">
+            <div class="rt-title">📊 你的学习记录</div>
+            <div class="rt-item"><span>📅 累计复习次数</span><span class="rt-value">28 次</span></div>
+            <div class="rt-item"><span>⏱️ 平均用时</span><span class="rt-value">1 分 42 秒</span></div>
+            <div class="rt-item"><span>✅ 良好及以上</span><span class="rt-value">21 次</span></div>
+            <div class="rt-quote">学过多少、复习了什么、哪题还不稳，都能留下痕迹。不是凭感觉学，而是让复习过程有记录、有反馈。</div>
+          </div>
+
+          <div class="tracker-content-card" id="content-analysis">
+            <div class="rt-title">🧠 错题解析助手</div>
+            <p style="font-size: 14px; color: var(--color-gray); margin-bottom: 20px; line-height: 1.6;">正在解析：关于极限计算的题目。</p>
+            <div style="background: #F8FAFC; border-radius: 12px; padding: 16px; font-size: 14px; line-height: 1.8; color: var(--text-title); flex: 1; overflow-y: auto;">
+              <strong>解题步骤：</strong><br><br>
+              1. 观察式子，当 x→0 时，分子分母均趋于 0。<br><br>
+              2. 使用泰勒展开：<br>
+              ln(1+x) ≈ x - x²/2 + x³/3 - ...<br><br>
+              3. 代入分子化简得到 x³/3。<br><br>
+              4. 原式 = (x³/3) / x³ = 1/3。
+            </div>
+            <button class="btn btn-primary" style="margin-top: 20px;" onclick="showToast('已加入待复习清单')">标记为已掌握</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. 伴学 -->
+    <section id="page-chat" class="page">
+      <div class="chat-layout">
+        <div class="chat-topbar">
+          <div class="chat-modes">
+            <button class="mode-btn active">💬 通用辅导</button>
+            <button class="mode-btn">✍️ 写作教练</button>
+            <button class="mode-btn">🧩 题目精解</button>
+          </div>
+          <div class="chat-topbar-right">
+            <button class="bookmark-btn" id="bookmarkBtn" onclick="toggleBookmark()" title="收藏此对话">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
+            </button>
+            <div class="partner-selector" onclick="togglePartners(event)">
+              <div class="partner-avatar" id="current-partner-avatar">🧑‍🏫</div>
+              <span class="partner-name" id="current-partner-name">严谨导师</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+              <div class="partner-dropdown" id="partner-menu">
+                <div class="partner-option" onclick="selectPartner('🧑‍🏫', '严谨导师', event)">
+                  <div class="avatar" style="background:#E8FAFF;">🧑‍🏫</div>
+                  <div><div style="font-weight:600; font-size:14px; color:var(--text-title);">严谨导师</div><div style="font-size:12px; color:#888;">讲究逻辑，按部就班</div></div>
+                </div>
+                <div class="partner-option" onclick="selectPartner('🤔', '苏格拉底', event)">
+                  <div class="avatar" style="background:#FFF0FE;">🤔</div>
+                  <div><div style="font-weight:600; font-size:14px; color:var(--text-title);">苏格拉底</div><div style="font-size:12px; color:#888;">不断追问，启发思考</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="chat-stream" id="chat-stream">
+          <div class="bubble-ai">你好！我是你的伴学伙伴。你可以问我任何问题，或者试试下方的 3D 模型快捷指令。</div>
+        </div>
+        <div class="chat-tools">
+          <button class="tool-chip" onclick="trigger3D('立体几何：正方体')"><span>🧊</span> 生成 3D 几何模型</button>
+          <button class="tool-chip" onclick="showToast('公式推导模式已就绪')"><span>📐</span> 详细公式推导</button>
+        </div>
+        <div class="chat-input-area">
+          <div class="chat-input-box">
+            <input type="text" id="chat-input" placeholder="发消息，或者问个问题..." onkeypress="handleEnter(event)">
+            <button class="send-btn" onclick="sendMessage()">↑</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. 掌握路径总览 -->
+    <section id="page-mastery-main" class="page">
+      <div class="mastery-header">
+        <div>
+          <h1 class="mastery-title">掌握路径 · 数据库系统</h1>
+          <p class="mastery-subtitle">5 个单元，按顺序推进。路径对话只出现在「路径对话」页。</p>
+        </div>
+        <button class="btn btn-primary" onclick="nav('mastery-chat')">开始路径对话</button>
+      </div>
+      <div class="mastery-progress-card">
+        <div class="m-progress-text">进度 40%</div>
+        <div class="m-progress-bar-wrap"><div class="m-progress-bar" id="progress-anim"></div></div>
+        <div style="font-size:14px; color:var(--color-gray); font-weight:600;">已完成 2 / 5</div>
+      </div>
+      <div class="mastery-list">
+        <div class="mastery-item done">
+          <div class="m-node"></div>
+          <div class="m-info">
+            <div class="m-title">索引基础 <span class="m-tag done">已完成</span></div>
+            <div class="m-desc">B+ 树、聚簇索引与二级索引</div>
+          </div>
+          <button class="m-btn outline" onclick="showToast('复习中...')">复习</button>
+        </div>
+        <div class="mastery-item done">
+          <div class="m-node"></div>
+          <div class="m-info">
+            <div class="m-title">执行计划 <span class="m-tag done">已完成</span></div>
+            <div class="m-desc">EXPLAIN 的 type、rows 与 Extra</div>
+          </div>
+          <button class="m-btn outline" onclick="showToast('复习中...')">复习</button>
+        </div>
+        <div class="mastery-item active">
+          <div class="m-node"></div>
+          <div class="m-info">
+            <div class="m-title">索引优化 <span class="m-tag active">进行中</span></div>
+            <div class="m-desc">覆盖索引、联合索引与索引失效</div>
+          </div>
+          <button class="m-btn primary" onclick="showToast('继续学习...')">继续</button>
+        </div>
+        <div class="mastery-item">
+          <div class="m-node"></div>
+          <div class="m-info">
+            <div class="m-title">事务与隔离级别 <span class="m-tag todo">未开始</span></div>
+            <div class="m-desc">ACID、MVCC 与幻读</div>
+          </div>
+          <button class="m-btn outline" onclick="showToast('开始学习...')">开始</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. 路径对话 -->
+    <section id="page-mastery-chat" class="page">
+      <div class="chat-layout">
+        <div class="chat-topbar" style="justify-content: flex-end;">
+          <span class="tag" style="background:rgba(0,0,0,0.05); padding:6px 12px; border-radius:8px; color:var(--color-gray); font-size:12px; font-weight:600;">mastery_path</span>
+        </div>
+        <div class="chat-stream">
+          <div class="bubble-user">为什么范围查询能用上索引，而函数包裹的列不能？</div>
+          <div class="bubble-ai">
+            索引是一棵按列值排好序的树。范围查询能利用这个顺序，从起点顺着叶子链表读下去；而 <code>WHERE DATE(created_at) = ...</code> 改变了参与比较的值，优化器无法把函数结果映射回索引上的有序位置，只能逐行计算，于是退化成全表扫描。<br><br>
+            想让这类查询走索引，要么改写成对列本身的范围条件（<code>created_at >= ... AND created_at < ...</code>），要么建立函数索引或生成列。
+          </div>
+        </div>
+        <div class="chat-tools">
+          <span class="tool-chip" style="background:var(--glass-bg); border:none; box-shadow:none; padding-left:0;">人格 · 严谨的数据库工程师 ∨</span>
+          <span class="tool-chip" style="background:var(--glass-bg); border:none; box-shadow:none;">知识库 · 数据库原理 ×</span>
+        </div>
+        <div class="chat-input-area">
+          <div class="chat-input-box">
+            <input type="text" placeholder="就这条路径提问...">
+            <button class="send-btn">↑</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. 学习地图 -->
+    <section id="page-mastery-map" class="page">
+      <div class="mastery-header">
+        <div>
+          <h1 class="mastery-title">学习地图</h1>
+          <p class="mastery-subtitle">同一批知识点按单元铺开，颜色表示掌握状态。</p>
+        </div>
+        <button class="btn btn-outline" onclick="nav('mastery-main')">回到路径</button>
+      </div>
+      <div style="display:flex; gap:12px; margin-bottom:24px; font-size:13px; font-weight:600;">
+        <span style="background:white; padding:6px 12px; border-radius:8px; border:1px solid #E2E8F0; color:#1f7a4d;">已掌握</span>
+        <span style="background:linear-gradient(135deg, var(--color-purple), var(--color-blue)); color:white; padding:6px 12px; border-radius:8px;">进行中</span>
+        <span style="background:rgba(255,255,255,0.4); padding:6px 12px; border-radius:8px; border:1px dashed rgba(0,0,0,0.1); color:var(--color-gray);">未开始</span>
+      </div>
+      <div class="map-section">
+        <div class="map-section-title">索引</div>
+        <div class="map-nodes">
+          <div class="map-pill done">B+ 树</div>
+          <div class="map-pill done">聚簇索引</div>
+          <div class="map-pill done">二级索引</div>
+          <div class="map-pill active">覆盖索引</div>
+          <div class="map-pill active">联合索引</div>
+          <div class="map-pill todo">索引失效</div>
+        </div>
+      </div>
+      <div class="map-section">
+        <div class="map-section-title">查询</div>
+        <div class="map-nodes">
+          <div class="map-pill done">EXPLAIN</div>
+          <div class="map-pill done">回表</div>
+          <div class="map-pill active">深分页</div>
+          <div class="map-pill todo">优化器</div>
+        </div>
+      </div>
+      <div class="map-section">
+        <div class="map-section-title">事务</div>
+        <div class="map-nodes">
+          <div class="map-pill done">ACID</div>
+          <div class="map-pill active">隔离级别</div>
+          <div class="map-pill todo">MVCC</div>
+          <div class="map-pill todo">间隙锁</div>
+          <div class="map-pill todo">死锁</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 8. 活书 -->
+    <section id="page-livebook" class="page">
+      <div class="space-header"><div><h1 class="space-title">我的活书</h1><p class="space-subtitle">知识库文档智能整理成书，随时回到对话。</p></div></div>
+      <div class="bento-grid">
+        <div class="bento-card b-large card-livebook" onclick="nav('reading')"><span class="bento-tag" style="background:#E8FAFF; color:#0099CC;">📖 正在阅读</span><h3>《数据库系统概念》</h3><p>作者：Silberschatz 等<br>已读 42% · 由知识库自动生成</p><div class="book-cover-3d">数据库系统</div></div>
+        <div class="bento-card b-tall card-citation"><span class="bento-tag" style="background:#FFF0FE; color:#B18CFF;">🔗 对话引用溯源</span><h3>最近被 AI 引用的资料</h3><p style="margin-bottom: 12px;">AI 的回答都有迹可循。</p><div class="citation-list"><div class="citation-item"><span style="background:#E8FAFF; color:#0099CC; padding:2px 6px; border-radius:4px;">PDF</span> 数据库系统概念.pdf</div></div></div>
+        <div class="bento-card b-medium" style="background: linear-gradient(135deg, #FFF9E6, #FEDD76);" onclick="nav('kb')"><span class="bento-tag" style="background:rgba(255,255,255,0.5); color:#B8860B;">🗂️ 源文件</span><h3>查看知识库文件</h3><p>管理《数据库系统概念》的原始 PDF 与笔记。</p></div>
+        <div class="bento-card b-small" style="background: linear-gradient(135deg, #F4F7F9, #E8FAFF);" onclick="nav('reading')"><span style="font-size:32px; margin-bottom:8px;">📑</span><h3>沉浸阅读</h3></div>
+        <div class="bento-card b-small" style="background: linear-gradient(135deg, #F4F7F9, #FFF0FE);" onclick="nav('market')"><span style="font-size:32px; margin-bottom:8px;">🛒</span><h3>去市场看看</h3></div>
+      </div>
+    </section>
+
+    <!-- 9. 知识库 -->
+    <section id="page-kb" class="page">
+      <div class="kb-header"><div><h1 class="space-title" style="font-size: 28px;">知识库：数据库原理</h1><p class="space-subtitle">这里存放着你上传的所有源文件。</p></div></div>
+      <div class="kb-doc-card"><div class="kb-doc-info"><div class="kb-icon">PDF</div><div><h4 style="margin: 0 0 4px 0; color: var(--text-title); font-size: 16px;">数据库系统概念.pdf</h4><span style="font-size: 13px; color: var(--color-gray);">3.2 MB · 486 个片段 · 已解析</span></div></div><div style="display:flex; gap:12px;"><button class="btn btn-outline" onclick="nav('reading')">进入沉浸阅读</button><button class="btn btn-primary" onclick="nav('livebook')">转为活书</button></div></div>
+    </section>
+
+    <!-- 10. 资料市场 -->
+    <section id="page-market" class="page">
+      <div class="space-header"><div><h1 class="space-title">资料市场</h1><p class="space-subtitle">发现优质的教材、讲义与真题，一键加入你的知识库。</p></div></div>
+      <div class="market-grid">
+        <div class="market-card"><div class="market-cover" style="background: linear-gradient(135deg, #E8FAFF, #66D2F5);">📘</div><h3 style="margin: 0 0 8px 0; font-size: 18px; color: var(--text-title);">《数据库系统概念》</h3><p style="font-size: 13px; color: var(--color-gray); margin-bottom: 20px;">经典黑皮书，涵盖数据库底层原理与实现。</p><button class="btn btn-primary" onclick="showToast('已加入知识库')">加入知识库</button></div>
+      </div>
+    </section>
+
+    <!-- 11. 沉浸阅读 -->
+    <section id="page-reading" class="page" style="padding: 16px;">
+      <div class="reading-layout">
+        <div class="reading-toc">
+          <div class="toc-back" onclick="nav('livebook')"><span>←</span> 返回《数据库系统概念》活书</div>
+          <div class="toc-title"><span>📑 章节目录</span></div>
+          <div class="toc-item active">第二章 索引与散列</div>
+          <div class="toc-item toc-sub" style="color:#0099CC; font-weight:700;">2.2 B+ 树索引</div>
+        </div>
+        <div class="reader-main" id="reader-box">
+          <h1 class="reader-title">2.2 B+ 树索引</h1>
+          <p class="reader-meta">来源：《数据库系统概念》 · 1,240 字</p>
+          <div class="reader-text" id="reader-text">
+            <p>B+ 树是关系型数据库中最常用的索引结构。与二叉搜索树不同，B+ 树是一种多路搜索树，它的每个节点可以包含多个键值和多个子节点，从而极大地降低了树的高度，减少了磁盘 I/O 的次数。</p>
+            <p>在 B+ 树中，所有的数据记录都存储在叶子节点上，并且叶子节点之间通过指针相互连接，形成了一个有序链表。这个特性使得 B+ 树不仅支持高效的等值查询，还极其适合范围查询。</p>
+          </div>
+          <div class="sel-bubble" id="sel-bubble" onclick="askAI()">✨ 让 AI 解释这段话</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 12. 收藏夹 -->
+    <section id="page-favorites" class="page">
+      <div class="space-header"><div><h1 class="space-title">灵感收藏夹</h1><p class="space-subtitle">你留下的每一次顿悟，都在这里闪闪发光。</p></div></div>
+      <div class="fav-masonry">
+        <div class="fav-card" style="background: #FAFAFC;"><div class="fav-card-header"><span class="fav-type type-chat">💬 对话灵感</span><span class="fav-icon">🤖</span></div><div class="fav-content">“为什么 B+ 树比哈希表更适合范围查询？因为 B+ 树的叶子节点是有序的且用链表串联。”</div><div class="fav-footer"><span>来自：伴学 · 苏格拉底</span><span>今天 14:20</span></div></div>
+        <div class="fav-card" style="background: #F4F9FF; border-color: #E0F0FF;"><div class="fav-card-header"><span class="fav-type type-knowledge">🧠 知识卡片</span><span class="fav-icon">💡</span></div><div class="fav-content"><strong style="color:#0099CC; display:block; margin-bottom:8px;">回表 (Back to Table)</strong>指通过二级索引找到主键后，再回到聚簇索引查找完整行数据的过程。</div><div class="fav-footer"><span>来自：沉浸阅读</span><span>昨天</span></div></div>
+        <div class="fav-card" style="background: #FFFBF2; border-color: #FFEAC2;"><div class="fav-card-header"><span class="fav-type type-book">📚 书籍片段</span><span class="fav-icon">📖</span></div><div class="fav-content">“索引设计的目标不是覆盖所有查询，而是覆盖最重要的那几条。”<br><span style="font-size:13px; color:#D4A017; margin-top:8px; display:block;">——《数据库系统概念》</span></div><div class="fav-footer"><span>来自：资料库</span><span>10 月 24 日</span></div></div>
+        <div class="fav-card" style="background: #FAFAFC;"><div class="fav-card-header"><span class="fav-type type-chat">💬 对话灵感</span><span class="fav-icon">🤖</span></div><div class="fav-content">“事务隔离级别解决的是并发事务之间的可见性问题。级别越高，读越稳定，并发越差。”</div><div class="fav-footer"><span>来自：伴学 · 严谨导师</span><span>昨天</span></div></div>
+      </div>
+    </section>
+
+    <!-- 13. 设置页面 -->
+    <section id="page-settings" class="page">
+      <div class="settings-header">
+        <h1 class="settings-title">设置</h1>
+        <p class="settings-subtitle">掌控工作区、备份和本地目录。</p>
+      </div>
+      <div class="privacy-banner">
+        <span>🛡️</span> 不登录 · 无云端 · 数据保存在你自己的设备上
+      </div>
+      <div class="settings-card">
+        <div class="settings-card-left">
+          <h3>本地工作区</h3>
+          <p>绑定后会在所选文件夹中维护可读的 notebook.json，并保留设备内副本。</p>
+          <div class="settings-folder-path">📁 我的错题本 (2 道错题 · 1 条复习记录)</div>
+        </div>
+        <div class="settings-card-right">
+          <button class="btn btn-outline" onclick="showToast('打开文件夹')">打开文件夹</button>
+          <button class="btn btn-primary" onclick="showToast('选择文件夹')">选择文件夹</button>
+        </div>
+      </div>
+      <div class="settings-card">
+        <div class="settings-card-left">
+          <h3>备份与恢复</h3>
+          <p>备份包含题目元数据、图片和复习记录；导入前会先校验文件结构。</p>
+        </div>
+        <div class="settings-card-right">
+          <button class="btn btn-outline" onclick="showToast('导出备份')">📤 导出备份</button>
+          <button class="btn btn-outline" onclick="showToast('从备份恢复')">📥 从备份恢复</button>
+        </div>
+      </div>
+      <div class="settings-card">
+        <div class="settings-card-left">
+          <h3>回收站</h3>
+          <p>仅永久清理删除已满 30 天的内容。近期误删仍可恢复。</p>
+        </div>
+        <div class="settings-card-right">
+          <button class="btn btn-outline" style="color:#DC2626; border-color:#FCA5A5;" onclick="showToast('已清理到期内容')">🗑️ 清理到期内容</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 14. 个人中心 -->
+    <section id="page-profile" class="page">
+      <div class="mastery-header" style="margin-bottom: 24px;">
+        <div><h1 class="mastery-title">个人中心</h1></div>
+        <button class="btn btn-outline" onclick="showToast('编辑资料')">编辑资料</button>
+      </div>
+      <div class="profile-header-card">
+        <div class="profile-avatar-lg">👦🏻</div>
+        <div class="profile-info">
+          <div class="profile-name-row">
+            <div class="profile-name">Alex Chen</div>
+            <div class="profile-level">Lv.36 数据库狂热者</div>
+          </div>
+          <div class="profile-bio">在 Rinnex 探索知识的边界，保持好奇。✨</div>
+          <div class="profile-stats-row">
+            <div class="p-stat"><span class="p-stat-val">1336</span><span class="p-stat-label">陪伴天数</span></div>
+            <div class="p-stat"><span class="p-stat-val">2280</span><span class="p-stat-label">已学知识点</span></div>
+            <div class="p-stat"><span class="p-stat-val">7.5h</span><span class="p-stat-label">本周学习</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="profile-actions-grid">
+        <div class="p-action-card" onclick="nav('favorites')">
+          <div class="p-action-icon" style="background:#FFF9E6; color:#D4A017;">⭐</div>
+          <div class="p-action-text"><h4>我的收藏</h4><p>收藏的对话与知识点</p></div>
+        </div>
+        <div class="p-action-card" onclick="nav('mistakes')">
+          <div class="p-action-icon" style="background:#FEE2E2; color:#DC2626;">📝</div>
+          <div class="p-action-text"><h4>错题本</h4><p>已归档 28 道易错题</p></div>
+        </div>
+      </div>
+      <div class="profile-list">
+        <div class="p-list-item" onclick="showToast('打开账号设置')">
+          <div class="p-list-left"><span>👤</span> 账号与安全</div>
+          <div class="p-list-right">已绑定本地 <span style="color:#E2E8F0;">></span></div>
+        </div>
+        <div class="p-list-item" onclick="nav('settings')">
+          <div class="p-list-left"><span>💾</span> 存储与备份</div>
+          <div class="p-list-right">已用 124 MB <span style="color:#E2E8F0;">></span></div>
+        </div>
+        <div class="p-list-item" onclick="showToast('打开通知设置')">
+          <div class="p-list-left"><span>🔔</span> 消息通知</div>
+          <div class="p-list-right">已开启 <span style="color:#E2E8F0;">></span></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <aside class="panel" id="context-panel">
+    <div class="panel-title" id="panel-title">✨ 上下文助手</div>
+    <div id="panel-content" style="flex:1; overflow-y:auto; font-size:14px; line-height:1.6; color:var(--color-gray);"></div>
+  </aside>
+</div>
+
+<!-- 3D 模型弹窗 -->
+<div class="modal-overlay" id="modal3D" onclick="close3D(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <button class="modal-close" onclick="close3D(event)">✕</button>
+    <h3 class="modal-title">3D 立体几何展示</h3>
+    <div class="css-3d-scene">
+      <div class="css-3d-cube">
+        <div class="css-3d-face face-front">面 ABCD</div><div class="css-3d-face face-back">面 EFGH</div>
+        <div class="css-3d-face face-right">面 CDGH</div><div class="css-3d-face face-left">面 ABEF</div>
+        <div class="css-3d-face face-top">面 ADEH</div><div class="css-3d-face face-bottom">面 BCFG</div>
+      </div>
+    </div>
+    <p style="color:var(--color-gray); font-size:14px; margin-top:40px;">* 实际产品中将在此处加载 Three.js 渲染的真实模型。</p>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+  let currentView = 'home';
+
+  // --- 登录逻辑 ---
+  function handleLogin() {
+    const btn = document.querySelector('.login-btn');
+    btn.innerHTML = `<span>正在登录...</span>`;
+    btn.style.opacity = '0.8';
+    setTimeout(() => {
+      document.getElementById('login-page').classList.add('hidden');
+      showToast('登录成功，欢迎回到 Rinnex！');
+      renderSidebar('home');
+    }, 800);
+  }
+
+  const SPACE_SIDEBAR = { title: '学习空间', items: [
+    { label: '📖 我的活书', view: 'livebook' },
+    { label: '🗂️ 知识库', view: 'kb' },
+    { label: '📑 沉浸阅读', view: 'reading' },
+    { label: '🛒 资料市场', view: 'market' }
+  ] };
+
+  const MASTERY_SIDEBAR = { title: '掌握路径', items: [
+    { label: '🚀 路径总览', view: 'mastery-main' },
+    { label: '💬 路径对话', view: 'mastery-chat' },
+    { label: '🗺️ 学习地图', view: 'mastery-map' }
+  ] };
+
+  const SETTINGS_SIDEBAR = { title: '设置项', items: [
+    { label: '⚙️ 偏好设置', action: "showToast('当前已在设置页')" },
+    { label: '🗂️ 本地目录', action: "showToast('目录管理')" },
+    { label: '☁️ 云同步', action: "showToast('当前处于无云端模式')" }
+  ] };
+
+  const PROFILE_SIDEBAR = { title: '个人中心', items: [
+    { label: '👤 个人资料', action: "showToast('当前已在个人中心')" },
+    { label: '🏅 我的成就', action: "showToast('查看成就')" },
+    { label: '📊 学习报表', action: "showToast('查看报表')" }
+  ] };
+
+  // 核心配置：包含笔记本和错题本的分类选项
+  const SIDEBAR_DATA = {
+    home: { title: '快捷入口', items: [ 
+      { label: '最近学习', action: "showToast('加载最近学习...')" }, 
+      { label: '⭐ 收藏夹', action: "nav('favorites')" }, 
+      { label: '📝 错题本', action: "nav('mistakes')" },
+      { label: '📓 笔记本', action: "nav('notebook')" }
+    ] },
+    chat: { title: '历史会话', items: [{ label: '立体几何 3D 模型', action: "" }, { label: 'InnoDB 聚簇索引', action: "" }] },
+    livebook: SPACE_SIDEBAR,
+    kb: SPACE_SIDEBAR,
+    reading: SPACE_SIDEBAR,
+    market: SPACE_SIDEBAR,
+    'mastery-main': MASTERY_SIDEBAR,
+    'mastery-chat': MASTERY_SIDEBAR,
+    'mastery-map': MASTERY_SIDEBAR,
+    settings: SETTINGS_SIDEBAR,
+    profile: PROFILE_SIDEBAR,
+    favorites: { title: '收藏分类', items: [ { label: '全部收藏', action: "" }, { label: '💬 对话灵感', action: "" }, { label: '🧠 知识卡片', action: "" }, { label: '📚 书籍片段', action: "" } ] },
+    mistakes: { title: '错题本分类', items: [ { label: '📺 今日复习', action: "" }, { label: '📥 收集箱', action: "" }, { label: '🗂️ 全部错题', action: "" }, { label: '⏱️ 复习记录', action: "" } ] },
+    notebook: { title: '笔记分类', items: [ { label: '全部笔记', action: "" }, { label: '# 日常随笔', action: "" }, { label: '# 专业课笔记', action: "" }, { label: '# 课外阅读', action: "" } ] }
+  };
+
+  function nav(view, btn) {
+    currentView = view;
+    document.querySelectorAll('.nav-item').forEach((el) => el.classList.remove('active'));
+    
+    if (['livebook', 'kb', 'reading', 'market'].includes(view)) {
+      document.querySelectorAll('.nav-item')[2].classList.add('active'); 
+    } else if (['mastery-main', 'mastery-chat', 'mastery-map'].includes(view)) {
+      document.querySelectorAll('.nav-item')[3].classList.add('active'); 
+    } else if (['favorites', 'mistakes', 'notebook'].includes(view)) {
+      document.querySelectorAll('.nav-item')[0].classList.add('active'); 
+    } else if (view === 'settings') {
+      document.querySelectorAll('.nav-bottom .nav-item')[0].classList.add('active');
+    } else if (view === 'profile') {
+      document.querySelectorAll('.nav-bottom .nav-item')[1].classList.add('active');
+    } else if (btn) {
+      btn.classList.add('active');
+    }
+
+    document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+    const page = document.getElementById('page-' + view);
+    if(page) page.classList.add('active');
+
+    renderSidebar(view);
+    updateContextPanel(view);
+
+    if (view === 'mastery-main') {
+      setTimeout(() => {
+        const bar = document.getElementById('progress-anim');
+        if(bar) bar.style.width = '40%';
+      }, 100);
+    }
+  }
+
+  function renderSidebar(view) {
+    const sidebar = document.getElementById('sidebar');
+    const data = SIDEBAR_DATA[view] || SIDEBAR_DATA.home;
+    
+    let html = `<div class="sidebar-header">${data.title}</div><div class="sidebar-list">`;
+    data.items.forEach((item) => {
+      let isActive = false;
+      if (item.view === view) isActive = true;
+      if (view === 'notebook' && item.label.includes('全部笔记')) isActive = true;
+      if (view === 'mistakes' && item.label.includes('全部错题')) isActive = true;
+      
+      const clickAction = item.view ? `nav('${item.view}')` : (item.action || `showToast('切换到：${item.label}')`);
+      html += `<button class="sidebar-item ${isActive ? 'active' : ''}" onclick="${clickAction}">${item.label}</button>`;
+    });
+    html += `</div>`;
+    sidebar.innerHTML = html;
+  }
+
+  // 错题本右侧 Tab 切换逻辑
+  function switchTrackerTab(target) {
+    const tabTracker = document.getElementById('tab-tracker');
+    const tabAnalysis = document.getElementById('tab-analysis');
+    const contentTracker = document.getElementById('content-tracker');
+    const contentAnalysis = document.getElementById('content-analysis');
+
+    if (!tabTracker) return;
+
+    if (target === 'tracker') {
+      tabTracker.classList.add('active');
+      tabAnalysis.classList.remove('active');
+      contentTracker.classList.add('active');
+      contentAnalysis.classList.remove('active');
+    } else {
+      tabAnalysis.classList.add('active');
+      tabTracker.classList.remove('active');
+      contentAnalysis.classList.add('active');
+      contentTracker.classList.remove('active');
+    }
+  }
+
+  function updateContextPanel(view) {
+    const panel = document.getElementById('context-panel');
+    const title = document.getElementById('panel-title');
+    const content = document.getElementById('panel-content');
+
+    if (view === 'profile') {
+      panel.classList.add('active');
+      title.innerHTML = '🏅 学习成就';
+      content.innerHTML = `<p>你已解锁成就：</p><div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;"><span style="background:#FFF9E6; color:#D4A017; padding:6px 12px; border-radius:8px; font-size:12px; font-weight:700;">🔥 连续打卡 7 天</span><span style="background:#E8FAFF; color:#0099CC; padding:6px 12px; border-radius:8px; font-size:12px; font-weight:700;">📚 阅读 5 本书</span><span style="background:#FFF0FE; color:#B18CFF; padding:6px 12px; border-radius:8px; font-size:12px; font-weight:700;">💬 对话 100 次</span></div>`;
+    } else if (view === 'settings') {
+      panel.classList.add('active');
+      title.innerHTML = '🛡️ 数据隐私保护';
+      content.innerHTML = `<p style="font-weight:700; color:#1f7a4d; margin-bottom:12px;">你的数据完全属于你。</p><p>Rinnex 采用纯本地架构，所有的对话、错题、文档都在你的电脑上。我们不收集任何个人隐私数据。</p><div style="margin-top:20px;"><button class="btn btn-outline" style="width:100%;" onclick="showToast('查看隐私协议')">查看隐私协议</button></div>`;
+    } else if (view === 'mastery-main' || view === 'mastery-map') {
+      panel.classList.add('active');
+      title.innerHTML = '🧭 学习路径引导';
+      content.innerHTML = `<p>你的学习轨迹已记录。</p><div style="margin-top:20px; padding:16px; background:linear-gradient(135deg, #FFF0FE, #E8FAFF); border-radius:12px; border:1px solid rgba(177,140,255,0.2);"><p style="margin:0 0 8px 0; font-weight:700; color:var(--color-purple);">💡 AI 建议</p><p style="margin:0; font-size:13px;">你目前在「索引优化」单元停留较久。建议尝试让伴学 AI 结合题目给你讲一道实战案例。</p></div>`;
+    } else if (view === 'chat' || view === 'mastery-chat') {
+      panel.classList.add('active');
+      title.innerHTML = '🧠 知识图谱';
+      content.innerHTML = `<p>当前讨论：<strong>${view === 'chat' ? '递归与栈' : '索引优化与执行计划'}</strong></p><div style="margin-top:16px;"><span style="background:#FFF0FE; color:#B18CFF; padding:4px 8px; border-radius:6px; font-size:12px;">相关概念</span><br>函数调用栈、基线条件。</div>`;
+    } else if (view === 'reading') {
+      panel.classList.add('active');
+      title.innerHTML = '💡 文献问答助手';
+      content.innerHTML = `<div style="background:white; padding:16px; border-radius:12px; border:1px solid #E2E8F0; margin-bottom:16px;"><p style="margin:0 0 8px 0; font-weight:700; color:var(--text-title);">📌 当前文献</p><p style="margin:0; font-size:13px;">《数据库系统概念》<br>2.2 B+ 树索引</p></div><button class="btn btn-outline" style="width:100%;" onclick="showToast('请在左侧选中文字以发起新提问')">发起新提问</button>`;
+    } else if (view === 'kb') {
+      panel.classList.add('active');
+      title.innerHTML = '⚙️ 知识库操作';
+      content.innerHTML = `<p>你可以在左侧选择文档，直接进入沉浸阅读，或者一键转为活书。</p>`;
+    } else if (view === 'livebook') {
+      panel.classList.add('active');
+      title.innerHTML = '📚 关于活书';
+      content.innerHTML = `<p>活书是由知识库源文件生成的互动式书籍。点击左侧卡片即可进入沉浸阅读。</p>`;
+    } else if (view === 'favorites') {
+      panel.classList.add('active');
+      title.innerHTML = '🔗 关联知识图谱';
+      content.innerHTML = `<p>你收藏的内容主要围绕：</p><div style="margin-top:16px;"><span style="background:#FFF0FE; color:#B18CFF; padding:4px 8px; border-radius:6px; font-size:12px;">数据库原理</span> <span style="background:#E8FAFF; color:#0099CC; padding:4px 8px; border-radius:6px; font-size:12px;">索引优化</span></div>`;
+    } else if (view === 'mistakes' || view === 'notebook') {
+      panel.classList.remove('active');
+    } else {
+      panel.classList.remove('active');
+    }
+  }
+
+  // --- 学伴页面的交互 ---
+  function toggleBookmark() {
+    const btn = document.getElementById('bookmarkBtn');
+    btn.classList.toggle('active');
+    showToast(btn.classList.contains('active') ? '⭐ 对话已收藏' : '已取消收藏');
+  }
+
+  function togglePartners(e) {
+    e.stopPropagation();
+    document.getElementById('partner-menu').classList.toggle('show');
+  }
+  
+  function selectPartner(emoji, name, e) {
+    e.stopPropagation();
+    document.getElementById('current-partner-avatar').textContent = emoji;
+    document.getElementById('current-partner-name').textContent = name;
+    document.getElementById('partner-menu').classList.remove('show');
+    showToast(`已切换至：${name}`);
+  }
+
+  document.addEventListener('click', () => {
+    document.getElementById('partner-menu').classList.remove('show');
+  });
+
+  function handleEnter(e) { if (e.key === 'Enter') sendMessage(); }
+  
+  function trigger3D(topic) {
+    document.getElementById('chat-input').value = topic;
+    sendMessage();
+  }
+
+  function sendMessage() {
+    const input = document.getElementById('chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    const stream = document.getElementById('chat-stream');
+    stream.innerHTML += `<div class="bubble-user">${text}</div>`;
+    input.value = '';
+    stream.scrollTop = stream.scrollHeight;
+
+    setTimeout(() => {
+      const aiDiv = document.createElement('div');
+      aiDiv.className = 'bubble-ai';
+      let content = `收到！关于“${text}”，我为你整理了核心要点。<br><br>这里的知识点非常容易出现在期末考试中。`;
+      
+      if (text.includes('几何') || text.includes('3D') || text.includes('正方体')) {
+        content += `<br><br>为了帮你更直观地理解空间结构，我为你生成了这个几何体的三维模型：
+          <div class="ai-3d-card" onclick="open3D()">
+            <div class="ai-3d-icon">🧊</div>
+            <div class="ai-3d-text"><h4>查看 3D 交互模型</h4><p>支持旋转、缩放观察各个面</p></div>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-purple)" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </div>`;
+      }
+
+      content += `<div class="ai-actions">
+          <button class="ai-btn" onclick="showToast('已保存至活书章节')">📚 保存为活书章节</button>
+          <button class="ai-btn" onclick="showToast('已加入错题本')">📌 加入错题本</button>
+        </div>`;
+
+      aiDiv.innerHTML = content;
+      stream.appendChild(aiDiv);
+      stream.scrollTop = stream.scrollHeight;
+    }, 800);
+  }
+
+  function open3D() { document.getElementById('modal3D').classList.add('show'); }
+  function close3D(e) { if(e) e.stopPropagation(); document.getElementById('modal3D').classList.remove('show'); }
+
+  // --- 阅读页面交互 ---
+  const readerBox = document.getElementById('reader-box');
+  const selBubble = document.getElementById('sel-bubble');
+  if(readerBox) {
+    readerBox.addEventListener('mouseup', (e) => {
+      const selection = window.getSelection();
+      if (selection.toString().length > 0 && e.target.tagName === 'P') {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        selBubble.style.display = 'flex';
+        selBubble.style.left = `${rect.left + rect.width / 2 - 80}px`;
+        selBubble.style.top = `${rect.top - 50}px`; 
+      } else {
+        selBubble.style.display = 'none';
+      }
+    });
+  }
+
+  function askAI() {
+    selBubble.style.display = 'none';
+    const text = window.getSelection().toString();
+    showToast(`已将选中内容发送至右侧问答助手`);
+    const content = document.getElementById('panel-content');
+    content.innerHTML = `<div style="background:white; padding:16px; border-radius:12px; border:1px solid #E2E8F0; margin-bottom:16px;"><p style="margin:0 0 8px 0; font-weight:700; color:var(--text-title);">📌 当前文献</p><p style="margin:0; font-size:13px;">《数据库系统概念》<br>2.2 B+ 树索引</p></div><p style="font-weight:700; color:var(--color-purple); margin-bottom:8px;">你的提问：</p><div style="background:#F8FAFC; padding:12px; border-radius:8px; font-size:13px; margin-bottom:12px;">“${text}”</div><p style="font-weight:700; color:var(--text-title); margin-bottom:8px;">AI 解答：</p><div style="background:#FFF0FE; padding:12px; border-radius:8px; font-size:13px; color:var(--text-title); line-height:1.8;">使用链表相连是为了支持高效的<strong>范围查询</strong>。因为叶子节点是有序的，通过链表可以顺序遍历，无需回到根节点重新查找。</div>`;
+  }
+
+  function showToast(message) {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = 'toast-msg';
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+  }
+
+  window.onload = () => { 
+    // 页面加载后不做额外操作，等待用户点击登录
+  };
+</script>
+<script>window.addEventListener("load",function(){try{nav("chat")}catch(e){document.title="ERR:"+e.message}})</script><script>window.addEventListener("load",function(){try{nav("chat")}catch(e){}})</script></body>
+</html>

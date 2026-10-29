@@ -5,6 +5,7 @@ import type { ReadingMaterial } from '../../../api/reading'
 import SkeletonBlock from '../../../components/common/SkeletonBlock.vue'
 import { READING } from '../../../copy/reading'
 import { formatDate } from '../../../shared/format'
+import AppIcon from '../../../components/common/AppIcon.vue'
 
 defineProps<{
   materials: ReadingMaterial[]
@@ -20,12 +21,16 @@ defineEmits<{
 
 <template>
   <aside class="materials">
-    <header class="materials__head">
-      <h2 class="materials__title">{{ READING.materials }}</h2>
-      <button type="button" class="link" @click="$emit('openFile')">
-        {{ READING.openFromFile }}
-      </button>
-    </header>
+    <!-- 演示稿目录卡的第一块是「返回」，这里对应「从文件打开」。 -->
+    <button type="button" class="toc-back" @click="$emit('openFile')">
+      <AppIcon name="folder" />
+      {{ READING.openFromFile }}
+    </button>
+
+    <h2 class="materials__title">
+      <AppIcon name="reading" />
+      {{ READING.materials }}
+    </h2>
 
     <SkeletonBlock v-if="loading" :lines="6" :line-height="34" />
 

@@ -16,6 +16,7 @@ import EmptyState from '../common/EmptyState.vue'
 import FailureState from '../common/FailureState.vue'
 import type { ApiFailure } from '../../api/client'
 import { CHAT } from '../../copy/chat'
+import AppIcon from '../common/AppIcon.vue'
 
 export interface PickerItem {
   id: string
@@ -64,7 +65,7 @@ function close(): void {
     <header class="picker__head">
       <h2 class="picker__title">{{ title }}</h2>
       <button type="button" class="picker__close" :aria-label="CHAT.closePicker" @click="close">
-        ✕
+        <AppIcon name="close" />
       </button>
     </header>
 
@@ -114,14 +115,18 @@ function close(): void {
   width: min(480px, calc(100vw - 40px));
   max-height: min(560px, calc(100vh - 80px));
   padding: 0;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: rgb(255 255 255 / 92%);
   color: var(--text);
+  box-shadow: 0 24px 64px -12px rgb(51 68 85 / 20%);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
 }
 
 .picker::backdrop {
-  background: rgb(20 26 38 / 35%);
+  background: rgb(20 26 38 / 25%);
+  backdrop-filter: blur(6px);
 }
 
 .picker__head {
@@ -154,7 +159,7 @@ function close(): void {
   margin: 0;
   padding: 0 16px 10px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.6;
 }
 
@@ -167,7 +172,7 @@ function close(): void {
 .picker__loading {
   padding: 24px 6px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .picker__list {
@@ -202,7 +207,7 @@ function close(): void {
 
 .picker__label {
   overflow: hidden;
-  font-size: 13px;
+  font-size: 14px;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -210,7 +215,7 @@ function close(): void {
 .picker__detail {
   grid-column: 2;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .picker__foot {
@@ -222,7 +227,7 @@ function close(): void {
 
 .picker__count {
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .picker__done {
@@ -231,7 +236,7 @@ function close(): void {
   border-radius: var(--radius-sm);
   background: var(--accent);
   color: #fff;
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
 }
 </style>

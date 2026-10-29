@@ -16,6 +16,11 @@ const (
 	materialIDPrefix = "rm_"
 	markIDPrefix     = "rmk_"
 	idRandomBytes    = 16
+
+	// bookmarkExcerptChars is how much of a saved passage the favourites list
+	// carries. A card shows a line or two; the coordinate is what opens the
+	// rest, so reading more here would only be read to be thrown away.
+	bookmarkExcerptChars = 160
 )
 
 // Service owns the rules about the reading layer: which materials the catalogue
@@ -228,6 +233,45 @@ func (s *Service) Marks(ctx context.Context, materialID string, caller authz.Cal
 		return nil, err
 	}
 	return s.repository.Marks(ctx, strings.TrimSpace(materialID), caller)
+}
+
+// Bookmarks lists every bookmark the caller has saved, newest first.
+//
+// Each one carries the first characters of the passage it covers, so a
+// favourites page is drawn from one read. A bookmark whose words cannot be read
+// — a material with no document behind it, or a coordinate the text has since
+// moved past — comes back with no excerpt rather than failing the list: the
+// bookmark is the reader's own filing, and it is still one when the words at it
+// cannot be shown. What it is not is quietly dropped, which would make somebody
+// else's storage problem look like the reader never saved anything.
+func (s *Service) Bookmarks(ctx context.Context, caller authz.Caller) ([]Bookmark, error) {
+	saved, err := s.repository.Bookmarks(ctx, caller)
+	if err != nil {
+		return nil, err
+	}
+	for i := range saved {
+		saved[i].Text = s.excerptOf(ctx, saved[i], caller)
+	}
+	return saved, nil
+}
+
+// excerptOf reads the beginning of a bookmark's passage, cut to the length a
+// card shows.
+func (s *Service) excerptOf(ctx context.Context, bookmark Bookmark, caller authz.Caller) string {
+	contentID := bookmark.Material.ContentID
+	start := bookmark.Mark.Locator.CharStart
+	end := bookmark.Mark.Locator.CharEnd
+	if contentID == "" || end <= start {
+		return ""
+	}
+	if end-start > bookmarkExcerptChars {
+		end = start + bookmarkExcerptChars
+	}
+	excerpt, err := s.documents.Text(ctx, contentID, start, end, caller)
+	if err != nil {
+		return ""
+	}
+	return excerpt
 }
 
 // AddMark writes one bookmark, highlight or note.

@@ -1,0 +1,137 @@
+/* 演示稿的 `.panel` / `.panel-title` 与那条「当前文献 → 你的提问 → AI 解答」
+   的记录：玻璃卡、白文献卡、灰问题块、淡紫答案块。
+   宽度、留白与字号对齐对话页的 `SidePanel`：面板撑满一列、内部滚动，
+   正文用 15px、次级信息 14–15px，从一个页面切到另一个不会突然变细。 */
+
+.assistant {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-height: 0;
+  height: 100%;
+  padding: 24px;
+  overflow-y: auto;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+.assistant__title {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.doc {
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.doc__label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.doc__name {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.assistant__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.exchanges {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.exchange {
+  padding-top: 20px;
+  border-top: 1px solid rgb(0 0 0 / 5%);
+}
+
+.exchange:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.exchange__label {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+/* 演示稿把提问标成紫色，答案保持深色。 */
+.exchange__label--ask {
+  color: var(--color-purple);
+}
+
+.exchange__question {
+  margin: 0 0 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.exchange__answer {
+  padding: 12px;
+  border-radius: 8px;
+  background: #fff0fe;
+}
+
+/* 面板比正文窄，答案按面板的尺度排：与对话页面板的正文同为 15px。 */
+.exchange__answer :deep(.markdown) {
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+.exchange__pending,
+.exchange__failed {
+  margin: 0;
+  padding: 12px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.exchange__pending {
+  background: #f8fafc;
+}
+
+.exchange__failed {
+  background: var(--danger-soft);
+  color: var(--danger);
+}

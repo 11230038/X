@@ -19,12 +19,13 @@
  */
 
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import type { ApiFailure } from '../api/client'
 import { describeFailure } from '../api/errors'
 import { listMasteryPaths, type MasterySummary } from '../api/mastery'
 import {
+  getQuestion,
   listQuestionCategories,
   listQuestions,
   patchQuestion,
@@ -37,7 +38,6 @@ import EmptyState from '../components/common/EmptyState.vue'
 import FailureState from '../components/common/FailureState.vue'
 import LoadMore from '../components/common/LoadMore.vue'
 import SkeletonBlock from '../components/common/SkeletonBlock.vue'
-import StatusBadge from '../components/common/StatusBadge.vue'
 import SurfaceGate from '../components/common/SurfaceGate.vue'
 import AppShell from '../components/shell/AppShell.vue'
 import PageHeader from '../components/shell/PageHeader.vue'
@@ -48,9 +48,11 @@ import { notify } from '../shared/toast'
 import QuestionDetail from './questions/QuestionDetail.vue'
 import QuestionImportDialog from './questions/QuestionImportDialog.vue'
 import { resolvedLabel, resolvedTone, typeLabel } from './questions/labels'
+import AppIcon from '../components/common/AppIcon.vue'
 
 const PAGE_SIZE = 30
 const router = useRouter()
+const route = useRoute()
 
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'failed'
 type ResolvedFilter = '' | 'untouched' | 'open' | 'done'
@@ -112,6 +114,16 @@ function describe(cause: unknown): string {
   return describeFailure(toFailure(cause))
 }
 
+/** 掌握状态对应的标签底色。灰底（neutral）不给修饰类，就是 `.m-tag` 本身。 */
+const RESOLVED_TAG_CLASS: Record<string, string> = {
+  success: 'm-tag--success',
+  warning: 'm-tag--warning',
+}
+
+function resolvedTagClass(entry: QuestionEntry): string {
+  return RESOLVED_TAG_CLASS[resolvedTone(entry)] ?? ''
+}
+
 async function loadList(): Promise<void> {
   const reset = questions.value.length === 0
   if (reset) {
@@ -171,12 +183,18 @@ async function loadMore(): Promise<void> {
   }
 }
 
+/**
+ * 列表刷新后决定打开哪一道。
+ *
+ * 页面是"选择题目 → 点开一道 → 返回列表"，所以刷新**不会**替用户挑一道：
+ * 只有正在看的那道从列表里消失了（被删、换了筛选条件）才退回列表。
+ */
 function reconcileSelection(): void {
+  if (selectedId.value === null) return
   const existing = questions.value.find(
     (entry) => entry.question.question_id === selectedId.value,
   )
-  if (existing) return
-  selectedId.value = questions.value[0]?.question.question_id ?? null
+  if (!existing) selectedId.value = null
 }
 
 function clearFilters(): void {
@@ -287,82 +305,145 @@ function onImported(): void {
 
 // ── 生命周期 ──────────────────────────────────────────────────────────────
 
-onMounted(() => {
+/**
+ * 地址上带着 `?question=<id>` 时直接打开那一道。收藏夹的题目卡片这样进来。
+ *
+ * 列表只取第一页，收藏的题可能比第一页更早，所以列表里没有时按 id 单独取
+ * 一道，插到最前面 —— 这样"返回列表"仍然回到一个能看见它的列表。取不到
+ * （题被删了、没权限）就留在列表，不把整页画成错误。
+ */
+async function openFromQuery(): Promise<void> {
+  const id = route.query.question
+  if (typeof id !== 'string' || id === '') return
+  if (questions.value.some((entry) => entry.question.question_id === id)) {
+    selectedId.value = id
+    return
+  }
+  try {
+    const entry = await getQuestion(id)
+    questions.value = [entry, ...questions.value]
+    selectedId.value = id
+  } catch {
+    // 打开失败只是没打开，列表照常可用。
+  }
+}
+
+onMounted(async () => {
   if (canSurface('notebook') === false) {
     status.value = 'ready'
     return
   }
-  void Promise.all([loadList(), loadCategories(), loadPaths()])
+  await Promise.all([loadList(), loadCategories(), loadPaths()])
+  await openFromQuery()
 })
+
+// 已经在题库页时从收藏夹再点一道，页面不会重建，靠这个 watch 换选中的题。
+watch(
+  () => route.query.question,
+  (id) => {
+    if (typeof id === 'string' && id !== '') void openFromQuery()
+  },
+)
 </script>
 
 
 <template>
   <SurfaceGate surface="notebook">
     <AppShell>
-      <template #list>
-        <aside class="bank">
-          <div class="bank__head">
-            <input
-              v-model="searchInput"
-              class="bank__search"
-              type="search"
-              :placeholder="QUESTIONS.searchPlaceholder"
-              :aria-label="QUESTIONS.searchPlaceholder"
-            />
-          </div>
+      <div class="page">
+        <div class="page__inner">
+          <PageHeader :title="QUESTIONS.title" :description="QUESTIONS.description" serif>
+            <template #actions>
+              <button type="button" class="primary" @click="openImport">
+                {{ QUESTIONS.importAction }}
+              </button>
+            </template>
+          </PageHeader>
 
-          <div class="bank__filters">
-            <select
-              v-model="resolvedFilter"
-              class="bank__select"
-              :aria-label="QUESTIONS.filterResolved"
-              @change="refreshForFilter"
-            >
-              <option value="">{{ QUESTIONS.filterResolved }}：{{ QUESTIONS.all }}</option>
-              <option value="untouched">{{ QUESTIONS.resolvedUntouched }}</option>
-              <option value="open">{{ QUESTIONS.resolvedOpen }}</option>
-              <option value="done">{{ QUESTIONS.resolvedDone }}</option>
-            </select>
+          <p v-if="actionError" class="action-error">{{ actionError }}</p>
 
-            <select
-              v-model="typeFilter"
-              class="bank__select"
-              :aria-label="QUESTIONS.filterType"
-              @change="refreshForFilter"
-            >
-              <option value="">{{ QUESTIONS.filterType }}：{{ QUESTIONS.all }}</option>
-              <option value="choice">{{ QUESTIONS.typeChoice }}</option>
-              <option value="fill_blank">{{ QUESTIONS.typeFillBlank }}</option>
-              <option value="short_answer">{{ QUESTIONS.typeShortAnswer }}</option>
-            </select>
+          <!--
+            列表态：一页"选择题目"。工具行在顶上，下面一排题目；点一道就换成
+            详情。题库页不再占左侧那一栏，所以学习空间的侧边栏一直都在。
+          -->
+          <template v-if="selectedId === null">
+            <div class="feature-pills">
+              <span v-for="pill in QUESTIONS.featurePills" :key="pill.label" class="f-pill">
+                <span aria-hidden="true"><AppIcon :name="pill.icon" /></span>
+                {{ pill.label }}
+              </span>
+            </div>
 
-            <select
-              v-model="categoryFilter"
-              class="bank__select"
-              :aria-label="QUESTIONS.filterCategory"
-              @change="refreshForFilter"
-            >
-              <option value="">{{ QUESTIONS.filterCategory }}：{{ QUESTIONS.all }}</option>
-              <option v-for="category in categories" :key="category.name" :value="category.name">
-                {{ category.name }}（{{ category.count }}）
-              </option>
-            </select>
+            <!-- 搜索占一整行，四个筛选条件排在它下面一行。 -->
+            <div class="m-tools">
+              <input
+                v-model="searchInput"
+                class="m-input"
+                type="search"
+                :placeholder="QUESTIONS.searchPlaceholder"
+                :aria-label="QUESTIONS.searchPlaceholder"
+              />
 
-            <select
-              v-model="pathFilter"
-              class="bank__select"
-              :aria-label="QUESTIONS.filterPath"
-              @change="refreshForFilter"
-            >
-              <option value="">{{ QUESTIONS.filterPath }}：{{ QUESTIONS.all }}</option>
-              <option v-for="path in paths" :key="path.path_id" :value="path.path_id">
-                {{ pathLabel(path) }}
-              </option>
-            </select>
-          </div>
+              <div class="m-filters">
+                <select
+                  v-model="resolvedFilter"
+                  class="m-select"
+                  :aria-label="QUESTIONS.filterResolved"
+                  @change="refreshForFilter"
+                >
+                  <option value="">{{ QUESTIONS.filterResolved }}：{{ QUESTIONS.all }}</option>
+                  <option value="untouched">{{ QUESTIONS.resolvedUntouched }}</option>
+                  <option value="open">{{ QUESTIONS.resolvedOpen }}</option>
+                  <option value="done">{{ QUESTIONS.resolvedDone }}</option>
+                </select>
 
-          <div class="bank__body">
+                <select
+                  v-model="typeFilter"
+                  class="m-select"
+                  :aria-label="QUESTIONS.filterType"
+                  @change="refreshForFilter"
+                >
+                  <option value="">{{ QUESTIONS.filterType }}：{{ QUESTIONS.all }}</option>
+                  <option value="choice">{{ QUESTIONS.typeChoice }}</option>
+                  <option value="fill_blank">{{ QUESTIONS.typeFillBlank }}</option>
+                  <option value="short_answer">{{ QUESTIONS.typeShortAnswer }}</option>
+                </select>
+
+                <select
+                  v-model="categoryFilter"
+                  class="m-select"
+                  :aria-label="QUESTIONS.filterCategory"
+                  @change="refreshForFilter"
+                >
+                  <option value="">{{ QUESTIONS.filterCategory }}：{{ QUESTIONS.all }}</option>
+                  <option
+                    v-for="category in categories"
+                    :key="category.name"
+                    :value="category.name"
+                  >
+                    {{ category.name }}（{{ category.count }}）
+                  </option>
+                </select>
+
+                <select
+                  v-model="pathFilter"
+                  class="m-select"
+                  :aria-label="QUESTIONS.filterPath"
+                  @change="refreshForFilter"
+                >
+                  <option value="">{{ QUESTIONS.filterPath }}：{{ QUESTIONS.all }}</option>
+                  <option v-for="path in paths" :key="path.path_id" :value="path.path_id">
+                    {{ pathLabel(path) }}
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <p v-if="staleFailure" class="question-stale">
+              {{ QUESTIONS.loadFailed }}
+              <button type="button" class="question-retry" @click="loadList">重试</button>
+            </p>
+
             <SkeletonBlock v-if="status === 'loading'" :lines="8" :line-height="38" />
 
             <FailureState
@@ -389,29 +470,29 @@ onMounted(() => {
             />
 
             <template v-else>
-              <p v-if="staleFailure" class="bank__stale">
-                {{ QUESTIONS.loadFailed }}
-                <button type="button" class="bank__retry" @click="loadList">重试</button>
-              </p>
-
-              <ul class="bank__list">
+              <ul class="m-list">
                 <li v-for="entry in questions" :key="entry.question.question_id">
                   <button
                     type="button"
-                    class="qrow"
-                    :class="{ 'qrow--active': entry.question.question_id === selectedId }"
+                    class="m-card"
                     @click="selectedId = entry.question.question_id"
                   >
-                    <span class="qrow__text">{{ entry.question.text }}</span>
-                    <span class="qrow__meta">
-                      <StatusBadge :label="typeLabel(entry.question.question_type)" small />
-                      <StatusBadge
-                        :label="resolvedLabel(entry)"
-                        :tone="resolvedTone(entry)"
-                        small
-                      />
-                      <span v-if="entry.answer.bookmarked" class="qrow__star" aria-hidden="true">★</span>
+                    <span class="m-card__main">
+                      <span class="m-card__text">{{ entry.question.text }}</span>
+                      <span class="m-card__tags">
+                        <span class="m-tag">{{ typeLabel(entry.question.question_type) }}</span>
+                        <span class="m-tag" :class="resolvedTagClass(entry)">
+                          {{ resolvedLabel(entry) }}
+                        </span>
+                        <span v-if="entry.answer.bookmarked" class="m-tag m-tag--accent">
+                          <AppIcon name="star" /> {{ QUESTIONS.bookmarked }}
+                        </span>
+                        <span v-for="name in entry.question.categories" :key="name" class="m-tag">
+                          {{ name }}
+                        </span>
+                      </span>
                     </span>
+                    <span class="m-card__go" aria-hidden="true">›</span>
                   </button>
                 </li>
               </ul>
@@ -423,38 +504,23 @@ onMounted(() => {
                 @load="loadMore"
               />
             </template>
-          </div>
-        </aside>
-      </template>
+          </template>
 
-      <div class="page">
-        <div class="page__inner">
-          <PageHeader :title="QUESTIONS.title" :description="QUESTIONS.description">
-            <template #actions>
-              <button type="button" class="primary" @click="openImport">
-                {{ QUESTIONS.importAction }}
-              </button>
-            </template>
-          </PageHeader>
+          <!-- 详情态：点开的那一道。返回就回到列表，筛选条件还在。 -->
+          <template v-else>
+            <button type="button" class="back" @click="selectedId = null">
+              ← 返回{{ QUESTIONS.selectTitle }}
+            </button>
 
-          <p v-if="actionError" class="action-error">{{ actionError }}</p>
-
-          <QuestionDetail
-            v-if="selected"
-            :entry="selected"
-            :busy="busyId !== ''"
-            @bookmark="toggleBookmark(selected)"
-            @resolve="markResolved(selected)"
-            @ask="askAbout(selected)"
-          />
-
-          <EmptyState
-            v-else
-            :title="hasFilters ? QUESTIONS.emptyFiltered : QUESTIONS.selectQuestion"
-            :hint="hasFilters ? QUESTIONS.emptyFilteredHint : QUESTIONS.selectQuestionHint"
-            :action-label="hasFilters ? QUESTIONS.clearFilters : ''"
-            @action="clearFilters"
-          />
+            <QuestionDetail
+              v-if="selected"
+              :entry="selected"
+              :busy="busyId !== ''"
+              @bookmark="toggleBookmark(selected)"
+              @resolve="markResolved(selected)"
+              @ask="askAbout(selected)"
+            />
+          </template>
         </div>
       </div>
     </AppShell>

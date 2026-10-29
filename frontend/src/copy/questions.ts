@@ -1,8 +1,17 @@
 /** 题库的文案。 */
+import type { AppIconName } from '../components/common/AppIcon.vue'
 
 export const QUESTIONS = {
   title: '题库',
   description: '导入、筛选与复习。导入先预览逐行结果，确认之后才写入。',
+
+  /** 标题下面一排能力标签，照演示稿错题本页的 `.f-pill`。别写做不到的事。 */
+  featurePills: [
+    { icon: 'search', label: '支持搜索题目' },
+    { icon: 'tag', label: '按题型 / 分类筛选' },
+    { icon: 'space', label: '掌握状态清楚' },
+    { icon: 'eye', label: '复习状态一目了然' },
+  ] satisfies readonly { icon: AppIconName; label: string }[],
 
   searchPlaceholder: '按题目内容搜索',
   filterResolved: '掌握状态',
@@ -24,8 +33,8 @@ export const QUESTIONS = {
   emptyFiltered: '没有符合这些条件的题',
   emptyFilteredHint: '放宽一个筛选条件，或者清除搜索再看。',
   clearFilters: '清除筛选',
-  selectQuestion: '选一道题',
-  selectQuestionHint: '左边选一道题，这里会显示答案、解析与标记。',
+  /** 列表态的名字：详情页的返回按钮要回到这里。 */
+  selectTitle: '选择题目',
 
   importAction: '导入题目',
   importTitle: '导入题目',

@@ -179,7 +179,7 @@ onBeforeUnmount(() => {
 .l1 {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
 }
 
 .head__title {
@@ -191,19 +191,22 @@ onBeforeUnmount(() => {
 .head__description {
   margin: 4px 0 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
 .filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 14px;
   align-items: flex-end;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
+  padding: 16px 18px;
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .field {
@@ -214,22 +217,30 @@ onBeforeUnmount(() => {
 
 .field__label {
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .field__input {
   min-width: 120px;
-  padding: 5px 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  font-size: 12px;
+  padding: 6px 10px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 80%);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.field__input:focus {
+  border-color: var(--color-purple);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
 }
 
 .note {
   margin: 0;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .traces {
@@ -242,10 +253,11 @@ onBeforeUnmount(() => {
 }
 
 .trace {
-  padding: 11px 13px;
-  border: 1px solid var(--border);
+  padding: 13px 16px;
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: rgb(255 255 255 / 50%);
+  box-shadow: var(--inset-light);
 }
 
 .trace__head {
@@ -260,7 +272,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   border-radius: 9px;
   color: var(--text-muted);
-  font-size: 9px;
+  font-size: 14px;
   line-height: 17px;
 }
 
@@ -271,12 +283,12 @@ onBeforeUnmount(() => {
 .trace__time {
   margin-left: auto;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .trace__statement {
   margin: 6px 0 0;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
@@ -286,7 +298,7 @@ onBeforeUnmount(() => {
   margin: 5px 0 0;
   color: var(--text-faint);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 14px;
   word-break: break-all;
 }
 
@@ -298,7 +310,7 @@ onBeforeUnmount(() => {
 .trace__empty {
   margin: 6px 0 0;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .payload {
@@ -307,7 +319,7 @@ onBeforeUnmount(() => {
 
 .payload__toggle {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 14px;
   cursor: pointer;
 }
 
@@ -320,7 +332,7 @@ onBeforeUnmount(() => {
   background: var(--surface-sunken);
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 14px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;

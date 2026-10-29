@@ -21,6 +21,7 @@ import { QUESTIONS, QUESTION_CHAT } from '../../copy/questions'
 import { truncate } from '../../shared/format'
 import { toFailure } from '../../shared/resource'
 import { typeLabel } from './labels'
+import AppIcon from '../../components/common/AppIcon.vue'
 
 const props = defineProps<{
   open: boolean
@@ -111,7 +112,7 @@ onBeforeUnmount(() => {
     <header class="picker__head">
       <h2 class="picker__title">{{ QUESTION_CHAT.pickerTitle }}</h2>
       <button type="button" class="picker__close" :aria-label="QUESTION_CHAT.pickerClose" @click="close">
-        ✕
+        <AppIcon name="close" />
       </button>
     </header>
 
@@ -179,14 +180,18 @@ onBeforeUnmount(() => {
   width: min(560px, calc(100vw - 40px));
   max-height: min(620px, calc(100vh - 80px));
   padding: 0;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: rgb(255 255 255 / 92%);
   color: var(--text);
+  box-shadow: 0 24px 64px -12px rgb(51 68 85 / 20%);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
 }
 
 .picker::backdrop {
-  background: rgb(20 26 38 / 35%);
+  background: rgb(20 26 38 / 25%);
+  backdrop-filter: blur(6px);
 }
 
 .picker__head {
@@ -219,7 +224,7 @@ onBeforeUnmount(() => {
   margin: 0;
   padding: 0 16px 8px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -229,17 +234,20 @@ onBeforeUnmount(() => {
 
 .picker__field {
   width: 100%;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 9px 14px;
+  border: 1px solid rgb(0 0 0 / 6%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 70%);
   color: var(--text);
-  font-size: 13px;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .picker__field:focus {
-  border-color: var(--accent);
-  outline: none;
+  border-color: var(--color-purple);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
 }
 
 .picker__body {
@@ -251,7 +259,7 @@ onBeforeUnmount(() => {
 .picker__loading {
   padding: 20px 6px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .picker__list {
@@ -265,28 +273,29 @@ onBeforeUnmount(() => {
 
 .picker__row {
   display: flex;
-  gap: 12px;
+  gap: 16px;
   align-items: flex-start;
   justify-content: space-between;
   width: 100%;
-  padding: 9px 10px;
+  padding: 11px 14px;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: 12px;
   background: transparent;
   color: var(--text);
   text-align: left;
   cursor: pointer;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .picker__row:hover {
-  border-color: var(--border);
-  background: var(--surface-sunken);
+  background: #fff;
+  box-shadow: 0 6px 16px -8px rgb(51 68 85 / 25%);
 }
 
 .picker__text {
   display: -webkit-box;
   overflow: hidden;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.55;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -295,13 +304,13 @@ onBeforeUnmount(() => {
 .picker__meta {
   flex: none;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
   white-space: nowrap;
 }
 
 .picker__more {
   margin: 8px 6px 0;
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: 14px;
 }
 </style>

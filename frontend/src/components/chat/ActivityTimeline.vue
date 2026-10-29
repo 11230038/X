@@ -110,14 +110,14 @@ const entries = computed(() =>
   display: flex;
   gap: 9px;
   align-items: baseline;
-  padding: 5px 2px;
-  font-size: 13px;
+  padding: 6px 2px;
+  font-size: 15px;
 }
 
 .timeline__dot {
   flex: none;
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border: 1px solid var(--border-strong);
   border-radius: 50%;
   background: var(--surface);
@@ -160,12 +160,12 @@ const entries = computed(() =>
 .timeline__count {
   margin-left: 6px;
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .timeline__tool {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .timeline__fail {

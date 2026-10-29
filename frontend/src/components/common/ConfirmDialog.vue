@@ -114,36 +114,41 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(20, 24, 32, 0.38);
+  background: rgb(20 24 32 / 30%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .confirm {
-  width: min(440px, 100%);
-  padding: 20px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: 0 12px 40px rgba(20, 24, 32, 0.18);
+  width: min(460px, 100%);
+  padding: 28px;
+  border: 1px solid var(--glass-border);
+  border-radius: 28px;
+  background: rgb(255 255 255 / 86%);
+  box-shadow: 0 30px 60px rgb(0 0 0 / 15%), var(--inset-light);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
 }
 
 .confirm__title {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   color: var(--text);
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 .confirm__body {
   margin: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.65;
 }
 
 .confirm__note {
   margin: 8px 0 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -156,26 +161,32 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 .confirm__cancel,
 .confirm__submit {
-  padding: 6px 14px;
+  padding: 10px 20px;
   border-radius: var(--radius-sm);
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: 700;
   cursor: pointer;
 }
 
 .confirm__cancel {
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
+  border: 1px solid rgb(0 0 0 / 8%);
+  background: #fff;
   color: var(--text);
 }
 
 .confirm__cancel:hover {
-  background: var(--surface-sunken);
+  border-color: var(--text);
 }
 
 .confirm__submit {
-  border: 1px solid var(--accent);
-  background: var(--accent);
+  border: 1px solid transparent;
+  background: var(--accent-gradient);
   color: #fff;
+  box-shadow: 0 4px 12px rgb(177 140 255 / 30%);
+}
+
+.confirm__submit:hover {
+  filter: brightness(1.02);
 }
 
 .confirm__submit--danger {

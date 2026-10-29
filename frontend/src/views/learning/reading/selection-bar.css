@@ -1,18 +1,20 @@
+/* 演示稿的 `.sel-bubble`：深色药丸、白字、悬停转紫。这一版动作更多，
+   所以做成一条贴顶的深色工具条，而不是浮在选区上方的小气泡。 */
+
 .selectionbar {
   position: sticky;
   top: 8px;
   z-index: 3;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 14px;
   align-items: center;
   justify-content: space-between;
-  margin-top: 8px;
-  padding: 8px 11px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  background: var(--surface-raised);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
+  margin: 0 0 20px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #2b3648;
+  box-shadow: 0 10px 24px rgb(51 68 85 / 30%);
 }
 
 .selectionbar__meta {
@@ -20,8 +22,8 @@
   gap: 8px;
   align-items: baseline;
   min-width: 0;
-  color: var(--text-muted);
-  font-size: 11px;
+  color: rgb(255 255 255 / 70%);
+  font-size: 14px;
 }
 
 .selectionbar__snippet {
@@ -34,6 +36,29 @@
 .selectionbar__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 6px;
 }
 
+.selectionbar__actions .ghost {
+  border-color: rgb(255 255 255 / 22%);
+  background: rgb(255 255 255 / 8%);
+  color: #fff;
+}
+
+.selectionbar__actions .ghost:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--color-purple);
+  color: #fff;
+}
+
+/* 「让 AI 解释」是这一条里的主动作。 */
+.selectionbar__actions .ghost--accent {
+  border-color: transparent;
+  background: var(--accent-gradient);
+  box-shadow: 0 4px 12px rgb(177 140 255 / 35%);
+}
+
+.selectionbar__actions .ghost--accent:hover:not(:disabled) {
+  background: var(--accent-gradient);
+  filter: brightness(1.05);
+}

@@ -30,6 +30,12 @@ func TestDBArrivingWithNothingCreatesThePathTheConversationNames(t *testing.T) {
 	if len(arrival.Path.Tree.Modules) != 0 {
 		t.Errorf("a path created from a goal arrived with %d modules", len(arrival.Path.Tree.Modules))
 	}
+	// This arrival is the one that opened the path, which is what lets the turn
+	// replace the goal with a summary once it has an answer. Only the opening
+	// turn gets to do that; a later arrival must not.
+	if !arrival.Created {
+		t.Error("the first arrival did not report opening the path")
+	}
 	view, err := h.service.Load(ctx, arrival.Path.ID, h.caller)
 	if err != nil {
 		t.Fatalf("read the path back: %v", err)
@@ -93,6 +99,11 @@ func TestDBArrivingAgainComesBackToTheSamePath(t *testing.T) {
 	}
 	if again.Path.ID != opened.Path.ID {
 		t.Errorf("the second turn arrived on path %s, want %s", again.Path.ID, opened.Path.ID)
+	}
+	// The path was opened by the first turn, not this one. The second turn must
+	// not rename what the first one named or the learner renamed by hand.
+	if !opened.Created || again.Created {
+		t.Errorf("created: first=%v second=%v, want true then false", opened.Created, again.Created)
 	}
 	if got := h.countRows(t, "mastery_paths"); got != 1 {
 		t.Errorf("%d paths are stored, want the one the conversation already had", got)

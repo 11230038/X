@@ -12,10 +12,20 @@ import Reading from './learning/Reading.vue'
 
 <template>
   <AppShell>
-    <div class="page">
+    <div class="page reading-page">
       <div class="page__inner">
         <Reading />
       </div>
     </div>
   </AppShell>
 </template>
+
+<style scoped>
+/*
+ * 阅读页不吃 `.page` 的上下内边距：三栏要跟左侧主侧栏一样，从骨架的顶边
+ * 一直铺到底边，而不是上下各空 32px。左右 40px 与其它内容页一致。
+ */
+.reading-page {
+  padding: 0 40px;
+}
+</style>

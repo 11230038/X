@@ -40,6 +40,7 @@ type readingStub struct {
 	position  reading.Position
 	saved     bool
 	marks     []reading.Mark
+	bookmarks []reading.Bookmark
 	mark      reading.Mark
 	passage   reading.Passage
 	pairings  reading.Pairings
@@ -96,6 +97,10 @@ func (s *readingStub) Marks(_ context.Context, _ string, _ authz.Caller) ([]read
 	return s.marks, s.err
 }
 
+func (s *readingStub) Bookmarks(_ context.Context, _ authz.Caller) ([]reading.Bookmark, error) {
+	return s.bookmarks, s.err
+}
+
 func (s *readingStub) AddMark(_ context.Context, request reading.MarkRequest, _ authz.Caller) (reading.Mark, error) {
 	s.adds = append(s.adds, request)
 	return s.mark, s.err
@@ -142,6 +147,7 @@ func newReadingRouter(readings Readings, extensions *reading.Registry) *gin.Engi
 	router.GET("/api/v1/reading/materials/:materialID/content", guarded, handler.Content)
 	router.GET("/api/v1/reading/materials/:materialID/marks", guarded, handler.Marks)
 	router.POST("/api/v1/reading/materials/:materialID/marks", guarded, handler.AddMark)
+	router.GET("/api/v1/reading/bookmarks", guarded, handler.Bookmarks)
 	router.POST("/api/v1/reading/materials/:materialID/position", guarded, handler.SavePosition)
 	router.GET("/api/v1/reading/materials/:materialID/pairings", guarded, handler.Pairings)
 	router.POST("/api/v1/reading/materials/:materialID/pairings", guarded, handler.ConfirmPairing)

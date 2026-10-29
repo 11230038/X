@@ -2,13 +2,15 @@
 /**
  * 对话工作台：列表栏 + 主区 + 右侧面板 + 输入区。
  *
- * 对话页、写作页与路径对话页是同一套工作台，只在四件事上不同：
+ * 对话页、写作页与路径对话页是同一套工作台，只在五件事上不同：
  *
  * 1. **列哪一种会话** —— `kind` 决定列表只读 `chat`、`writing` 还是 `mastery`；
+ *    路径对话的二级页不画这一列（`showList=false`），它的一级页就是历史；
  * 2. **用哪一种能力** —— 给了 `capability` 就固定用它、不画选择器（路径对话页
  *    固定 `mastery_path`）；不给则按清单默认，写作页就是 `chat`；
  * 3. **用哪个人格** —— 给了 `personaLock` 就每一轮都用它（题目问答页锁死
- *    「题目问答伙伴」）；不给则由输入区下拉自由选择；
+ *    「题目问答伙伴」）；`showPersona=false` 时既不给选择器也不带人格（路径
+ *    对话页）；不给则自由选择；
  * 4. **首页是什么** —— 由 `#home` 插槽给出（对话页是起始提示，写作页是准备表，
  *    路径对话页是想学什么的入口）；
  * 5. **会话地址** —— `sessionRoute` 决定点开一行、新建一条之后往哪个路由名去。
@@ -19,7 +21,7 @@
  * 权限面仍然是 `chat`：写作与路径对话都是用法，不是新的授权面。
  */
 
-import { useTemplateRef } from 'vue'
+import { computed, useTemplateRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { capabilityList } from '../../shared/capabilities'
@@ -56,6 +58,7 @@ import { useChatPersona, type PersonaLock } from './useChatPersona'
 import { useChatSessions } from './useChatSessions'
 import { useChatSources } from './useChatSources'
 import { useMasteryQuestion } from './useMasteryQuestion'
+import AppIcon, { type AppIconName } from '../../components/common/AppIcon.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -67,6 +70,11 @@ const props = withDefaults(
     sessionRoute: string
     /** 首页（没有选中会话时）标题行的文字。 */
     homeTitle?: string
+    /**
+     * 顶栏左侧的返回上一级链接。给了它就在模式胶囊之前画一枚回到
+     * `homeRoute` 的链接；只有二级页面（路径对话）需要，别处留空。
+     */
+    backLabel?: string
     /** 能力选择器。写作页不提供：写作只用 `chat` 能力。 */
     showCapability?: boolean
     /** 固定使用的能力名。给了它就隐藏选择器，每一轮都用它。 */
@@ -76,8 +84,18 @@ const props = withDefaults(
      * 账号里没有同名人格时按这份内容建一个。题目问答页用它。
      */
     personaLock?: PersonaLock
+    /**
+     * 这一页是否用得到人格。路径对话不需要：不给选择器，也不把人格带进任何
+     * 一轮（连人格列表都不读）。
+     */
+    showPersona?: boolean
     /** 首页是否也显示输入区。对话页要（可以直接问），写作页不要（先填准备表）。 */
     composerOnHome?: boolean
+    /**
+     * 是否画工作台自带的会话列表。路径对话不要：它的一级页就是对话历史，
+     * 二级再列一遍就是同一份列表出现两次。
+     */
+    showList?: boolean
     /** 输入框占位文案。 */
     placeholder?: string
     /** 列表栏标题与空态文案。写作页要的是「写作」那一套。 */
@@ -91,11 +109,14 @@ const props = withDefaults(
   }>(),
   {
     homeTitle: '',
+    backLabel: '',
     showCapability: true,
     capability: '',
+    showPersona: true,
+    showList: true,
     composerOnHome: true,
     placeholder: CHAT.placeholder,
-    listTitle: '对话',
+    listTitle: '历史会话',
     listEmptyAction: '开始一段对话',
     listNewLabel: '新建会话',
     emptyTitle: '这个对话还没有消息',
@@ -117,6 +138,11 @@ defineSlots<{
     retryPersonas: () => void
     managePersonas: () => void
   }): unknown
+  /**
+   * 已选中一段还没有消息的会话时画什么。路径对话放进它的开场提示，
+   * 与真正的新会话是同一种开始；别的页面用默认的空状态。
+   */
+  empty(props: { send: (text: string) => void }): unknown
   /** 输入区工具行里的页面私有按钮（题目问答的「选择题目」）。 */
   'composer-tools'(props: {
     send: (text: string) => void
@@ -153,7 +179,7 @@ const connection = useChatConnection({
   stages: () => caps.stagePlan.value,
 })
 
-const persona = useChatPersona(route, props.personaLock)
+const persona = useChatPersona(route, props.personaLock, props.showPersona)
 const materials = useChatMaterials(route, persona.selectedId)
 
 /**
@@ -185,7 +211,6 @@ const {
   draft,
   composerError,
   starting,
-  headerTitle,
   panelStatus,
   startSession,
   onSend,
@@ -248,6 +273,22 @@ const {
 
 const { capabilityName } = caps
 
+/**
+ * 对话顶栏的模式胶囊，照演示稿的 `.chat-modes`：通用辅导 / 写作教练 /
+ * 题目精解。三个都是真页面（对话、协同写作、题目问答），所以这里用链接而不是
+ * 一个假的切换开关 —— 点一下真的换到那一套工作台。
+ */
+const MODES: readonly { kind: string; label: string; icon: AppIconName; to: RouteLocationRaw }[] = [
+  { kind: 'chat', label: '通用辅导', icon: 'chat', to: { name: 'chat' } },
+  { kind: 'writing', label: '写作教练', icon: 'practice', to: { name: 'co-writer' } },
+  { kind: 'question_bank', label: '题目精解', icon: 'puzzle', to: { name: 'question-chat' } },
+]
+
+/** 顶栏人格下拉。模板里不做类型断言，取值的活放在这里。 */
+function onPersonaPick(event: Event): void {
+  selectPersona((event.target as HTMLSelectElement).value)
+}
+
 const {
   conversation,
   history,
@@ -265,6 +306,16 @@ const {
   retryLeft,
   loadHistory,
 } = connection
+
+/**
+ * 会话流里不画"阶段第几步"（`✓ exploring 第 1/2 步` 那种）：它是**动作**，不是
+ * 内容，右侧「活动」时间线已经逐条列着。两个视图仍读同一份 `allBlocks` —— 只是
+ * 流这边把阶段摘掉，面板那边不动。
+ *
+ * 过滤放在这一层而不是让 `ConversationStream` 视而不见：块还在数组里的话，那个
+ * `<li>` 仍会占掉一行 24px 的行距，流里会凭空多出几段空隙。
+ */
+const streamBlocks = computed(() => allBlocks.value.filter((block) => block.kind !== 'stage'))
 
 const clarifyDialog = useTemplateRef<InstanceType<typeof ClarifyDialog>>('clarifyDialog')
 const { question: pendingQuestion, reopen: reopenQuestion } = useChatClarify(
@@ -317,7 +368,7 @@ const {
 <template>
   <SurfaceGate surface="chat">
     <AppShell :busy="running || connectionStatus === 'reconnecting'" :panel-status="panelStatus">
-      <template #list>
+      <template v-if="showList" #list>
         <SessionListPane
           :sessions="sessions"
           :loading="sessionsLoading"
@@ -337,37 +388,95 @@ const {
         />
       </template>
 
-      <div class="main" :class="{ 'main--writing': kind === 'writing' }">
+      <div class="main">
         <header class="main__head">
-          <h1 class="main__title">{{ activeId === null ? homeTitle : headerTitle }}</h1>
+          <div class="main__head-left">
+            <!--
+              二级页面的返回入口。它是导航不是动作：回到上一级的列表，不删除
+              这段会话。一级页面没有上一级，`backLabel` 为空时不画。
+            -->
+            <RouterLink v-if="backLabel" class="main__back" :to="homeRoute">
+              <span aria-hidden="true">←</span>
+              {{ backLabel }}
+            </RouterLink>
 
-          <!--
-            能力选择。它在这里不是装饰：**阶段名与阶段总数由所选能力决定**
-            （§4.2）。选项整个来自 `/capabilities`，这里不筛也不排。
-          -->
-          <select
-            v-if="showCapability && capability === '' && capabilityList.length > 1"
-            v-model="capabilityName"
-            class="main__capability"
-            :aria-label="CHAT.capabilityLabel"
-          >
-            <option v-for="manifest in capabilityList" :key="manifest.name" :value="manifest.name">
-              {{ manifest.name }}
-            </option>
-          </select>
+            <!--
+              模式胶囊，照演示稿的 `.chat-modes`：通用辅导 / 写作教练 / 题目精解。
+              三个都是真页面，所以是链接，不是同一个页面里的开关。
+            -->
+            <nav v-if="kind !== 'mastery'" class="chat-modes" aria-label="对话模式">
+              <RouterLink
+                v-for="mode in MODES"
+                :key="mode.kind"
+                class="mode-btn"
+                :class="{ 'mode-btn--active': kind === mode.kind }"
+                :to="mode.to"
+              >
+                <AppIcon :name="mode.icon" /> {{ mode.label }}
+              </RouterLink>
+            </nav>
 
-          <!--
-            写作会话的退出动作：回到准备页再开一段，或从左侧列表换一段。
-            它只导航，不删除这条会话——历史留在写作列表里。
-          -->
-          <button
-            v-if="kind === 'writing' && activeId !== null"
-            type="button"
-            class="main__end"
-            @click="router.push(homeRoute)"
-          >
-            {{ CO_WRITER.endWriting }}
-          </button>
+            <!--
+              路径对话固定用 `mastery_path`，不提供模式切换：换模式就不是路径对话
+              了。演示稿在这里也是一枚只读的能力标签。
+            -->
+            <span v-else class="chat-mode-tag">{{ capabilityName }}</span>
+          </div>
+
+          <div class="main__head-right">
+            <!--
+              人格选择在顶栏，照演示稿的 `.partner-selector`：它是"这段对话用哪种
+              说法"，选了通常连着用几轮，所以不放在输入框里当一轮的材料。
+              题目问答锁死人格时就退成一枚只读标签。
+            -->
+            <template v-if="showPersona">
+              <span
+                v-if="personaLock !== undefined"
+                class="partner-selector partner-selector--locked"
+              >
+                <span class="partner-avatar" aria-hidden="true"><AppIcon name="partners" tone="ink" /></span>
+                <span class="partner-name">{{ personaLock.name }}</span>
+              </span>
+              <label v-else class="partner-selector">
+                <span class="partner-avatar" aria-hidden="true"><AppIcon name="partners" tone="ink" /></span>
+                <select
+                  class="partner-name partner-select"
+                  :value="personaSelected"
+                  :disabled="personaLoading"
+                  aria-label="人格"
+                  @change="onPersonaPick"
+                >
+                  <option value="">
+                    {{ personaLoading ? '正在读取人格…' : '不指定人格' }}
+                  </option>
+                  <option v-for="item in personaItems" :key="item.id" :value="item.id">
+                    {{ item.label }}
+                  </option>
+                </select>
+                <button
+                  type="button"
+                  class="partner-manage"
+                  :title="'管理人格'"
+                  @click="router.push({ name: 'partners' })"
+                >
+                  ⋯
+                </button>
+              </label>
+            </template>
+
+            <!--
+              写作会话的退出动作：回到准备页再开一段，或从左侧列表换一段。
+              它只导航，不删除这条会话——历史留在写作列表里。
+            -->
+            <button
+              v-if="kind === 'writing' && activeId !== null"
+              type="button"
+              class="main__end"
+              @click="router.push(homeRoute)"
+            >
+              {{ CO_WRITER.endWriting }}
+            </button>
+          </div>
         </header>
 
         <div class="main__body">
@@ -400,7 +509,7 @@ const {
 
           <ConversationStream
             v-if="allBlocks.length > 0"
-            :blocks="allBlocks"
+            :blocks="streamBlocks"
             :citations="citations"
             @citation="onCitation"
             @open-source="openSource"
@@ -420,18 +529,19 @@ const {
             :persona-failure="personaFailure !== null"
             :select-persona="selectPersona"
             :retry-personas="() => loadPersonas(true)"
-            :manage-personas="() => router.push({ name: 'personas' })"
+            :manage-personas="() => router.push({ name: 'partners' })"
           />
 
           <PendingSkeleton v-else-if="historyLoading" />
 
-          <EmptyState
-            v-else
-            :title="emptyTitle"
-            :hint="emptyHint"
-            :action-label="emptyActionLabel"
-            @action="router.push(homeRoute)"
-          />
+          <slot v-else name="empty" :send="onSend">
+            <EmptyState
+              :title="emptyTitle"
+              :hint="emptyHint"
+              :action-label="emptyActionLabel"
+              @action="router.push(homeRoute)"
+            />
+          </slot>
         </div>
 
         <!--
@@ -467,18 +577,9 @@ const {
           :attachments="attachmentChips"
           :knowledge-bases="kbChips"
           :selection="selectionChip"
-          :personas="personaItems"
-          :persona="personaSelected"
-          :persona-loading="personaLoading"
-          :persona-failure="personaFailure !== null"
-          :persona-locked="personaLock !== undefined"
-          :persona-lock-label="personaLock?.name ?? ''"
           :draft="draft"
           @send="onSend"
           @stop="onStop"
-          @select-persona="selectPersona"
-          @retry-personas="loadPersonas(true)"
-          @manage-personas="router.push({ name: 'personas' })"
           @open-attachments="openPicker('attachments')"
           @open-knowledge-bases="openPicker('knowledgeBases')"
           @remove-attachment="toggleFile"
@@ -486,6 +587,30 @@ const {
           @clear-selection="selection = null"
         >
           <template #tools>
+            <!--
+              能力选择。它在这里不是装饰：**阶段名与阶段总数由所选能力决定**
+              （§4.2），选项整个来自 `/capabilities`，这里不筛也不排。
+
+              它排在输入框上方而不是顶栏：演示稿的顶栏只装得下模式胶囊和人格选择，
+              再塞一枚能力选择就会把人格的名字挤掉。这三样都是"这一轮怎么问"，
+              和附件、知识库同一排也说得通。
+            -->
+            <label
+              v-if="showCapability && capability === '' && capabilityList.length > 1"
+              class="cap-tool"
+            >
+              <span class="cap-tool__label">能力</span>
+              <select
+                v-model="capabilityName"
+                class="cap-tool__select"
+                :aria-label="CHAT.capabilityLabel"
+              >
+                <option v-for="manifest in capabilityList" :key="manifest.name" :value="manifest.name">
+                  {{ manifest.name }}
+                </option>
+              </select>
+            </label>
+
             <slot
               name="composer-tools"
               :send="onSend"

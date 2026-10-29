@@ -51,6 +51,9 @@ const (
 	// password, or one boolean. The password limit is 72 bytes, so this is
 	// generous by an order of magnitude and still a bound.
 	maxAdminRequestBytes int64 = 4 << 10
+	// The direct chat body is one question. It is not stored, so this bound is
+	// only about how much one model call may be asked to read.
+	maxDirectChatRequestBytes int64 = 16 << 10
 	// The largest question import is a file of questions, one to a line, so it is
 	// the one body here that is not an object. It is measured in questions rather
 	// than in bytes — a question is a few hundred bytes, so this is a file of some

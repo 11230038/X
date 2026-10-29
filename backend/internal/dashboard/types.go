@@ -47,6 +47,19 @@ type Entry struct {
 	Title     string
 	Context   string
 	UpdatedAt time.Time
+	// Progress is how far along the thing is, set only by a source that counts
+	// what is done and what there is. It is nil elsewhere — a conversation has no
+	// such count — and nil is "not counted" rather than "nothing done", which is
+	// why it is absent from the answer instead of being two zeros.
+	Progress *Progress
+}
+
+// Progress is what is done out of what there is. The two numbers come from the
+// domain that owns the thing; this package only carries them so that a surface
+// can draw the same ratio the domain would.
+type Progress struct {
+	Done  int
+	Total int
 }
 
 // Validate reports whether an entry is one to show.

@@ -1,0 +1,107 @@
+/*
+ * 掌握路径一级页的路径卡片。
+ *
+ * 卡片沿用知识库目录的尺度：白卡、28 内边距、52 图标、20px 名称。学习地图的
+ * 一级页是 `MapChooser.css` 的横排条目，两者故意不同。
+ */
+
+.path-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 28px;
+}
+
+.path-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 28px;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: var(--glass-shadow);
+  color: inherit;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.path-card:hover {
+  border-color: var(--color-purple);
+  box-shadow: 0 16px 32px -10px rgb(51 68 85 / 12%);
+  transform: translateY(-4px);
+}
+
+.path-card:focus-visible {
+  outline: none;
+  border-color: var(--color-purple);
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
+}
+
+.path-card__top {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.path-card__icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: #f3e8ff;
+  font-size: 26px;
+  line-height: 1;
+}
+
+.path-card__name {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+/* 描述最多两行，卡片高度不被一段长话撑开。 */
+.path-card__desc {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.8;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.path-card__meta {
+  margin-top: auto;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.path-card__bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 5%);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 4%);
+}
+
+.path-card__bar span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--color-purple), var(--color-blue));
+  transition: width 0.6s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.path-card__time {
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1.6;
+}

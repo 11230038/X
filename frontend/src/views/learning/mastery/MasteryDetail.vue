@@ -15,10 +15,10 @@ import type {
   LeaseState,
   MasteryInsight,
   MasteryLevel,
+  MasteryModule,
   MasteryPath,
   StepKind,
 } from '../../../api/mastery'
-import EmptyState from '../../../components/common/EmptyState.vue'
 import FailureState from '../../../components/common/FailureState.vue'
 import PartialBanner from '../../../components/common/PartialBanner.vue'
 import SkeletonBlock from '../../../components/common/SkeletonBlock.vue'
@@ -39,8 +39,6 @@ const props = defineProps<{
   leaseFailure: ApiFailure | null
   releasing: boolean
   selectedPointId: string
-  pathsReady: boolean
-  hasCurrent: boolean
 }>()
 
 const emit = defineEmits<{
@@ -120,6 +118,38 @@ const levelCounts = computed(() => {
   return counts
 })
 
+const totalPoints = computed(() => pointRows.value.length)
+
+/** 进度按"已掌握的知识点占全部知识点"算 —— 与路径摘要里的 `mastered` 同一口径。 */
+const progressPercent = computed(() =>
+  totalPoints.value === 0
+    ? 0
+    : Math.round((levelCounts.value.mastered / totalPoints.value) * 100),
+)
+
+type ModuleState = 'done' | 'active' | 'todo'
+
+const MODULE_LABELS: Record<ModuleState, string> = {
+  done: MASTERY.moduleDone,
+  active: MASTERY.moduleActive,
+  todo: MASTERY.moduleTodo,
+}
+
+/** 模块的状态由它自己的知识点推出来，不额外存一份。 */
+function moduleState(module: MasteryModule): ModuleState {
+  const levels = (module.knowledge_points ?? []).map(
+    (point) => rowOf(point.id)?.level ?? null,
+  )
+  if (levels.length === 0) return 'todo'
+  if (levels.every((level) => level === 'mastered')) return 'done'
+  if (levels.some((level) => level !== null)) return 'active'
+  return 'todo'
+}
+
+function moduleLabel(module: MasteryModule): string {
+  return MODULE_LABELS[moduleState(module)]
+}
+
 const selectedPoint = computed(
   () => pointRows.value.find((row) => row.id === props.selectedPointId) ?? null,
 )
@@ -193,15 +223,7 @@ function actOnNext(): void {
 
 <template>
   <section class="detail">
-    <EmptyState
-      v-if="pathsReady && !hasCurrent"
-      :title="MASTERY.noPath"
-      :hint="MASTERY.noPathHint"
-      :action-label="MASTERY.goChat"
-      @action="emit('go-chat')"
-    />
-
-    <SkeletonBlock v-else-if="pathStatus === 'loading'" :lines="9" :line-height="42" />
+    <SkeletonBlock v-if="pathStatus === 'loading'" :lines="9" :line-height="42" />
 
     <FailureState
       v-else-if="pathStatus === 'failed' && pathFailure"
@@ -211,25 +233,36 @@ function actOnNext(): void {
     />
 
     <template v-else-if="path">
-      <header class="head">
-        <h2 class="head__goal">{{ path.emoji }} {{ path.goal }}</h2>
-        <p v-if="path.description" class="head__description">{{ path.description }}</p>
-        <p class="head__meta">
-          {{ MASTERY.status }}：{{ path.status }} · {{ MASTERY.version }} {{ path.version }} ·
-          {{ MASTERY.updatedAt }} {{ formatDateTime(path.updated_at) }}
-        </p>
-        <p class="head__meta">
-          {{ MASTERY.modules(modules.length) }} · {{ MASTERY.points(pointRows.length) }}
-        </p>
-      </header>
+      <p class="head__meta">
+        {{ MASTERY.status }}：{{ path.status }} · {{ MASTERY.version }} {{ path.version }} ·
+        {{ MASTERY.updatedAt }} {{ formatDateTime(path.updated_at) }} ·
+        {{ MASTERY.modules(modules.length) }} · {{ MASTERY.points(totalPoints) }}
+      </p>
 
-      <!-- 四态分别画 -->
-      <div v-if="insight" class="levels">
-        <span v-for="level in LEVEL_ORDER" :key="level" class="level" :class="`level--${level}`">
-          <span class="level__dot" aria-hidden="true"></span>
-          {{ LEVEL_LABELS[level] }} {{ levelCounts[level] }}
+      <!-- 进度卡与四态计数，照演示稿的 `.mastery-progress-card`。 -->
+      <section class="progress-card">
+        <span class="progress-card__label">{{ MASTERY.progress(progressPercent) }}</span>
+        <div
+          class="progress-card__bar"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          :aria-valuenow="progressPercent"
+        >
+          <div class="progress-card__fill" :style="{ width: `${progressPercent}%` }"></div>
+        </div>
+        <span class="progress-card__count">
+          {{ MASTERY.masteredCount(levelCounts.mastered, totalPoints) }}
         </span>
-      </div>
+
+        <!-- 四态分别画 -->
+        <div v-if="insight" class="levels">
+          <span v-for="level in LEVEL_ORDER" :key="level" class="level" :class="`level--${level}`">
+            <span class="level__dot" aria-hidden="true"></span>
+            {{ LEVEL_LABELS[level] }} {{ levelCounts[level] }}
+          </span>
+        </div>
+      </section>
 
       <PartialBanner
         v-if="insightStatus === 'failed' && insightFailure"
@@ -238,27 +271,29 @@ function actOnNext(): void {
         @retry="emit('retry-insight')"
       />
 
-      <!-- 租约 -->
-      <section class="lease" :class="{ 'lease--held': lease?.lease }">
+      <!-- 租约：只有别的会话真的持着写权时才画。没有就整块不出现 ——
+           一张"现在没人改"的卡只会占地方。读失败时仍要露面，免得把
+           "读不到"当成"没人改"。 -->
+      <section
+        v-if="lease?.lease || leaseStatus === 'failed'"
+        class="lease"
+        :class="{ 'lease--held': Boolean(lease?.lease) }"
+      >
         <div class="lease__body">
           <h3 class="lease__title">{{ MASTERY.leaseTitle }}</h3>
-          <SkeletonBlock v-if="leaseStatus === 'loading'" :lines="2" :line-height="20" />
           <PartialBanner
-            v-else-if="leaseStatus === 'failed' && leaseFailure"
+            v-if="leaseStatus === 'failed' && leaseFailure"
             :failure="leaseFailure"
             :text="MASTERY.leaseFailed"
             @retry="emit('retry-lease')"
           />
-          <template v-else-if="lease">
-            <p v-if="!lease.lease" class="lease__state">{{ MASTERY.leaseFree }}</p>
-            <template v-else>
-              <p class="lease__state">{{ MASTERY.leaseHeld }}</p>
-              <p class="lease__holder">
-                {{ MASTERY.leaseHolder(lease.lease.session_id) }} ·
-                {{ MASTERY.leaseTurn(lease.lease.turn_id) }} ·
-                {{ MASTERY.leaseAcquired }} {{ formatDateTime(lease.lease.acquired_at) }}
-              </p>
-            </template>
+          <template v-else-if="lease?.lease">
+            <p class="lease__state">{{ MASTERY.leaseHeld }}</p>
+            <p class="lease__holder">
+              {{ MASTERY.leaseHolder(lease.lease.session_id) }} ·
+              {{ MASTERY.leaseTurn(lease.lease.turn_id) }} ·
+              {{ MASTERY.leaseAcquired }} {{ formatDateTime(lease.lease.acquired_at) }}
+            </p>
             <p class="lease__explain">{{ MASTERY.leaseExplanation }}</p>
           </template>
         </div>
@@ -321,33 +356,44 @@ function actOnNext(): void {
         </div>
       </section>
 
-      <!-- 模块 -->
-      <section class="modules">
+      <!-- 模块。演示稿的时间线：每个模块一个节点，知识点在模块里面。 -->
+      <section class="timeline-section">
         <h3 class="section__title">{{ MASTERY.modulesTitle }}</h3>
         <p v-if="modules.length === 0" class="side__empty">{{ MASTERY.moduleEmpty }}</p>
-        <article v-for="module in modules" :key="module.id" class="module">
-          <header class="module__head">
-            <h4 class="module__name">{{ module.name }}</h4>
-            <span v-if="module.description" class="module__description">
-              {{ module.description }}
-            </span>
-          </header>
-          <ul class="points">
-            <li v-for="point in module.knowledge_points ?? []" :key="point.id">
-              <button
-                type="button"
-                class="point"
-                :class="{ 'point--on': point.id === selectedPointId }"
-                @click="selectPoint(point.id)"
-              >
-                <span class="point__name">{{ point.name }}</span>
-                <span class="chip" :class="`chip--${levelKeyOf(point.id)}`">
-                  {{ levelTextOf(point.id) }}
+        <ol v-else class="timeline">
+          <li
+            v-for="module in modules"
+            :key="module.id"
+            class="module"
+            :class="`module--${moduleState(module)}`"
+          >
+            <span class="m-node" aria-hidden="true"></span>
+            <div class="m-info">
+              <header class="module__head">
+                <h4 class="module__name">{{ module.name }}</h4>
+                <span class="m-tag" :class="`m-tag--${moduleState(module)}`">
+                  {{ moduleLabel(module) }}
                 </span>
-              </button>
-            </li>
-          </ul>
-        </article>
+              </header>
+              <p v-if="module.description" class="module__description">{{ module.description }}</p>
+              <ul class="points">
+                <li v-for="point in module.knowledge_points ?? []" :key="point.id">
+                  <button
+                    type="button"
+                    class="point"
+                    :class="{ 'point--on': point.id === selectedPointId }"
+                    @click="selectPoint(point.id)"
+                  >
+                    <span class="point__name">{{ point.name }}</span>
+                    <span class="chip" :class="`chip--${levelKeyOf(point.id)}`">
+                      {{ levelTextOf(point.id) }}
+                    </span>
+                  </button>
+                </li>
+              </ul>
+            </div>
+          </li>
+        </ol>
       </section>
 
       <!-- 选中知识点 -->

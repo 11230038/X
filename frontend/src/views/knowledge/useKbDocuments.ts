@@ -5,7 +5,7 @@
  * 不受影响。
  */
 
-import { ref, type ComputedRef, type Ref } from 'vue'
+import { reactive, ref, type ComputedRef, type Ref } from 'vue'
 import type { Router } from 'vue-router'
 
 import { isApiFailure } from '../../api/client'
@@ -17,6 +17,7 @@ import {
   setDefaultKnowledgeBase,
   type KbDocument,
 } from '../../api/knowledgeBases'
+import { createReadingMaterial } from '../../api/reading'
 import { KNOWLEDGE } from '../../copy/knowledge'
 import { confirmAction } from '../../shared/confirm'
 import { notify } from '../../shared/toast'
@@ -111,6 +112,42 @@ export function useKbDocuments(deps: {
     }
   }
 
+  // ── 从知识库进沉浸阅读 ──────────────────────────────────────────────────
+  // 阅读材料建在文档背后的那份文件上；同一份文件已经有材料时，服务端会把旧的
+  // 还回来，所以点两次不会多出一个材料。
+  const readingBusy = ref<Set<string>>(new Set())
+  const readingErrors = reactive<Record<string, string>>({})
+
+  function isEnteringReading(documentId: string): boolean {
+    return readingBusy.value.has(documentId)
+  }
+
+  function readingError(document: KbDocument): string {
+    return readingErrors[document.document_id] ?? ''
+  }
+
+  async function enterReading(document: KbDocument): Promise<void> {
+    if (isEnteringReading(document.document_id)) return
+    delete readingErrors[document.document_id]
+    readingBusy.value = new Set(readingBusy.value).add(document.document_id)
+    try {
+      const created = await createReadingMaterial(document.file_id, 'knowledge_base')
+      await deps.router.push({
+        name: 'reading',
+        query: { material: created.material.material_id },
+      })
+    } catch (cause) {
+      // 失败留在卡片上：这里正盯着这份文档，浮层飘走就找不到是哪一份了。
+      readingErrors[document.document_id] = isApiFailure(cause)
+        ? describeFailure(cause.failure)
+        : KNOWLEDGE.enterReadingFailed
+    } finally {
+      const next = new Set(readingBusy.value)
+      next.delete(document.document_id)
+      readingBusy.value = next
+    }
+  }
+
   async function removeDocument(document: KbDocument): Promise<void> {
     const kbId = deps.selectedId.value
     if (!kbId || actionBusy.value) return
@@ -141,6 +178,9 @@ export function useKbDocuments(deps: {
     setDefault,
     deleteBase,
     rebuild,
+    enterReading,
+    isEnteringReading,
+    readingError,
     removeDocument,
   }
 }

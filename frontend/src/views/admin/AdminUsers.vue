@@ -12,6 +12,9 @@ import type { ApiFailure } from '../../api/client'
 import EmptyState from '../../components/common/EmptyState.vue'
 import FailureState from '../../components/common/FailureState.vue'
 import SkeletonBlock from '../../components/common/SkeletonBlock.vue'
+import SurfaceGate from '../../components/common/SurfaceGate.vue'
+import AppShell from '../../components/shell/AppShell.vue'
+import PageHeader from '../../components/shell/PageHeader.vue'
 import { ADMIN } from '../../copy/admin'
 import { currentAccount } from '../../session'
 import { toFailure } from '../../shared/resource'
@@ -57,8 +60,19 @@ async function onCreated(user: AdminUser): Promise<void> {
   selectedId.value = user.user_id
 }
 
+/**
+ * 预设一栏写的是"这个人开局拿到的基线"。老账号的 stored 列为空，但策略读到
+ * 的仍是 `preset_of`，所以两者不同时把生效值也写出来。
+ */
 function presetLabel(user: AdminUser): string {
-  return `${user.preset || '—'} / ${user.preset_of}`
+  return user.preset === user.preset_of
+    ? `${ADMIN.preset} ${user.preset_of || '—'}`
+    : `${ADMIN.preset} ${user.preset || '—'} · ${ADMIN.effectivePreset} ${user.preset_of}`
+}
+
+/** 头像块上的那个字：用户名首字母，与个人中心、主图标栏同一套做法。 */
+function initialOf(user: AdminUser): string {
+  return (user.username || '?').slice(0, 1).toUpperCase()
 }
 
 async function loadUsers(): Promise<void> {
@@ -88,63 +102,86 @@ onMounted(() => {
 
 
 <template>
-  <div class="admin">
-    <SkeletonBlock v-if="usersStatus === 'loading'" :lines="6" :line-height="30" />
+  <AppShell>
+    <SurfaceGate surface="admin">
+      <div class="page">
+        <div class="page__inner">
+          <PageHeader :title="ADMIN.users" :description="ADMIN.usersDescription" />
 
-    <FailureState
-      v-else-if="usersStatus === 'failed' && usersFailure"
-      :failure="usersFailure"
-      title="用户列表没能读出来"
-      @retry="loadUsers"
-    />
+          <div class="admin">
+            <SkeletonBlock v-if="usersStatus === 'loading'" :lines="6" :line-height="30" />
 
-    <template v-else>
-      <div class="toolbar">
-        <input
-          v-model="search"
-          type="search"
-          class="search"
-          :placeholder="ADMIN.searchUsers"
-        />
-        <button type="button" class="ghost" @click="loadUsers">刷新</button>
-        <button v-if="canManage" type="button" class="primary" @click="openCreate">
-          {{ ADMIN.createUser }}
-        </button>
+            <FailureState
+              v-else-if="usersStatus === 'failed' && usersFailure"
+              :failure="usersFailure"
+              title="用户列表没能读出来"
+              @retry="loadUsers"
+            />
+
+            <template v-else>
+              <div class="toolbar">
+                <input
+                  v-model="search"
+                  type="search"
+                  class="search"
+                  :placeholder="ADMIN.searchUsers"
+                />
+                <button type="button" class="set-btn set-btn--ghost" @click="loadUsers">
+                  刷新
+                </button>
+                <button v-if="canManage" type="button" class="set-btn" @click="openCreate">
+                  {{ ADMIN.createUser }}
+                </button>
+              </div>
+
+              <EmptyState
+                v-if="filteredUsers.length === 0"
+                :title="ADMIN.searchUsers"
+                hint="没有匹配的用户。"
+              />
+
+              <ul v-else class="users">
+                <li v-for="user in filteredUsers" :key="user.user_id">
+                  <button
+                    type="button"
+                    class="user"
+                    :class="{ 'user--active': user.user_id === selectedId }"
+                    @click="selectUser(user)"
+                  >
+                    <span class="user__avatar" aria-hidden="true">{{ initialOf(user) }}</span>
+                    <span class="user__text">
+                      <span class="user__name">{{ user.username }}</span>
+                      <span class="user__id">#{{ user.user_id }}</span>
+                    </span>
+                    <span class="user__chips">
+                      <span class="set-chip">{{
+                        user.role === 'admin' ? ADMIN.roleAdmin : ADMIN.roleUser
+                      }}</span>
+                      <span v-if="user.super_admin" class="set-chip set-chip--accent">
+                        {{ ADMIN.superAdmin }}
+                      </span>
+                      <span v-if="user.disabled" class="set-chip set-chip--bad">
+                        {{ ADMIN.disabled }}
+                      </span>
+                    </span>
+                    <span class="user__preset">{{ presetLabel(user) }}</span>
+                  </button>
+                </li>
+              </ul>
+
+              <AdminUserDetail
+                v-if="selectedUser"
+                :user="selectedUser"
+                @changed="loadUsers"
+              />
+            </template>
+
+            <AdminCreateUserDialog ref="createDialog" @created="onCreated" />
+          </div>
+        </div>
       </div>
-
-      <EmptyState
-        v-if="filteredUsers.length === 0"
-        :title="ADMIN.searchUsers"
-        hint="没有匹配的用户。"
-      />
-
-      <ul v-else class="users">
-        <li v-for="user in filteredUsers" :key="user.user_id">
-          <button
-            type="button"
-            class="user"
-            :class="{ 'user--active': user.user_id === selectedId }"
-            @click="selectUser(user)"
-          >
-            <span class="user__name">{{ user.username }}</span>
-            <span class="user__id">#{{ user.user_id }}</span>
-            <span class="chip">{{ user.role === 'admin' ? ADMIN.roleAdmin : ADMIN.roleUser }}</span>
-            <span v-if="user.super_admin" class="chip chip--super">{{ ADMIN.superAdmin }}</span>
-            <span class="user__preset">{{ presetLabel(user) }}</span>
-            <span v-if="user.disabled" class="chip chip--bad">{{ ADMIN.disabled }}</span>
-          </button>
-        </li>
-      </ul>
-
-      <AdminUserDetail
-        v-if="selectedUser"
-        :user="selectedUser"
-        @changed="loadUsers"
-      />
-    </template>
-
-    <AdminCreateUserDialog ref="createDialog" @created="onCreated" />
-  </div>
+    </SurfaceGate>
+  </AppShell>
 </template>
 
 <style scoped src="./AdminUsers.css"></style>

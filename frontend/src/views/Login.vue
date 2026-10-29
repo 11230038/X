@@ -50,7 +50,7 @@ async function submit(credentials: { username: string; password: string }): Prom
 <template>
   <AuthForm
     mode="login"
-    title="登录"
+    title="欢迎来到 Rinnex"
     submit-label="登录"
     :pending="pending"
     :error="error"

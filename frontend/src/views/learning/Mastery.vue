@@ -1,14 +1,22 @@
 <script setup lang="ts">
 /**
- * 掌握路径。
+ * 掌握路径，两级：
  *
- * 左栏是路径列表，右栏交给 `MasteryDetail`。租约是"另一个会话正在写"的提
- * 示：可以等待，也可以让它停下，但**停下不等于拿到**。拿到写权只能靠一次
- * `mastery_path` 对话，页面不假装有这个按钮。
+ * - **一级**（地址里没有 `?path=`）：选一条路径。卡片照知识库目录的尺度，
+ *   点一张进二级；学习地图的一级页是另一种横排风格，两张页面不混。
+ * - **二级**（`?path=<id>`）：这条路径的总览，版面照演示稿的 `mastery-main` ——
+ *   标题区 → 进度卡 → 模块时间线。路径之间不再用页面顶部的胶囊切换，选路径
+ *   回到一级页。
+ *
+ * 租约是"另一个会话正在写"的提示：可以等待，也可以让它停下，但**停下不等于
+ * 拿到**。拿到写权只能靠一次 `mastery_path` 对话，页面不假装有这个按钮。
+ *
+ * 地址仍用同一个路由加 `?path=`：学习地图、监护人设置等处已有的深链接直接落到
+ * 某条路径的总览，不需要改地址。
  */
 
-import { onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 
 import type { ApiFailure } from '../../api/client'
 import {
@@ -31,22 +39,31 @@ import PageHeader from '../../components/shell/PageHeader.vue'
 import { MASTERY } from '../../copy/mastery'
 import { confirmAction } from '../../shared/confirm'
 import { capabilityStatus, hasCapability, refreshCapabilities } from '../../shared/capabilities'
+import { openMasteryChat, openNewMasteryChat } from '../../shared/masteryChat'
 import { toFailure } from '../../shared/resource'
 import { notify } from '../../shared/toast'
 
 import MasteryDetail from './mastery/MasteryDetail.vue'
+import PathChooser from './PathChooser.vue'
 
 const route = useRoute()
 const router = useRouter()
 
+/** 没能开成路径对话时留在页头下面的那句话（`shared/masteryChat.ts`）。 */
+const chatError = ref<string | null>(null)
+
 type Status = 'idle' | 'loading' | 'ready' | 'failed'
 
-/* ── 路径列表 ────────────────────────────────────────────────────────── */
+/** 有 `?path=` 就是二级页；没有就是一级页。 */
+const currentId = computed(() =>
+  typeof route.query.path === 'string' ? route.query.path : '',
+)
+
+/* ── 一级：路径列表 ──────────────────────────────────────────────────── */
 
 const paths = ref<MasterySummary[]>([])
 const pathsStatus = ref<Status>('idle')
 const pathsFailure = ref<ApiFailure | null>(null)
-const currentId = ref('')
 
 async function loadPaths(): Promise<void> {
   pathsStatus.value = 'loading'
@@ -55,31 +72,22 @@ async function loadPaths(): Promise<void> {
     const loaded = await listMasteryPaths()
     paths.value = loaded.paths
     pathsStatus.value = 'ready'
-    const requested = typeof route.query.path === 'string' ? route.query.path : ''
-    const chosen = requested || paths.value[0]?.path_id || ''
-    if (chosen) {
-      currentId.value = chosen
-      if (route.query.path !== chosen) replaceRoute(chosen)
-      await loadPath()
-    }
   } catch (cause) {
     pathsFailure.value = toFailure(cause)
     pathsStatus.value = 'failed'
   }
 }
 
-function replaceRoute(pathId: string): void {
-  void router.replace({ name: 'mastery', query: { path: pathId } })
+function backToPaths(): void {
+  void router.push({ name: 'mastery' })
 }
 
-function selectPath(pathId: string): void {
-  if (pathId === currentId.value) return
-  currentId.value = pathId
-  replaceRoute(pathId)
-  void loadPath()
+/** 一级卡片点进二级；地址仍是这个路由加 `?path=`，既有深链接不用改。 */
+function masteryLink(item: MasterySummary): RouteLocationRaw {
+  return { name: 'mastery', query: { path: item.path_id } }
 }
 
-/* ── 路径详情 ────────────────────────────────────────────────────────── */
+/* ── 二级：路径详情 ──────────────────────────────────────────────────── */
 
 const path = ref<MasteryPath | null>(null)
 const pathStatus = ref<Status>('idle')
@@ -94,6 +102,19 @@ const leaseStatus = ref<Status>('idle')
 const leaseFailure = ref<ApiFailure | null>(null)
 const releasing = ref(false)
 const selectedPointId = ref('')
+
+function resetDetail(): void {
+  path.value = null
+  pathStatus.value = 'idle'
+  pathFailure.value = null
+  insight.value = null
+  insightStatus.value = 'idle'
+  insightFailure.value = null
+  lease.value = null
+  leaseStatus.value = 'idle'
+  leaseFailure.value = null
+  selectedPointId.value = ''
+}
 
 async function loadPath(): Promise<void> {
   const pathId = currentId.value
@@ -189,8 +210,20 @@ function canCreate(): boolean {
   return hasCapability('mastery_path')
 }
 
-function goChat(): void {
-  void router.push({ name: 'mastery-chat' })
+/** 开一条新路径：建一段空会话进二级，路径由第一句到达时创建。 */
+async function goChat(): Promise<void> {
+  chatError.value = null
+  chatError.value = await openNewMasteryChat(router)
+}
+
+/**
+ * 继续这条路径自己的那段对话（二级页的「下一步：学」）。
+ *
+ * 不是新开一段：路径已经在了，新会话只会再建出一条新路径。
+ */
+async function continueChat(): Promise<void> {
+  chatError.value = null
+  chatError.value = await openMasteryChat(router, currentId.value)
 }
 
 function goPractice(): void {
@@ -202,94 +235,98 @@ function goPractice(): void {
 watch(
   () => route.query.path,
   (value) => {
-    if (typeof value !== 'string' || value === '' || value === currentId.value) return
-    currentId.value = value
-    void loadPath()
+    if (typeof value === 'string' && value !== '') {
+      void loadPath()
+      return
+    }
+    // 回到一级：清掉上一条路径的详情，重新读列表。
+    resetDetail()
+    void loadPaths()
   },
 )
 
 onMounted(() => {
   if (canSurface('mastery') === false) return
   if (capabilityStatus.value === 'idle') void refreshCapabilities()
-  void loadPaths()
+  if (currentId.value) void loadPath()
+  else void loadPaths()
+})
+
+/* ── 标题 ────────────────────────────────────────────────────────────── */
+
+const headerTitle = computed(() => {
+  if (currentId.value === '' || !path.value) return MASTERY.title
+  return `${MASTERY.title} · ${path.value.goal}`
+})
+
+const headerDescription = computed(() => {
+  if (currentId.value === '') return MASTERY.indexDescription
+  return path.value?.description || MASTERY.description
 })
 </script>
 
 
 <template>
   <SurfaceGate surface="mastery">
-    <PageHeader :title="MASTERY.title" :description="MASTERY.description" />
+    <PageHeader :title="headerTitle" :description="headerDescription">
+      <template #actions>
+        <button v-if="currentId !== ''" type="button" class="ghost" @click="backToPaths">
+          {{ MASTERY.backToPaths }}
+        </button>
+        <button v-if="canCreate()" type="button" class="primary" @click="goChat">
+          {{ MASTERY.newPath }}
+        </button>
+      </template>
+    </PageHeader>
 
-    <FailureState
-      v-if="pathsStatus === 'failed' && pathsFailure"
-      :failure="pathsFailure"
-      :title="MASTERY.pathsFailed"
-      @retry="loadPaths"
-    />
+    <p v-if="chatError" class="chat-error" role="alert">{{ chatError }}</p>
 
-    <div v-else class="workspace">
-      <!-- 左：路径列表 -->
-      <aside class="side">
-        <div class="side__head">
-          <h2 class="side__title">{{ MASTERY.paths }}</h2>
-          <button v-if="canCreate()" type="button" class="link" @click="goChat">
-            {{ MASTERY.goChat }}
-          </button>
-        </div>
+    <!-- 一级：选路径 -->
+    <template v-if="currentId === ''">
+      <FailureState
+        v-if="pathsStatus === 'failed' && pathsFailure"
+        :failure="pathsFailure"
+        :title="MASTERY.pathsFailed"
+        @retry="loadPaths"
+      />
 
+      <template v-else>
         <SkeletonBlock v-if="pathsStatus === 'loading'" :lines="5" :line-height="32" />
 
-        <template v-else-if="paths.length === 0">
-          <p class="side__empty">{{ MASTERY.pathsEmpty }}</p>
-          <EmptyState
-            :title="MASTERY.pathsEmpty"
-            :hint="canCreate() ? MASTERY.goChatHint : MASTERY.capabilityMissing"
-            :action-label="MASTERY.goChat"
-            @action="goChat"
-          />
-        </template>
+        <EmptyState
+          v-else-if="paths.length === 0"
+          :title="MASTERY.pathsEmpty"
+          :hint="canCreate() ? MASTERY.goChatHint : MASTERY.capabilityMissing"
+          :action-label="MASTERY.newPath"
+          @action="goChat"
+        />
 
-        <ul v-else class="paths">
-          <li v-for="item in paths" :key="item.path_id">
-            <button
-              type="button"
-              class="path"
-              :class="{ 'path--on': item.path_id === currentId }"
-              @click="selectPath(item.path_id)"
-            >
-              <span class="path__goal">{{ item.emoji }} {{ item.goal }}</span>
-              <span class="path__meta">
-                {{ MASTERY.masteredCount(item.mastered, item.knowledge_points) }}
-              </span>
-            </button>
-          </li>
-        </ul>
-      </aside>
+        <PathChooser v-else :paths="paths" :to="masteryLink" />
+      </template>
+    </template>
 
-      <!-- 右：详情 -->
-      <MasteryDetail
-        :path="path"
-        :path-status="pathStatus"
-        :path-failure="pathFailure"
-        :insight="insight"
-        :insight-status="insightStatus"
-        :insight-failure="insightFailure"
-        :lease="lease"
-        :lease-status="leaseStatus"
-        :lease-failure="leaseFailure"
-        :releasing="releasing"
-        :selected-point-id="selectedPointId"
-        :paths-ready="pathsStatus === 'ready'"
-        :has-current="currentId !== ''"
-        @retry-path="loadPath"
-        @retry-insight="loadInsight()"
-        @retry-lease="loadLease()"
-        @release="releaseLease"
-        @select-point="selectedPointId = $event"
-        @go-chat="goChat"
-        @go-practice="goPractice"
-      />
-    </div>
+    <!-- 二级：路径总览，照演示稿 -->
+    <MasteryDetail
+      v-else
+      :path="path"
+      :path-status="pathStatus"
+      :path-failure="pathFailure"
+      :insight="insight"
+      :insight-status="insightStatus"
+      :insight-failure="insightFailure"
+      :lease="lease"
+      :lease-status="leaseStatus"
+      :lease-failure="leaseFailure"
+      :releasing="releasing"
+      :selected-point-id="selectedPointId"
+      @retry-path="loadPath"
+      @retry-insight="loadInsight()"
+      @retry-lease="loadLease()"
+      @release="releaseLease"
+      @select-point="selectedPointId = $event"
+      @go-chat="continueChat"
+      @go-practice="goPractice"
+    />
   </SurfaceGate>
 </template>
 

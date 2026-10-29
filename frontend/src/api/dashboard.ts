@@ -2,11 +2,21 @@
 
 import { request } from './client'
 
+export interface DashboardProgress {
+  done: number
+  total: number
+}
+
 export interface DashboardEntry {
   id: string
   title: string
   context?: string
   updated_at?: string
+  /**
+   * 只有掌握路径带这个比例（已掌握 / 知识点总数）。会话与复习队列没有可数的
+   * 东西，所以字段缺席 —— 缺席是"没有这一项统计"，不是"完成了 0"。
+   */
+  progress?: DashboardProgress
 }
 
 export interface DashboardRecommendation {

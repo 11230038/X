@@ -186,17 +186,20 @@ onMounted(() => {
 .quiz {
   width: min(560px, calc(100vw - 32px));
   max-height: calc(100vh - 64px);
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 24px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: rgb(255 255 255 / 92%);
   color: var(--text);
-  box-shadow: 0 18px 48px rgb(20 26 38 / 18%);
+  box-shadow: 0 24px 64px -12px rgb(51 68 85 / 20%);
   overflow: auto;
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
 }
 
 .quiz::backdrop {
-  background: rgb(20 26 38 / 32%);
+  background: rgb(20 26 38 / 25%);
+  backdrop-filter: blur(6px);
 }
 
 .quiz__title {
@@ -215,7 +218,7 @@ onMounted(() => {
 .quiz__bank {
   margin: -4px 0 12px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .quiz__options {
@@ -229,24 +232,27 @@ onMounted(() => {
   gap: 10px;
   align-items: flex-start;
   width: 100%;
-  padding: 8px 11px;
-  border: 1px solid var(--border-strong);
+  padding: 10px 13px;
+  border: 1px solid rgb(0 0 0 / 8%);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: rgb(255 255 255 / 70%);
   color: var(--text);
   text-align: left;
   font-size: 14px;
   line-height: 1.55;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .quiz__option:hover {
-  background: var(--surface-sunken);
+  border-color: var(--accent);
+  background: #fff;
 }
 
 .quiz__option--picked {
   border-color: var(--accent);
-  background: var(--accent-soft);
+  background: #fff;
+  box-shadow: 0 4px 12px -6px rgb(177 140 255 / 50%);
 }
 
 .quiz__key {
@@ -254,7 +260,7 @@ onMounted(() => {
   min-width: 18px;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 650;
 }
 
@@ -265,19 +271,21 @@ onMounted(() => {
 .quiz__hint {
   margin: 2px 0 0;
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .quiz__input {
   width: 100%;
-  padding: 9px 11px;
-  border: 1px solid var(--border-strong);
+  padding: 10px 13px;
+  border: 1px solid rgb(0 0 0 / 8%);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: rgb(255 255 255 / 80%);
   color: var(--text);
   font: inherit;
   font-size: 14px;
   line-height: 1.6;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .quiz__input--long {
@@ -286,14 +294,15 @@ onMounted(() => {
 }
 
 .quiz__input:focus {
-  border-color: var(--accent);
-  outline: 2px solid var(--accent-soft);
+  border-color: var(--color-purple);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
 }
 
 .quiz__offline {
   margin: 10px 0 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .quiz__actions {
@@ -304,12 +313,21 @@ onMounted(() => {
 }
 
 .quiz__submit {
-  padding: 6px 14px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
-  background: var(--accent);
+  padding: 7px 16px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--accent-gradient);
   color: #fff;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgb(177 140 255 / 30%);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.quiz__submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgb(177 140 255 / 40%);
 }
 
 .quiz__submit:disabled {
@@ -318,15 +336,20 @@ onMounted(() => {
 }
 
 .quiz__later {
-  padding: 6px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 7px 15px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 78%);
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .quiz__later:hover {
-  background: var(--surface-sunken);
+  border-color: var(--accent);
+  background: #fff;
+  color: var(--text);
 }
 </style>

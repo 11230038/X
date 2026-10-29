@@ -15,7 +15,7 @@
  *    说明这个编号被别的内容用过，换一个新的再交。
  */
 
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import type { ApiFailure } from '../../api/client'
@@ -35,14 +35,12 @@ import EmptyState from '../../components/common/EmptyState.vue'
 import FailureState from '../../components/common/FailureState.vue'
 import QuotaState from '../../components/common/QuotaState.vue'
 import SkeletonBlock from '../../components/common/SkeletonBlock.vue'
-import SurfaceGate from '../../components/common/SurfaceGate.vue'
 import PageHeader from '../../components/shell/PageHeader.vue'
 import { PRACTICE } from '../../copy/practice'
 import { QUESTIONS } from '../../copy/questions'
 import { formatDateTime, formatPercent } from '../../shared/format'
 import { toFailure } from '../../shared/resource'
-
-import PracticeStats from './practice/PracticeStats.vue'
+import { setPracticeAnswered, setPracticeQuestion } from './practice/currentQuestion'
 
 const router = useRouter()
 
@@ -342,6 +340,25 @@ const quotaResetAt = computed(() => {
   return typeof value === 'string' ? value : ''
 })
 
+/**
+ * 右侧面板的错题解析要的是"眼前这道题"。队列与面板分属两个 `AppShell`
+ * 插槽，状态传不上去，所以当前题写进 `currentQuestion.ts` 这个小 store；
+ * 主列卸载时清空，面板不会拿着上一页的题继续解析。
+ */
+watch(current, (item) => setPracticeQuestion(item), { immediate: true })
+
+/**
+ * 作答与否也写进去：错题解析只在这道题答过之后才可用（否则它先说出答案）。
+ * 判分落下来（`judged`）或用户主动跳过（`skipped`）就算答过；换题、提交中、
+ * 判分失败这些阶段都重新锁上——没记下的那次提交还在等他重试。
+ */
+watch(phase, (value) => setPracticeAnswered(value === 'judged' || value === 'skipped'))
+
+onBeforeUnmount(() => {
+  setPracticeQuestion(null)
+  setPracticeAnswered(false)
+})
+
 onMounted(() => {
   if (canSurface('practice') === false) return
   void loadQueue()
@@ -349,230 +366,225 @@ onMounted(() => {
 </script>
 
 <template>
-  <SurfaceGate surface="practice">
-    <PageHeader :title="PRACTICE.title" :description="PRACTICE.description" />
+  <PageHeader :title="PRACTICE.title" :description="PRACTICE.description" />
 
-    <!-- 队列本身 -->
-    <SkeletonBlock v-if="queueStatus === 'loading'" :lines="8" :line-height="42" />
+  <!-- 队列本身 -->
+  <SkeletonBlock v-if="queueStatus === 'loading'" :lines="8" :line-height="42" />
 
-    <FailureState
-      v-else-if="queueStatus === 'failed' && queueFailure"
-      :failure="queueFailure"
-      :title="'复习队列没有读出来'"
-      @retry="loadQueue"
-    />
+  <FailureState
+    v-else-if="queueStatus === 'failed' && queueFailure"
+    :failure="queueFailure"
+    :title="'复习队列没有读出来'"
+    @retry="loadQueue"
+  />
 
-    <EmptyState
-      v-else-if="queue.length === 0"
-      :title="PRACTICE.emptyQueue"
-      :hint="PRACTICE.emptyQueueHint"
-      :action-label="PRACTICE.goQuestions"
-      @action="router.push({ name: 'questions' })"
-    />
+  <EmptyState
+    v-else-if="queue.length === 0"
+    :title="PRACTICE.emptyQueue"
+    :hint="PRACTICE.emptyQueueHint"
+    :action-label="PRACTICE.goQuestions"
+    @action="router.push({ name: 'questions' })"
+  />
 
-    <EmptyState
-      v-else-if="finished"
-      title="这一轮做完了"
-      hint="可以重新抽一轮队列，或者回题库看看。"
-      action-label="再看一次队列"
-      :secondary-label="PRACTICE.backToQuestions"
-      @action="loadQueue"
-      @secondary="router.push({ name: 'questions' })"
-    />
+  <EmptyState
+    v-else-if="finished"
+    title="这一轮做完了"
+    hint="可以重新抽一轮队列，或者回题库看看。"
+    action-label="再看一次队列"
+    :secondary-label="PRACTICE.backToQuestions"
+    @action="loadQueue"
+    @secondary="router.push({ name: 'questions' })"
+  />
 
-    <section v-else-if="current" class="card">
-      <header class="card__head">
-        <div class="card__badges">
-          <span class="chip">{{ typeLabel(current.question.question_type) }}</span>
-          <span class="chip">{{ reasonLabel(current) }}</span>
-          <span v-if="current.is_mistake" class="chip chip--danger">{{ PRACTICE.mistake }}</span>
-        </div>
-        <span class="card__progress">{{ PRACTICE.queueProgress(index + 1, queue.length) }}</span>
+  <section v-else-if="current" class="card">
+    <header class="card__head">
+      <div class="card__badges">
+        <span class="chip">{{ typeLabel(current.question.question_type) }}</span>
+        <span class="chip">{{ reasonLabel(current) }}</span>
+        <span v-if="current.is_mistake" class="chip chip--danger">{{ PRACTICE.mistake }}</span>
+      </div>
+      <span class="card__progress">{{ PRACTICE.queueProgress(index + 1, queue.length) }}</span>
+    </header>
+
+    <p class="card__question">{{ current.question.text }}</p>
+
+    <!-- 题目旁边：不会就先把这道题记成答错，再去题目问答里问它。 -->
+    <div v-if="canAsk" class="card__ask">
+      <button
+        type="button"
+        class="ghost card__ask-button"
+        :disabled="asking || phase === 'submitting'"
+        @click="askAboutCurrent"
+      >
+        {{ asking ? PRACTICE.asking : PRACTICE.askAbout }}
+      </button>
+      <p v-if="askFailure" class="card__ask-error" role="alert">
+        <span>{{ PRACTICE.askFailed }}</span>
+        {{ describeFailure(askFailure) }}
+        <button type="button" class="card__ask-retry" @click="askAboutCurrent">
+          {{ PRACTICE.retry }}
+        </button>
+      </p>
+    </div>
+
+    <p v-if="current.answer.attempt_count > 0" class="card__prior">
+      {{ QUESTIONS.attempts(current.answer.attempt_count) }}
+      <span v-if="current.answer.updated_at">
+        · {{ QUESTIONS.lastAnswered }}：{{ formatDateTime(current.answer.updated_at) }}
+      </span>
+      <span v-if="current.state?.version !== undefined" class="card__version">
+        · 状态版本 {{ current.state?.version }}
+      </span>
+    </p>
+
+    <!-- 作答区。判分之后只读，但内容留着。 -->
+    <fieldset
+      v-if="current.question.question_type === 'choice'"
+      class="choices"
+      :disabled="phase !== 'answering'"
+    >
+      <legend class="visually-hidden">{{ PRACTICE.choiceHint }}</legend>
+      <label
+        v-for="option in current.question.options"
+        :key="option.key"
+        class="choice"
+        :class="{ 'choice--on': choice === option.key }"
+      >
+        <input v-model="choice" type="radio" :value="option.key" />
+        <span class="choice__key">{{ option.key }}</span>
+        <span class="choice__text">{{ option.text }}</span>
+      </label>
+    </fieldset>
+
+    <textarea
+      v-else
+      v-model="answerText"
+      class="answer"
+      rows="4"
+      :placeholder="PRACTICE.answerPlaceholder"
+      :disabled="phase !== 'answering'"
+      :aria-label="PRACTICE.answerPlaceholder"
+    ></textarea>
+
+    <div class="actions">
+      <button
+        type="button"
+        class="primary"
+        :disabled="!canSubmit"
+        @click="submit()"
+      >
+        {{ phase === 'submitting' ? PRACTICE.submitting : PRACTICE.submit }}
+      </button>
+      <button
+        type="button"
+        class="ghost"
+        :disabled="phase === 'submitting' || asking"
+        @click="skip"
+      >
+        {{ phase === 'submitting' ? PRACTICE.skipping : PRACTICE.skip }}
+      </button>
+    </div>
+
+    <!-- 判分结果 -->
+    <section v-if="phase === 'judged' && result?.judgment" class="judgment">
+      <header class="judgment__head">
+        <h2 class="judgment__title">
+          {{ judgmentTitle(result.judgment) }}
+        </h2>
+        <span
+          class="judgment__verdict"
+          :class="{ 'judgment__verdict--ok': result.judgment.is_correct }"
+        >
+          {{ result.judgment.is_correct ? PRACTICE.correct : PRACTICE.incorrect }}
+        </span>
+        <span v-if="result.judgment.kind === 'model_judgment'" class="judgment__kind">
+          {{ PRACTICE.modelTitle }}
+        </span>
       </header>
 
-      <p class="card__question">{{ current.question.text }}</p>
+      <p v-if="result.replayed" class="judgment__replayed">{{ PRACTICE.replayed }}</p>
 
-      <!-- 题目旁边：不会就先把这道题记成答错，再去题目问答里问它。 -->
-      <div v-if="canAsk" class="card__ask">
-        <button
-          type="button"
-          class="ghost card__ask-button"
-          :disabled="asking || phase === 'submitting'"
-          @click="askAboutCurrent"
-        >
-          {{ asking ? PRACTICE.asking : PRACTICE.askAbout }}
-        </button>
-        <p v-if="askFailure" class="card__ask-error" role="alert">
-          <span>{{ PRACTICE.askFailed }}</span>
-          {{ describeFailure(askFailure) }}
-          <button type="button" class="card__ask-retry" @click="askAboutCurrent">
-            {{ PRACTICE.retry }}
-          </button>
-        </p>
-      </div>
+      <p v-if="result.judgment.reason" class="judgment__reason">{{ result.judgment.reason }}</p>
 
-      <p v-if="current.answer.attempt_count > 0" class="card__prior">
-        {{ QUESTIONS.attempts(current.answer.attempt_count) }}
-        <span v-if="current.answer.updated_at">
-          · {{ QUESTIONS.lastAnswered }}：{{ formatDateTime(current.answer.updated_at) }}
-        </span>
-        <span v-if="current.state?.version !== undefined" class="card__version">
-          · 状态版本 {{ current.state?.version }}
-        </span>
-      </p>
+      <dl class="judgment__meta">
+        <template v-if="confidenceText(result.judgment)">
+          <dt>{{ PRACTICE.confidence }}</dt>
+          <dd>{{ confidenceText(result.judgment) }}</dd>
+        </template>
+        <template v-if="result.judgment.model">
+          <dt>{{ PRACTICE.model }}</dt>
+          <dd>{{ result.judgment.model }}</dd>
+        </template>
+      </dl>
 
-      <!-- 作答区。判分之后只读，但内容留着。 -->
-      <fieldset
-        v-if="current.question.question_type === 'choice'"
-        class="choices"
-        :disabled="phase !== 'answering'"
-      >
-        <legend class="visually-hidden">{{ PRACTICE.choiceHint }}</legend>
-        <label
-          v-for="option in current.question.options"
-          :key="option.key"
-          class="choice"
-          :class="{ 'choice--on': choice === option.key }"
-        >
-          <input v-model="choice" type="radio" :value="option.key" />
-          <span class="choice__key">{{ option.key }}</span>
-          <span class="choice__text">{{ option.text }}</span>
-        </label>
-      </fieldset>
-
-      <textarea
-        v-else
-        v-model="answerText"
-        class="answer"
-        rows="4"
-        :placeholder="PRACTICE.answerPlaceholder"
-        :disabled="phase !== 'answering'"
-        :aria-label="PRACTICE.answerPlaceholder"
-      ></textarea>
-
-      <div class="actions">
-        <button
-          type="button"
-          class="primary"
-          :disabled="!canSubmit"
-          @click="submit()"
-        >
-          {{ phase === 'submitting' ? PRACTICE.submitting : PRACTICE.submit }}
-        </button>
-        <button
-          type="button"
-          class="ghost"
-          :disabled="phase === 'submitting' || asking"
-          @click="skip"
-        >
-          {{ phase === 'submitting' ? PRACTICE.skipping : PRACTICE.skip }}
-        </button>
-      </div>
-
-      <!-- 判分结果 -->
-      <section v-if="phase === 'judged' && result?.judgment" class="judgment">
-        <header class="judgment__head">
-          <h2 class="judgment__title">
-            {{ judgmentTitle(result.judgment) }}
-          </h2>
-          <span
-            class="judgment__verdict"
-            :class="{ 'judgment__verdict--ok': result.judgment.is_correct }"
-          >
-            {{ result.judgment.is_correct ? PRACTICE.correct : PRACTICE.incorrect }}
-          </span>
-          <span v-if="result.judgment.kind === 'model_judgment'" class="judgment__kind">
-            {{ PRACTICE.modelTitle }}
-          </span>
-        </header>
-
-        <p v-if="result.replayed" class="judgment__replayed">{{ PRACTICE.replayed }}</p>
-
-        <p v-if="result.judgment.reason" class="judgment__reason">{{ result.judgment.reason }}</p>
-
-        <dl class="judgment__meta">
-          <template v-if="confidenceText(result.judgment)">
-            <dt>{{ PRACTICE.confidence }}</dt>
-            <dd>{{ confidenceText(result.judgment) }}</dd>
-          </template>
-          <template v-if="result.judgment.model">
-            <dt>{{ PRACTICE.model }}</dt>
-            <dd>{{ result.judgment.model }}</dd>
-          </template>
-        </dl>
-
-        <section v-if="result.judgment.rubric.length > 0" class="judgment__block">
-          <h3 class="judgment__label">{{ PRACTICE.rubric }}</h3>
-          <ul class="judgment__list">
-            <li v-for="(line, i) in result.judgment.rubric" :key="i">{{ line }}</li>
-          </ul>
-        </section>
-
-        <section v-if="result.judgment.feedback" class="judgment__block">
-          <h3 class="judgment__label">{{ PRACTICE.feedback }}</h3>
-          <p class="judgment__text">{{ result.judgment.feedback }}</p>
-        </section>
-
-        <section v-if="result.judgment.suggestion" class="judgment__block">
-          <h3 class="judgment__label">{{ PRACTICE.suggestion }}</h3>
-          <p class="judgment__text">{{ result.judgment.suggestion }}</p>
-        </section>
-
-        <section v-if="result.judgment.boundary" class="judgment__block">
-          <h3 class="judgment__label">{{ PRACTICE.boundary }}</h3>
-          <p class="judgment__text">{{ result.judgment.boundary }}</p>
-        </section>
-
-        <button type="button" class="primary" @click="next">{{ PRACTICE.next }}</button>
+      <section v-if="result.judgment.rubric.length > 0" class="judgment__block">
+        <h3 class="judgment__label">{{ PRACTICE.rubric }}</h3>
+        <ul class="judgment__list">
+          <li v-for="(line, i) in result.judgment.rubric" :key="i">{{ line }}</li>
+        </ul>
       </section>
 
-      <!-- 跳过 -->
-      <section v-else-if="phase === 'skipped'" class="judgment">
-        <h2 class="judgment__title">{{ PRACTICE.skippedTitle }}</h2>
-        <p class="judgment__text">{{ PRACTICE.skippedHint }}</p>
-        <button type="button" class="primary" @click="next">{{ PRACTICE.next }}</button>
+      <section v-if="result.judgment.feedback" class="judgment__block">
+        <h3 class="judgment__label">{{ PRACTICE.feedback }}</h3>
+        <p class="judgment__text">{{ result.judgment.feedback }}</p>
       </section>
 
-      <!-- 判分服务不可用：作答与 request_id 都还在。 -->
-      <section v-else-if="phase === 'failed'" class="judgment judgment--failed">
-        <h2 class="judgment__title">{{ PRACTICE.failed }}</h2>
-        <p class="judgment__text">
-          {{ failureCode === 'judge_unavailable' ? PRACTICE.judgeUnavailable : submitFailure ? describeFailure(submitFailure) : PRACTICE.failed }}
-        </p>
-        <p v-if="submitFailure?.requestId" class="judgment__request">
-          请求编号：{{ submitFailure.requestId }}
-        </p>
-        <button type="button" class="primary" @click="retryFailed">{{ PRACTICE.retry }}</button>
+      <section v-if="result.judgment.suggestion" class="judgment__block">
+        <h3 class="judgment__label">{{ PRACTICE.suggestion }}</h3>
+        <p class="judgment__text">{{ result.judgment.suggestion }}</p>
       </section>
 
-      <section v-else-if="phase === 'not_judgeable'" class="judgment judgment--failed">
-        <h2 class="judgment__title">{{ PRACTICE.notJudgeable }}</h2>
-        <p class="judgment__text">{{ submitFailure?.message }}</p>
-        <button type="button" class="primary" @click="skip">{{ PRACTICE.skip }}</button>
+      <section v-if="result.judgment.boundary" class="judgment__block">
+        <h3 class="judgment__label">{{ PRACTICE.boundary }}</h3>
+        <p class="judgment__text">{{ result.judgment.boundary }}</p>
       </section>
 
-      <section v-else-if="phase === 'stale'" class="judgment judgment--warning">
-        <h2 class="judgment__title">{{ PRACTICE.staleReview }}</h2>
-        <button type="button" class="primary" @click="adoptLatest">
-          {{ PRACTICE.adoptLatest }}
-        </button>
-      </section>
-
-      <section v-else-if="phase === 'conflict'" class="judgment judgment--warning">
-        <h2 class="judgment__title">{{ PRACTICE.conflictingRequest }}</h2>
-        <button type="button" class="primary" @click="retryFailed">{{ PRACTICE.submit }}</button>
-      </section>
-
-      <QuotaState
-        v-else-if="phase === 'quota'"
-        :reset-at="quotaResetAt"
-        @back="router.push({ name: 'questions' })"
-      />
+      <button type="button" class="primary" @click="next">{{ PRACTICE.next }}</button>
     </section>
 
-    <!-- 统计。它自己的失败只影响这一段。 -->
-    <PracticeStats />
-  </SurfaceGate>
+    <!-- 跳过 -->
+    <section v-else-if="phase === 'skipped'" class="judgment">
+      <h2 class="judgment__title">{{ PRACTICE.skippedTitle }}</h2>
+      <p class="judgment__text">{{ PRACTICE.skippedHint }}</p>
+      <button type="button" class="primary" @click="next">{{ PRACTICE.next }}</button>
+    </section>
+
+    <!-- 判分服务不可用：作答与 request_id 都还在。 -->
+    <section v-else-if="phase === 'failed'" class="judgment judgment--failed">
+      <h2 class="judgment__title">{{ PRACTICE.failed }}</h2>
+      <p class="judgment__text">
+        {{ failureCode === 'judge_unavailable' ? PRACTICE.judgeUnavailable : submitFailure ? describeFailure(submitFailure) : PRACTICE.failed }}
+      </p>
+      <p v-if="submitFailure?.requestId" class="judgment__request">
+        请求编号：{{ submitFailure.requestId }}
+      </p>
+      <button type="button" class="primary" @click="retryFailed">{{ PRACTICE.retry }}</button>
+    </section>
+
+    <section v-else-if="phase === 'not_judgeable'" class="judgment judgment--failed">
+      <h2 class="judgment__title">{{ PRACTICE.notJudgeable }}</h2>
+      <p class="judgment__text">{{ submitFailure?.message }}</p>
+      <button type="button" class="primary" @click="skip">{{ PRACTICE.skip }}</button>
+    </section>
+
+    <section v-else-if="phase === 'stale'" class="judgment judgment--warning">
+      <h2 class="judgment__title">{{ PRACTICE.staleReview }}</h2>
+      <button type="button" class="primary" @click="adoptLatest">
+        {{ PRACTICE.adoptLatest }}
+      </button>
+    </section>
+
+    <section v-else-if="phase === 'conflict'" class="judgment judgment--warning">
+      <h2 class="judgment__title">{{ PRACTICE.conflictingRequest }}</h2>
+      <button type="button" class="primary" @click="retryFailed">{{ PRACTICE.submit }}</button>
+    </section>
+
+    <QuotaState
+      v-else-if="phase === 'quota'"
+      :reset-at="quotaResetAt"
+      @back="router.push({ name: 'questions' })"
+    />
+  </section>
 </template>
 
 <style scoped src="./Practice.css"></style>

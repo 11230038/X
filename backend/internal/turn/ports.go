@@ -296,9 +296,10 @@ type ClaimRequest struct {
 	SessionID  string
 	TurnID     string
 	// Goal is what this turn is about. It is used only when the conversation has
-	// no path yet, where it becomes the new path's goal — and it is the user's
-	// own words rather than a summary of them, because a path's goal is read
-	// back to the learner as the thing they set out to learn.
+	// no path yet, where it becomes the new path's goal until the turn has an
+	// answer to name it with. It is the user's own words rather than a summary
+	// of them: the summary needs the answer, and the answer does not exist yet
+	// when the claim is made. The turn replaces it through Claimed.Name.
 	Goal string
 	// Caller is who is running this turn. It is here rather than derived from the
 	// session because the two are not the same fact: a turn started in a session
@@ -331,6 +332,16 @@ type Claimed struct {
 	// scoped to the caller's turn id — and it follows a mastery_switch to the
 	// path the turn ended on. Nil for a turn with no path.
 	Release func(ctx context.Context) error
+	// Name gives the path this turn opened the name and the sentence the learner
+	// will read it under, and the runtime calls it once the turn has a summary to
+	// give — the title it names the session with, and a one-line description from
+	// the same exchange.
+	//
+	// It is set only for a turn that opened the path: a path the conversation
+	// came back to was named by the turn that opened it, or by the learner, and
+	// neither is this turn's to overwrite. Nil for a turn on no path, and for a
+	// turn on a path it did not open.
+	Name func(ctx context.Context, title, description string) error
 }
 
 // Notebook is the part of the question bank domain the runtime uses: the bank a

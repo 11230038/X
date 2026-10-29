@@ -57,15 +57,15 @@ defineEmits<{
 .empty__title {
   margin: 0;
   color: var(--text);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 700;
 }
 
 .empty__hint {
   max-width: 36em;
   margin: 0;
-  color: var(--text-muted);
-  font-size: 12px;
+  color: var(--text-faint);
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -73,35 +73,39 @@ defineEmits<{
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 6px;
+  margin-top: 8px;
 }
 
 .empty__action {
-  padding: 6px 14px;
-  border: 1px solid var(--accent);
+  padding: 10px 20px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: var(--accent);
+  background: var(--accent-gradient);
   color: #fff;
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 4px 12px rgb(177 140 255 / 30%);
 }
 
 .empty__action:hover {
-  filter: brightness(0.95);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgb(177 140 255 / 40%);
 }
 
 .empty__secondary {
-  padding: 6px 12px;
-  border: 1px solid var(--border-strong);
+  padding: 10px 18px;
+  border: 1px solid rgb(0 0 0 / 8%);
   border-radius: var(--radius-sm);
-  background: transparent;
+  background: #fff;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: 600;
   cursor: pointer;
 }
 
 .empty__secondary:hover {
-  background: var(--surface-sunken);
+  border-color: var(--text);
   color: var(--text);
 }
 </style>

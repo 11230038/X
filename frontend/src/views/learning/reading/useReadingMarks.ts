@@ -83,8 +83,13 @@ export function useReadingMarks(options: {
     await addMark('highlight', '')
   }
 
+  /**
+   * 收藏选中的这一段。书签在正文里没有可见的痕迹（只有高亮会在原文上画），
+   * 所以这里补一条 toast —— 否则按下之后屏幕上看不出发生了什么。位置由
+   * 收藏夹按坐标回读原文，书签自己不复制那段文字。
+   */
   async function addBookmark(): Promise<void> {
-    await addMark('bookmark', '')
+    if (await addMark('bookmark', '')) notify(READING.favoriteSaved, 'success')
   }
 
   function jumpToMark(mark: ReadingMark): void {

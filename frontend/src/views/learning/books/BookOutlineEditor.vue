@@ -241,31 +241,34 @@ function titleCount(draft: Draft): string {
 .editor {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
 }
 
 .editor__head {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 14px;
   align-items: flex-start;
   justify-content: space-between;
 }
 
 .editor__title {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 650;
 }
 
 .editor__hint {
   margin: 3px 0 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .rows {
@@ -279,7 +282,7 @@ function titleCount(draft: Draft): string {
 
 .row {
   display: flex;
-  gap: 10px;
+  gap: 14px;
   align-items: flex-start;
   padding: 10px;
   border: 1px solid var(--border);
@@ -298,7 +301,7 @@ function titleCount(draft: Draft): string {
 
 .row__ordinal {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
   white-space: nowrap;
 }
 
@@ -308,15 +311,21 @@ function titleCount(draft: Draft): string {
 }
 
 .row__move {
-  width: 22px;
-  height: 20px;
+  width: 24px;
+  height: 22px;
   padding: 0;
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  background: var(--surface);
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 78%);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
   cursor: pointer;
+}
+
+.row__move:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: #fff;
+  color: var(--text);
 }
 
 .row__move:disabled {
@@ -340,7 +349,7 @@ function titleCount(draft: Draft): string {
 .row__count {
   margin-left: 6px;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .row__remove {

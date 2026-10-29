@@ -7,8 +7,8 @@
  *
  * - **回答走 Markdown**，HTML 只来自 `markdown/render.ts` 并经过 DOMPurify；
  *   引用编号只有能对上来源时才做成按钮。
- * - **阶段名与总数来自能力**，由 `socket.ts` 算好放在块里。阶段（能力声明的
- *   第几步）与 `progress`（阶段内部的多步进度）是两件事，画法也不同。
+ * - **阶段（能力声明的第几步）不在这里画**：它是动作，不是内容，右侧「活动」
+ *   时间线已经列着。使用方传进来的块先滤掉了阶段，这一层只管剩下的。
  * - **思考是推理，不是回答**：它是可折叠的次要内容，永远不混进回答正文。
  * - **工具结果按纯文本画**：外部数据源不决定页面结构。
  */
@@ -69,13 +69,6 @@ function outcomeLabel(status: string): string {
           —— 这里表达的是"还有字要来"。
         -->
         <span v-if="!block.complete" class="answer__typing" aria-label="正在生成">···</span>
-      </div>
-
-      <!-- 阶段指示。"第 3/5 步"里的两个数字都来自能力的阶段表。 -->
-      <div v-else-if="block.kind === 'stage'" class="stage" :class="{ 'stage--done': block.done }">
-        <span class="stage__mark" aria-hidden="true">{{ block.done ? '✓' : '●' }}</span>
-        <span class="stage__name">{{ block.name }}</span>
-        <span v-if="block.index > 0" class="stage__count">第 {{ block.index }}/{{ block.total }} 步</span>
       </div>
 
       <!-- 思考。可折叠，默认收起；它不参与回答正文。 -->
@@ -157,12 +150,14 @@ function outcomeLabel(status: string): string {
 </template>
 
 <style scoped>
+/* 演示稿 `.chat-stream`：行距 24，横向留白由页面那层给（主列 40）。
+   现在行距放到 32、底部留 28：回答字号变大之后，24 的行距会显得挤。 */
 .stream {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 32px;
   margin: 0;
-  padding: 20px 24px 8px;
+  padding: 0 40px 28px;
   list-style: none;
 }
 
@@ -177,18 +172,23 @@ function outcomeLabel(status: string): string {
 .bubble-wrap {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   align-items: flex-end;
-  max-width: 72%;
+  max-width: 70%;
 }
 
+/* 用户气泡照演示稿：粉紫渐变、白字、右下角收成 4px。 */
 .bubble {
   max-width: 100%;
-  padding: 9px 13px;
-  border-radius: var(--radius) var(--radius) 2px var(--radius);
-  background: var(--accent-soft);
+  padding: 18px 26px;
+  border-radius: 24px 24px 4px 24px;
+  background: var(--warm-gradient);
+  color: #fff;
+  font-size: 18px;
+  line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  box-shadow: 0 8px 24px rgb(247 169 239 / 30%);
 }
 
 .unconfirmed {
@@ -196,7 +196,7 @@ function outcomeLabel(status: string): string {
   gap: 8px;
   align-items: center;
   color: var(--warning);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .unconfirmed__retry {
@@ -205,13 +205,28 @@ function outcomeLabel(status: string): string {
   border-radius: 4px;
   background: transparent;
   color: var(--warning);
-  font-size: 11px;
+  font-size: 13px;
   cursor: pointer;
 }
 
+/* AI 回答是一块玻璃气泡，左上角保留 4px 的"指向"缺口。 */
 .answer {
-  max-width: 100%;
+  max-width: 80%;
   min-width: 0;
+  padding: 24px 28px;
+  border: 1px solid var(--glass-border);
+  border-radius: 24px 24px 24px 4px;
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* 对话是这一页的主角：回答正文与共用正文同一档（18px），只是行距更宽。
+   这个覆盖只落在对话流里，书籍章节与阅读助手不受影响。 */
+.answer :deep(.markdown) {
+  font-size: 18px;
+  line-height: 1.85;
 }
 
 .answer__typing {
@@ -219,36 +234,11 @@ function outcomeLabel(status: string): string {
   letter-spacing: 0.15em;
 }
 
-.stage {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
-.stage--done {
-  color: var(--success);
-  border-color: #bfe0cd;
-}
-
-.stage__mark {
-  font-size: 11px;
-}
-
-.stage__count {
-  color: var(--text-faint);
-}
-
 .thinking {
   padding: 6px 10px;
   border-left: 2px solid var(--border-strong);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .thinking__summary {
@@ -270,7 +260,7 @@ function outcomeLabel(status: string): string {
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-sm);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .observation__label {
@@ -287,7 +277,7 @@ function outcomeLabel(status: string): string {
   gap: 8px;
   align-items: center;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .progress__count {
@@ -311,10 +301,10 @@ function outcomeLabel(status: string): string {
 }
 
 .sources {
-  border: 1px solid var(--border);
+  border: 1px solid rgb(255 255 255 / 70%);
   border-radius: var(--radius-sm);
-  background: var(--surface);
-  font-size: 12px;
+  background: rgb(255 255 255 / 50%);
+  font-size: 13px;
 }
 
 .sources__summary {
@@ -359,7 +349,7 @@ function outcomeLabel(status: string): string {
   background: var(--accent-soft);
   color: var(--accent);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .sources__title {
@@ -399,13 +389,13 @@ function outcomeLabel(status: string): string {
   gap: 8px;
   margin-top: 6px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .error__quota {
   margin-top: 4px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .error__code {
@@ -417,7 +407,7 @@ function outcomeLabel(status: string): string {
   gap: 10px;
   align-items: center;
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .done__partial {

@@ -1,0 +1,125 @@
+/* 技能 / 工具目录。两块共用这套尺度：一条标题行，下面一列白卡。
+   标题行不放进面板里 —— 它跟着页面走，列表才是内容。 */
+.catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.catalog__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding-bottom: 2px;
+}
+
+.catalog__head .set-btn {
+  margin-left: auto;
+}
+
+.cards,
+.tools {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card,
+.tool {
+  padding: 16px 20px;
+  border: 1px solid rgb(255 255 255 / 70%);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 55%);
+  box-shadow: var(--inset-light);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover,
+.tool:hover {
+  background: #fff;
+  box-shadow: 0 6px 16px -8px rgb(51 68 85 / 25%);
+}
+
+.card__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+}
+
+/* 能力名是代码标识，用等宽字 + 强调色；描述跟在后面说人话。 */
+.card__name,
+.tool__name {
+  color: var(--accent-ink);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.card__description {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  margin-top: 10px;
+}
+
+.row__label {
+  min-width: 4.5em;
+  color: var(--text-faint);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.row__note,
+.note {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.row .row__note {
+  margin-top: 0;
+}
+
+.tool {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+/* 名字与描述叠在左边，右边留给"调用它的能力"。描述可能有一两句，所以顶对齐。 */
+.tool__head {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.tool__description {
+  margin: 0;
+  max-width: 64ch;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.tool__owners {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+}

@@ -29,6 +29,7 @@ type Readings interface {
 	Position(ctx context.Context, materialID, sessionID string, caller authz.Caller) (reading.Position, bool, error)
 	SavePosition(ctx context.Context, request reading.SavePositionRequest, caller authz.Caller) (reading.Position, error)
 	Marks(ctx context.Context, materialID string, caller authz.Caller) ([]reading.Mark, error)
+	Bookmarks(ctx context.Context, caller authz.Caller) ([]reading.Bookmark, error)
 	AddMark(ctx context.Context, request reading.MarkRequest, caller authz.Caller) (reading.Mark, error)
 	Resolve(ctx context.Context, materialID string, locator reading.Locator, caller authz.Caller) (reading.Passage, error)
 	// Pairings is the bilingual read: whether this material's bilingual reading is

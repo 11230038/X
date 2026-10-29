@@ -23,7 +23,7 @@ export const BOOKS = {
   emptyTitle: '还没有活书',
   emptyHint: '选一个来源，先让模型写一份大纲；确认之后，一章一章生成。',
   emptyAction: '新建第一本',
-  emptySecondary: '去文件库',
+  emptySecondary: '去资料市场',
   count: (count: number) => `${count} 本`,
   sourceSnapshot: '创建时的来源快照',
   chapters: (ready: number, total: number) => `${ready}/${total} 章`,
@@ -53,10 +53,10 @@ export const BOOKS = {
   createFailed: '这本书没能创建',
   noSessionOption: '还没有对话',
   noKnowledgeBaseOption: '还没有知识库',
-  noFileOption: '文件库里还没有文件',
+  noFileOption: '资料市场里还没有文件',
   goChat: '去对话',
   goKnowledge: '去知识库',
-  goFiles: '去文件库',
+  goFiles: '去资料市场',
 
   /* ── 详情 ─────────────────────────────────────────────────────────── */
 

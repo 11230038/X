@@ -241,8 +241,11 @@ func pathEntries(paths []mastery.Summary, limit int) []Entry {
 			ID:    summary.PathID,
 			Title: summary.Goal,
 			// What the tree is made of and how much of it is known, which is what
-			// tells two paths with similar goals apart.
-			Context: fmt.Sprintf("已掌握 %d/%d 个知识点", summary.Mastered, summary.KnowledgePoints),
+			// tells two paths with similar goals apart. The same two numbers also
+			// travel as a ratio, for a surface that draws a bar rather than a
+			// sentence.
+			Context:  fmt.Sprintf("已掌握 %d/%d 个知识点", summary.Mastered, summary.KnowledgePoints),
+			Progress: &Progress{Done: summary.Mastered, Total: summary.KnowledgePoints},
 			// When it was last worked on, falling back to when it was written for
 			// a path no conversation has touched: the two are one question, and a
 			// zero time would sort it before everything.

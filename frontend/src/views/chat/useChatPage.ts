@@ -26,7 +26,6 @@ import { refreshPermissions } from '../../auth/permissions'
 import { CHAT } from '../../copy/chat'
 import { CO_WRITER } from '../../copy/collaboration'
 import type { SendOptions } from '../../ws/socket'
-import { sessionLabel } from '../../components/chat/session-label'
 
 import type { useChatCapabilities } from './useChatCapabilities'
 import type { useChatConnection } from './useChatConnection'
@@ -86,13 +85,6 @@ export function useChatPage(parts: ChatPageParts) {
   }
 
   /* ── 头部与状态条 ────────────────────────────────────────────────────── */
-
-  /** 内容区头部的那一行。实时标题优先于列表里的旧值。 */
-  const headerTitle = computed(() => {
-    const live = connection.conversation.value?.title ?? ''
-    if (live !== '') return live
-    return sessionsApi.activeSession.value ? sessionLabel(sessionsApi.activeSession.value) : ''
-  })
 
   /**
    * 收合后那条细栏上的一句话。§3.5 要的是"用户能随时知道 AI 还在干活 / 干完了"，
@@ -278,7 +270,6 @@ export function useChatPage(parts: ChatPageParts) {
     draft,
     composerError,
     starting,
-    headerTitle,
     panelStatus,
     startSession,
     onSend,

@@ -117,6 +117,14 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	// (§7). Nothing is rate-limited here: the limiter bounds work that leaves the
 	// process, and this reaches nothing (§2.10).
 	authenticated.POST("/ws-ticket", handlers.Auth.IssueWebSocketTicket)
+	// Being here is the account's own record rather than an area of the product:
+	// the row is keyed by the token's account and the answer is about that
+	// account, so these are mounted with no surface. An account refused every
+	// area still exists, and a number that says how long the app has been open
+	// is answering about existence rather than reach. A beat writes one row and
+	// neither route leaves this process, so neither is rate-limited (§2.10).
+	authenticated.GET("/presence", handlers.Presence.Get)
+	authenticated.POST("/presence", handlers.Presence.Touch)
 	system := reach(authz.SurfaceSystem)
 	system.GET("/auth/me", handlers.Auth.Me)
 	system.GET("/capabilities", handlers.Capabilities.List)
@@ -183,6 +191,11 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	knowledgeBase.POST("/knowledge-bases/:kbID/search", rateLimit(limit.Retrieval), handlers.KnowledgeBase.Search)
 	knowledgeBase.POST("/knowledge-bases/:kbID/default", handlers.KnowledgeBase.SetDefault)
 	chat := reach(authz.SurfaceChat)
+	// One question and one answer with no conversation around it: this route
+	// opens no session and writes no message. It is mounted on the same surface
+	// as the sessions because it is the same language of use, and on the model
+	// class because what it spends is a call to the provider.
+	chat.POST("/chat/complete", rateLimit(limit.Model), handlers.DirectChat.Complete)
 	chat.POST("/sessions", handlers.Sessions.Create)
 	chat.GET("/sessions", handlers.Sessions.List)
 	chat.GET("/sessions/:sessionID", handlers.Sessions.Get)
@@ -228,16 +241,27 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	practice.POST("/practice/reviews", rateLimit(limit.Model), handlers.Practice.Submit)
 	practice.GET("/practice/reviews/:requestID", handlers.Practice.Read)
 	practice.GET("/practice/stats", handlers.Practice.Stats)
+	// The wrong-answer set's progress is a read of the same two review tables
+	// Stats reads, for the home page's second task bar.
+	practice.GET("/practice/mistakes", handlers.Practice.Mistakes)
 	// Mastery paths are read and named here, and built through the socket: a
 	// path is created inside the turn that was asked to work on it (§2.1), so
 	// there is no POST among these. The two lease endpoints are the exception to
 	// "a turn's state is a turn's business", and the reason is written where they
 	// are handled: a claim left behind by a turn that died is a person's to drop.
 	mastery := reach(authz.SurfaceMastery)
+	// The first level of the path-chat page: one row per path, paired with the
+	// conversation that created it.
+	mastery.GET("/mastery/conversations", handlers.Mastery.Conversations)
+	// The window's count is a read of the evidence and sits beside the listing
+	// rather than under a path, because it is about every path at once.
+	mastery.GET("/mastery/mastered", handlers.Mastery.Mastered)
 	mastery.GET("/mastery/paths", handlers.Mastery.List)
 	mastery.GET("/mastery/paths/:pathID", handlers.Mastery.Get)
 	mastery.PATCH("/mastery/paths/:pathID", handlers.Mastery.Patch)
 	mastery.GET("/mastery/paths/:pathID/insight", handlers.Mastery.Insight)
+	// A path's module progress over a window, for the home page's task bar.
+	mastery.GET("/mastery/paths/:pathID/progress", handlers.Mastery.PathProgress)
 	mastery.GET("/mastery/paths/:pathID/lease", handlers.Mastery.Lease)
 	mastery.DELETE("/mastery/paths/:pathID/lease", handlers.Mastery.ReleaseLease)
 	// Reading is where the reader is, and every route here is one reader's own
@@ -251,6 +275,10 @@ func NewRouter(logger *slog.Logger, appEnv string, handlers Handlers) *gin.Engin
 	reading.GET("/reading/materials/:materialID/content", handlers.Reading.Content)
 	reading.GET("/reading/materials/:materialID/marks", handlers.Reading.Marks)
 	reading.POST("/reading/materials/:materialID/marks", handlers.Reading.AddMark)
+	// Favourites cross materials: the one mark read that is not scoped to a
+	// material, because a saved place is the reader's whole shelf rather than
+	// one book's marginalia.
+	reading.GET("/reading/bookmarks", handlers.Reading.Bookmarks)
 	reading.POST("/reading/materials/:materialID/position", handlers.Reading.SavePosition)
 	// The two extension routes are the closed set of reading aids this build has
 	// and the run of one of them over one passage. The list is a read of the

@@ -37,59 +37,65 @@ import { dismissToast, toasts } from '../../shared/toast'
 <style scoped>
 .toast-host {
   position: fixed;
-  bottom: 24px;
+  bottom: 40px;
   left: 50%;
   z-index: 1100;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 14px;
   transform: translateX(-50%);
   pointer-events: none;
 }
 
+/* 演示稿的提示是一条深色胶囊，浮在页面底部中央。 */
 .toast {
   display: flex;
   align-items: center;
-  gap: 10px;
-  max-width: 480px;
-  padding: 8px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface-raised);
-  color: var(--text);
-  font-size: 12px;
-  box-shadow: 0 6px 20px rgba(20, 24, 32, 0.12);
+  gap: 16px;
+  max-width: 520px;
+  padding: 14px 26px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 999px;
+  background: rgb(28 28 30 / 92%);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+  box-shadow: 0 20px 40px rgb(0 0 0 / 20%);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   pointer-events: auto;
 }
 
 .toast--success {
-  border-color: var(--success);
-  background: var(--success-soft);
+  background: rgb(31 122 77 / 95%);
 }
 
 .toast--error {
-  border-color: var(--danger);
-  background: var(--danger-soft);
+  background: rgb(165 45 35 / 95%);
 }
 
 .toast__close {
   border: 0;
   background: transparent;
-  color: var(--text-muted);
-  font-size: 15px;
+  color: rgb(255 255 255 / 65%);
+  font-size: 17px;
   line-height: 1;
   cursor: pointer;
 }
 
+.toast__close:hover {
+  color: #fff;
+}
+
 .toast-enter-active,
 .toast-leave-active {
-  transition: opacity 0.16s ease, transform 0.16s ease;
+  transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
 .toast-enter-from,
 .toast-leave-to {
   opacity: 0;
-  transform: translateY(6px);
+  transform: translateY(14px) scale(0.94);
 }
 </style>

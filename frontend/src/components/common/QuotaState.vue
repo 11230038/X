@@ -44,7 +44,7 @@ defineEmits<{
 .quota__title {
   margin: 0;
   color: var(--text);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
 }
 
@@ -52,18 +52,25 @@ defineEmits<{
 .quota__reset {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
 .quota__back {
   margin-top: 6px;
-  padding: 5px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 7px 16px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 78%);
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.quota__back:hover {
+  border-color: var(--accent);
+  background: #fff;
 }
 </style>

@@ -23,42 +23,44 @@ withDefaults(
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: 1px 7px;
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  background: var(--surface);
+  padding: 2px 9px;
+  border: 1px solid rgb(28 28 30 / 6%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 65%);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
+  font-weight: 600;
   line-height: 1.6;
   white-space: nowrap;
 }
 
+/* 小一号仍然要比默认小一档，否则 `small` 就只剩内边距的区别了。 */
 .badge--small {
-  padding: 0 6px;
-  font-size: 10px;
+  padding: 0 7px;
+  font-size: 13px;
 }
 
 .badge--accent {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
+  border-color: transparent;
+  background: rgb(177 140 255 / 16%);
+  color: var(--accent-ink);
 }
 
 .badge--success {
-  border-color: var(--success);
-  background: var(--success-soft);
+  border-color: transparent;
+  background: rgb(167 243 208 / 45%);
   color: var(--success);
 }
 
 .badge--warning {
-  border-color: var(--warning);
-  background: var(--warning-soft);
-  color: var(--text);
+  border-color: transparent;
+  background: rgb(254 221 118 / 40%);
+  color: var(--warning);
 }
 
 .badge--danger {
-  border-color: var(--danger);
-  background: var(--danger-soft);
+  border-color: transparent;
+  background: rgb(254 226 226 / 85%);
   color: var(--danger);
 }
 </style>

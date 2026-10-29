@@ -46,6 +46,23 @@ export interface MasterySummary {
   updated_at: string
 }
 
+/**
+ * 路径对话历史的一行：一段掌握路径对话，和它创建的那条路径。
+ *
+ * 一个路径只有一段这样的对话 —— 创建它的那段。别的对话可能切换进来过，
+ * 但它们各有自己的路径，不在这一列里。
+ */
+export interface MasteryConversation {
+  session_id: string
+  title: string
+  path_id: string
+  /** 路径名：创建这条路的那轮结束时由模型总结的短名，之后可被学习者改。 */
+  goal: string
+  emoji: string
+  last_seen_at: string
+  updated_at: string
+}
+
 export interface MasteryPath {
   path_id: string
   goal: string
@@ -118,6 +135,11 @@ export function listMasteryPaths(sessionId?: string): Promise<{ paths: MasterySu
   })
 }
 
+/** 路径对话的第一级：每行一段对话，标出它创建的那条路径。 */
+export function listMasteryConversations(): Promise<{ conversations: MasteryConversation[] }> {
+  return request<{ conversations: MasteryConversation[] }>('/mastery/conversations')
+}
+
 export function getMasteryPath(pathId: string): Promise<MasteryPath> {
   return request<MasteryPath>(`/mastery/paths/${encodeURIComponent(pathId)}`)
 }
@@ -136,6 +158,41 @@ export function patchMasteryPath(
   return request<MasteryPath>(`/mastery/paths/${encodeURIComponent(pathId)}`, {
     method: 'PATCH',
     body: patch,
+  })
+}
+
+/**
+ * 一个时间窗内"从没掌握变成掌握"的知识点数。
+ *
+ * 等级的缓存只说明现在有多少个已掌握，不说明它们是什么时候学会的，所以这个数
+ * 由服务端回放证据算出来。窗口的两端都必须给出：首页的"本周"是按浏览器的日历
+ * 划的，服务端不替它猜。
+ */
+export function getMasteredBetween(from: string, to: string): Promise<{ mastered: number }> {
+  return request<{ mastered: number }>('/mastery/mastered', {
+    query: { from, to },
+  })
+}
+
+/**
+ * 一条路径在窗口里**完成**的模块数 / 它现在的模块数。
+ *
+ * 模块"完成"= 模块里每个知识点都到了 mastered。计数用证据回放：窗口末全掌握、
+ * 窗口初没有全掌握的模块才算一个；没有知识点的模块两边都不算（它永远完不成，
+ * 放分母会让 100% 到不了）。
+ */
+export interface PathProgress {
+  modules_done: number
+  modules_total: number
+}
+
+export function getPathProgress(
+  pathId: string,
+  from: string,
+  to: string,
+): Promise<PathProgress> {
+  return request<PathProgress>(`/mastery/paths/${encodeURIComponent(pathId)}/progress`, {
+    query: { from, to },
   })
 }
 

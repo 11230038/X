@@ -142,6 +142,31 @@ func (h *ReadingHandler) Marks(c *gin.Context) {
 	httpx.WriteSuccess(c, http.StatusOK, gin.H{"marks": listed})
 }
 
+// Bookmarks lists every bookmark the caller has saved, newest first.
+//
+// It is the one mark read that is not about one material: a favourites page
+// collects what was saved anywhere, so the material's name travels with each
+// one and the words at the saved coordinate come along.
+func (h *ReadingHandler) Bookmarks(c *gin.Context) {
+	if !h.ready(c) {
+		return
+	}
+	account, ok := caller(c)
+	if !ok {
+		return
+	}
+	found, err := h.readings.Bookmarks(c.Request.Context(), account)
+	if err != nil {
+		h.fail(c, "list_bookmarks_failed", err)
+		return
+	}
+	listed := make([]bookmarkView, 0, len(found))
+	for _, bookmark := range found {
+		listed = append(listed, toBookmarkView(bookmark))
+	}
+	httpx.WriteSuccess(c, http.StatusOK, gin.H{"bookmarks": listed})
+}
+
 // AddMark writes one bookmark, highlight or note.
 func (h *ReadingHandler) AddMark(c *gin.Context) {
 	if !h.ready(c) {

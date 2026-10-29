@@ -77,7 +77,7 @@ onBeforeUnmount(stop)
 <style scoped>
 .limited {
   display: flex;
-  gap: 10px;
+  gap: 14px;
   padding: 14px 16px;
   border: 1px solid var(--warning);
   border-radius: var(--radius);
@@ -98,14 +98,14 @@ onBeforeUnmount(stop)
 .limited__title {
   margin: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .limited__count {
   margin: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .limited__number {
@@ -116,6 +116,6 @@ onBeforeUnmount(stop)
 .limited__hint {
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 </style>

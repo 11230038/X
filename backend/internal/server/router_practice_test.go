@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"backend/internal/notebook"
 	"backend/internal/practice"
@@ -89,6 +90,13 @@ func (s routerPracticeStub) Stats(context.Context, practice.StatsQuery) (practic
 		Bucket: practice.BucketDay,
 		Series: []practice.BucketStat{{Label: "2026-10-05", Reviews: 1, Correct: 1}},
 	}, nil
+}
+
+func (s routerPracticeStub) Mistakes(context.Context, time.Time, time.Time, authz.Caller) (practice.MistakeProgress, error) {
+	if s.err != nil {
+		return practice.MistakeProgress{}, s.err
+	}
+	return practice.MistakeProgress{Reviewed: 1, Total: 2}, nil
 }
 
 func routerReviewResult() practice.ReviewResult {

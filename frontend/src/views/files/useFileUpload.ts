@@ -3,9 +3,11 @@
  *
  * 用带进度的上传（XHR），取消走 `AbortController`。上传成功后把它所在的
  * "在用"列表刷新一遍并选中它 —— 用户刚传的东西应该直接看得见。
+ *
+ * 选文件与拖文件都在上传弹窗里完成，这里只管"弹窗开没开"和上传本身。
  */
 
-import { computed, ref, type Ref } from 'vue'
+import { computed, ref } from 'vue'
 
 import { isApiFailure } from '../../api/client'
 import { describeFailure } from '../../api/errors'
@@ -20,8 +22,8 @@ import type { useFileList } from './useFileList'
 export function useFileUpload(deps: {
   list: ReturnType<typeof useFileList>
   detail: ReturnType<typeof useFileDetail>
-  fileInput: Ref<HTMLInputElement | null>
 }) {
+  const dialogOpen = ref(false)
   const uploading = ref(false)
   const uploadName = ref('')
   const uploadPercent = ref<number | null>(0)
@@ -30,16 +32,17 @@ export function useFileUpload(deps: {
   const uploadError = ref<string | null>(null)
   let uploadController: AbortController | null = null
 
-  function chooseFile(): void {
+  function openDialog(): void {
     if (uploading.value) return
-    deps.fileInput.value?.click()
+    uploadError.value = null
+    dialogOpen.value = true
   }
 
-  function onPicked(event: Event): void {
-    const input = event.target as HTMLInputElement
-    const picked = input.files?.[0]
-    input.value = ''
-    if (picked) void startUpload(picked)
+  /** 关弹窗：正在传就当作取消，请求真的停掉。 */
+  function closeDialog(): void {
+    uploadController?.abort()
+    dialogOpen.value = false
+    uploadError.value = null
   }
 
   async function startUpload(file: File): Promise<void> {
@@ -60,6 +63,7 @@ export function useFileUpload(deps: {
           uploadPercent.value = percent
         },
       })
+      dialogOpen.value = false
       notify(`已上传「${uploaded.filename}」`, 'success')
       await deps.list.resetForNewFile()
       await deps.detail.selectFile(uploaded.id, { force: true })
@@ -67,7 +71,8 @@ export function useFileUpload(deps: {
       if (isApiFailure(cause)) {
         const { code } = cause.failure
         if (code === 'aborted') {
-          notify('已取消上传', 'info')
+          // 取消是用户自己按的，不用再报一次错；弹窗已经关了。
+          uploadError.value = null
         } else {
           uploadError.value = UPLOAD_ERRORS[code] ?? describeFailure(cause.failure)
         }
@@ -82,6 +87,9 @@ export function useFileUpload(deps: {
 
   function cancelUpload(): void {
     uploadController?.abort()
+    dialogOpen.value = false
+    uploadError.value = null
+    notify('已取消上传', 'info')
   }
 
   const progressLabel = computed(() => {
@@ -93,14 +101,15 @@ export function useFileUpload(deps: {
   })
 
   return {
+    dialogOpen,
     uploading,
     uploadName,
     uploadPercent,
     uploadLoaded,
     uploadTotal,
     uploadError,
-    chooseFile,
-    onPicked,
+    openDialog,
+    closeDialog,
     startUpload,
     cancelUpload,
     progressLabel,

@@ -1,150 +1,227 @@
+/* 用户管理，以及挂在它下面的详情、授权、监护关系与几个对话框共用的一套尺度。
+   数值与设置页的 `set-` 零件一致：卡片 24 圆角、控件 12 圆角、字 14/15。 */
+
 .admin {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 20px;
 }
+
+/* ── 工具条 ───────────────────────────────────────────────────────────── */
 
 .toolbar {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 10px;
   align-items: center;
 }
 
+/* 搜索框撑开，两边留白与卡片内边距对齐。 */
 .search {
   flex: 1;
-  max-width: 320px;
-  padding: 5px 9px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  font-size: 12px;
+  max-width: 360px;
+  padding: 10px 16px;
+  border: 1px solid rgb(0 0 0 / 7%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 85%);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 }
+
+.search:hover {
+  background: #fff;
+}
+
+.search:focus {
+  border-color: var(--color-purple);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
+}
+
+/* ── 用户列表 ─────────────────────────────────────────────────────────── */
 
 .users {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+/* 一行一个账号：头像块、名字与编号、标签、右侧预设。 */
 .user {
   display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  align-items: baseline;
+  gap: 14px;
+  align-items: center;
   width: 100%;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 12px 20px 12px 12px;
+  border: 1px solid rgb(255 255 255 / 70%);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 55%);
   text-align: left;
   cursor: pointer;
+  transition: background 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.user:hover {
+  background: #fff;
+  box-shadow: 0 6px 16px -8px rgb(51 68 85 / 25%);
 }
 
 .user--active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  border-color: rgb(177 140 255 / 45%);
+  background: #fff;
+  box-shadow: 0 8px 20px -10px rgb(177 140 255 / 60%);
+}
+
+.user__avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--color-yellow), var(--color-pink));
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.user__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
 }
 
 .user__name {
-  font-size: 12px;
-  font-weight: 600;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .user__id,
 .user__preset {
   color: var(--text-faint);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 12px;
+}
+
+.user__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: 6px;
 }
 
 .user__preset {
   margin-left: auto;
 }
 
+/* 单独授权行里的类型标签（`AdminUserDetail`）沿用同一个样子。 */
 .chip {
-  padding: 0 6px;
-  border: 1px solid var(--border);
+  padding: 2px 9px;
   border-radius: 8px;
+  background: rgb(255 255 255 / 70%);
   color: var(--text-muted);
-  font-size: 9px;
-  line-height: 16px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
 }
 
 .chip--bad {
-  border-color: var(--danger);
+  background: var(--danger-soft);
   color: var(--danger);
 }
 
 /* 白名单里的账号。它读的是部署配置，不是角色，所以和角色是两个并排的标签。 */
 .chip--super {
-  border-color: var(--accent);
-  color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
 }
 
+/* ── 用户详情 ─────────────────────────────────────────────────────────── */
+
 .detail {
-  padding: 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 26px 28px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .detail__head {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  align-items: baseline;
+  gap: 14px;
+  align-items: center;
   justify-content: space-between;
+  margin-bottom: 4px;
 }
 
 .detail__title {
   margin: 0;
-  font-size: 14px;
-  font-weight: 650;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 .detail__actions {
   display: flex;
-  gap: 7px;
+  gap: 8px;
 }
 
+/* 详情里的每一块：一条浅线隔开，标题小一档。 */
 .block {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgb(0 0 0 / 5%);
 }
 
 .block__title {
-  margin: 0 0 6px;
-  font-size: 12px;
-  font-weight: 650;
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
 }
 
 .hint {
   margin: 5px 0 0;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
 .error {
-  margin: 7px 0 0;
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--danger-soft);
   color: var(--danger);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .empty {
-  margin: 5px 0;
+  margin: 6px 0;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
 }
+
+/* ── 表单控件 ─────────────────────────────────────────────────────────── */
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 6px;
 }
 
 .field--check {
@@ -152,44 +229,61 @@
 }
 
 .field__label {
-  color: var(--text-faint);
-  font-size: 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .field__input {
-  min-width: 110px;
-  padding: 4px 7px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  font-size: 11px;
+  min-width: 120px;
+  padding: 9px 13px;
+  border: 1px solid rgb(0 0 0 / 7%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 85%);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 }
 
-.grants {
+.field__input:hover {
+  background: #fff;
+}
+
+.field__input:focus {
+  border-color: var(--color-purple);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
+}
+
+/* ── 覆盖项与监护关系 ─────────────────────────────────────────────────── */
+
+.grants,
+.links {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.grant {
+.grant,
+.link-row {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 10px;
   align-items: baseline;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
-  font-size: 11px;
+  padding: 9px 14px;
+  border: 1px solid rgb(255 255 255 / 70%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 55%);
+  font-size: 14px;
 }
 
 .grant__id {
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 13px;
 }
 
 .grant__state {
@@ -198,118 +292,123 @@
 
 .grant__lock {
   color: var(--warning);
-  font-size: 9px;
+  font-size: 13px;
 }
 
 .grant__actions {
   display: flex;
-  gap: 8px;
+  gap: 12px;
   margin-left: auto;
 }
 
+.link-row__permissions {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* 新增授权那块：一条虚线框，和上面的实线行区分开。 */
 .add,
 .link-form {
   margin-top: 12px;
-  padding: 9px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-sm);
+  padding: 16px 18px;
+  border: 1px dashed rgb(177 140 255 / 40%);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 40%);
 }
 
 .add__title {
-  margin: 0 0 6px;
-  font-size: 11px;
-  font-weight: 600;
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .add__row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
   align-items: flex-end;
-}
-
-.links {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.link-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  align-items: baseline;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
-  font-size: 11px;
-}
-
-.link-row__permissions {
-  color: var(--text-muted);
-  font-size: 10px;
 }
 
 .permission-options {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 8px 14px;
+  margin-top: 10px;
 }
 
 .permission {
   display: inline-flex;
-  gap: 4px;
+  gap: 5px;
   align-items: center;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 14px;
   cursor: pointer;
+}
+
+.permission input {
+  accent-color: var(--accent);
+}
+
+/* ── 按钮 ─────────────────────────────────────────────────────────────── */
+
+.ghost {
+  padding: 8px 16px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ghost:hover:not(:disabled) {
+  border-color: rgb(0 0 0 / 18%);
+  box-shadow: 0 4px 12px rgb(51 68 85 / 6%);
+}
+
+.primary {
+  padding: 10px 22px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent-gradient);
+  box-shadow: 0 8px 18px rgb(177 140 255 / 28%);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgb(177 140 255 / 38%);
 }
 
 .link {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--accent);
-  font-size: 10px;
+  color: var(--accent-ink);
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
+}
+
+.link:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .link--danger {
   color: var(--danger);
 }
 
-.link:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.ghost {
-  padding: 4px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text-muted);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.primary {
-  padding: 5px 12px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: #fff;
-  font-size: 11px;
-  cursor: pointer;
-}
-
 .ghost:disabled,
-.primary:disabled {
+.primary:disabled,
+.link:disabled {
   cursor: default;
   opacity: 0.55;
 }

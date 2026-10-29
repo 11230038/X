@@ -19,8 +19,12 @@
 
 import { computed, ref } from 'vue'
 
+import logo from '../../assets/logo-rinnex-color.png'
+
 const props = defineProps<{
   title: string
+  /** 标题下面的一句定位语。不给就按登录/注册各用一句默认文案。 */
+  subtitle?: string
   submitLabel: string
   /**
    * 只用来决定密码框的 `autocomplete` —— 浏览器靠它分辨"填一个已有的"和"存
@@ -39,6 +43,10 @@ const username = ref('')
 const password = ref('')
 const revealed = ref(false)
 
+const subtitle = computed(
+  () => props.subtitle ?? (props.mode === 'login' ? '你的专属一体化学习空间' : '创建你的学习空间'),
+)
+
 // 两个都填了才让点。**这不是校验** —— 密码短了、用户名不合规都由服务端说了
 // 算，这一条只是别让空表单发出去。
 const ready = computed(() => username.value.length > 0 && password.value.length > 0)
@@ -54,7 +62,9 @@ function submit(): void {
 <template>
   <div class="auth">
     <form class="auth__card" novalidate @submit.prevent="submit">
-      <h1 class="auth__title">{{ props.title }}</h1>
+      <img class="auth__logo" :src="logo" alt="" aria-hidden="true" />
+      <h1 class="brand-script auth__title">{{ props.title }}</h1>
+      <p class="brand-script auth__subtitle">{{ subtitle }}</p>
 
       <label class="auth__field">
         <span class="auth__label">用户名</span>
@@ -113,48 +123,95 @@ function submit(): void {
 </template>
 
 <style scoped>
-/* 认证页是骨架的例外（§2.1）：不进四段式，是一张居中的卡片。 */
+/* 认证页是骨架的例外（§2.1）：不进四段式，是一张居中的玻璃卡片。
+   底色与全局极光一致，卡片本身按演示稿的登录卡做。 */
 .auth {
   display: grid;
   place-items: center;
   height: 100vh;
-  background: var(--surface-sunken);
+  background:
+    radial-gradient(circle at 10% 10%, rgb(247 169 239 / 30%) 0%, transparent 50%),
+    radial-gradient(circle at 90% 90%, rgb(177 140 255 / 20%) 0%, transparent 50%);
 }
 
 .auth__card {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  width: 340px;
-  padding: 28px 24px 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: 0 1px 2px rgb(15 23 42 / 5%);
+  gap: 20px;
+  width: 400px;
+  padding: 44px 40px 32px;
+  border: 1px solid var(--glass-border);
+  border-radius: 32px;
+  background: var(--glass-bg);
+  box-shadow: 0 24px 64px -12px rgb(51 68 85 / 15%), var(--inset-light);
+  text-align: center;
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+.auth__card:hover {
+  transform: translateY(-4px);
+}
+
+/* 品牌标志：`.product/Rinnex logo 初版方案.pdf` 的手绘稿，只裁掉四周纸白，
+   无穷符号、R、星点与圆环都在。原稿 2.34:1，比原来的两倍宽一点，所以高按
+   宽度走，不拉成 120×60。 */
+.auth__logo {
+  width: 160px;
+  height: auto;
+  margin: 0 auto;
+  filter: drop-shadow(0 8px 16px rgb(51 68 85 / 15%));
+}
+
+/* 标题与副标题也是花体（全局 `.brand-script` 给字体与渐变）。行楷没有粗体
+   字面，用合成粗体会把笔锋糊掉，所以标题按常规字重写。宽度收到内容宽度，
+   渐变才正好铺满这一行字。 */
 .auth__title {
-  font-size: 19px;
-  font-weight: 650;
+  width: fit-content;
+  margin: 0 auto;
+  font-size: 30px;
+  font-weight: 400;
+  line-height: 1.25;
+  letter-spacing: 0.01em;
+}
+
+.auth__subtitle {
+  width: fit-content;
+  margin: -6px auto 8px;
+  font-size: 18px;
+  font-weight: 400;
 }
 
 .auth__field {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 8px;
+  text-align: left;
 }
 
 .auth__label {
-  color: var(--text-muted);
-  font-size: 13px;
+  margin-left: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .auth__input {
   width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 14px 20px;
+  border: 1px solid rgb(0 0 0 / 6%);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 70%);
+  font-size: 15px;
+  outline: none;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.auth__input:focus {
+  border-color: var(--color-purple);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
 }
 
 .auth__input:disabled {
@@ -168,19 +225,19 @@ function submit(): void {
 }
 
 .auth__password .auth__input {
-  padding-right: 52px;
+  padding-right: 62px;
 }
 
 .auth__reveal {
   position: absolute;
   top: 50%;
-  right: 6px;
-  padding: 3px 6px;
+  right: 8px;
+  padding: 5px 8px;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   background: none;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   transform: translateY(-50%);
   cursor: pointer;
 }
@@ -192,32 +249,54 @@ function submit(): void {
 /* 失败与加载中不能长得像（§6.2 硬规则 1）：错误有底色和边框，提交中只是把
    按钮文字换掉且置灰。 */
 .auth__error {
-  padding: 8px 10px;
+  padding: 10px 14px;
   border: 1px solid #f3c9c3;
   border-radius: var(--radius-sm);
   background: var(--danger-soft);
   color: var(--danger);
-  font-size: 13px;
+  font-size: 14px;
+  text-align: left;
 }
 
 .auth__submit {
-  padding: 9px;
+  padding: 16px;
+  margin-top: 4px;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
+  border-radius: 16px;
+  background: var(--accent-gradient);
   color: #fff;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 8px 24px rgb(177 140 255 / 40%);
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.auth__submit:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgb(177 140 255 / 50%);
+}
+
+.auth__submit:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .auth__submit:disabled {
-  background: #b9c6e6;
+  background: #d9cdf1;
+  box-shadow: none;
   cursor: default;
 }
 
 .auth__foot {
-  padding-top: 2px;
+  padding-top: 6px;
+  color: var(--text-faint);
   text-align: center;
-  font-size: 13px;
+  font-size: 14px;
+}
+
+.auth__foot :deep(a) {
+  color: var(--accent-ink);
+  font-weight: 600;
+  text-decoration: none;
 }
 </style>

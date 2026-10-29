@@ -117,16 +117,19 @@ defineExpose({ show })
 <style scoped>
 .clarify {
   width: min(520px, calc(100vw - 32px));
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 24px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: rgb(255 255 255 / 92%);
   color: var(--text);
-  box-shadow: 0 18px 48px rgb(20 26 38 / 18%);
+  box-shadow: 0 24px 64px -12px rgb(51 68 85 / 20%);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
 }
 
 .clarify::backdrop {
-  background: rgb(20 26 38 / 32%);
+  background: rgb(20 26 38 / 25%);
+  backdrop-filter: blur(6px);
 }
 
 .clarify__title {
@@ -145,20 +148,24 @@ defineExpose({ show })
 .clarify__input {
   width: 100%;
   min-height: 84px;
-  padding: 9px 11px;
-  border: 1px solid var(--border-strong);
+  padding: 10px 13px;
+  border: 1px solid rgb(0 0 0 / 8%);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: rgb(255 255 255 / 80%);
   color: var(--text);
   font: inherit;
   font-size: 14px;
   line-height: 1.6;
   resize: vertical;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .clarify__input:focus {
-  border-color: var(--accent);
-  outline: 2px solid var(--accent-soft);
+  border-color: var(--color-purple);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
+  outline: none;
 }
 
 .clarify__actions {
@@ -174,7 +181,7 @@ defineExpose({ show })
   border-radius: var(--radius-sm);
   background: var(--accent);
   color: #fff;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .clarify__submit:disabled {
@@ -188,7 +195,7 @@ defineExpose({ show })
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .clarify__later:hover {

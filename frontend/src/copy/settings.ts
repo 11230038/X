@@ -20,8 +20,19 @@ export const SETTINGS = {
   oldPassword: '当前密码',
   newPassword: '新密码',
   passwordChanged: '密码已修改，请重新登录',
+  signOut: '退出登录',
+  signOutNote: '退出后，所有设备上的登录都会失效，需要重新登录。',
+  signingOut: '正在退出…',
   noEmail: '这个版本不提供邮箱',
   whyHidden: '为什么有些设置看不到',
+
+  /* 设置各子页的标题与说明。侧栏一项对应一页，进来之后标题说的是这一页，
+     不是"设置"这个总称 —— 与个人中心的几个子页同一种做法。 */
+  workspaceDescription: '把会话、材料、题目与知识库导出成一份备份，也可以把备份导回来。',
+  usageDescription: '按天、会话、来源或模型统计调用次数、耗时与 token。',
+  systemDescription: '版本、依赖检查，以及正在进行的回合与索引任务。',
+  guardianDescription: '按学习者查看他们的学习报告。',
+  aboutDescription: '版本、构建时间与数据库迁移版本。',
 
   export: '导出',
   exportScope: '选择要导出的对象',
@@ -54,6 +65,7 @@ export const SETTINGS = {
   duration: '耗时',
   ttft: '首字延迟',
 
+  versionInfo: '版本信息',
   version: '版本',
   buildTime: '构建时间',
   migration: '数据库版本',
@@ -69,9 +81,5 @@ export const SETTINGS = {
   viewReportsMissing: '没有查看报告的权限',
   guardianPermissions: '已登记的权限',
   permissionNoEntry: '当前版本没有对应入口',
-
-  noKnowledgeBases: '还没有知识库',
-  defaultKnowledgeBase: '默认知识库',
-  setDefault: '设为默认',
 
 } as const

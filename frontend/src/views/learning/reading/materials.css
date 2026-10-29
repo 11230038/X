@@ -1,86 +1,116 @@
 /* ── 左栏 ─────────────────────────────────────────────────────────────── */
 
+/* 演示稿的 `.reading-toc`：白卡目录。和三栏同高，目录长了在卡内滚 ——
+   不再靠 `sticky` 挂在页面上，页面本身没有滚动条了。 */
 .materials {
-  position: sticky;
-  top: 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  min-height: 0;
+  height: 100%;
+  padding: 24px;
+  overflow-y: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-card);
+  background: #fff;
+  box-shadow: var(--glass-shadow);
 }
 
-.materials__head {
+/* 演示稿的 `.toc-back`：目录卡顶上的那一块，颜色用紫色。 */
+.toc-back {
   display: flex;
   gap: 8px;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding: 10px;
+  border: 0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: var(--color-purple);
+  font-size: 15px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s ease;
 }
 
+.toc-back:hover {
+  background: #fff0fe;
+}
+
+/* 演示稿的 `.toc-title`：标题上面一条细线，和「返回」分开。 */
 .materials__title {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 650;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 14px;
+  padding-top: 16px;
+  border-top: 1px solid rgb(0 0 0 / 5%);
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 800;
 }
 
 .materials__empty,
 .materials__hint {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
 .materials__hint {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .materials__list {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  max-height: 60vh;
+  gap: 6px;
   margin: 0;
   padding: 0;
-  overflow-y: auto;
   list-style: none;
 }
 
 .material {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
   width: 100%;
-  padding: 7px 8px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  padding: 14px;
+  border: 0;
+  border-radius: 10px;
   background: transparent;
   text-align: left;
   cursor: pointer;
+  transition: background 0.2s ease;
 }
 
 .material:hover {
-  border-color: var(--border);
+  background: #f4f7f9;
 }
 
 .material--on {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  background: #e8faff;
+  color: #0099cc;
 }
 
 .material__name {
   overflow: hidden;
-  font-size: 12px;
-  font-weight: 550;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.material--on .material__name {
+  font-weight: 700;
+}
+
 .material__meta {
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 15px;
+  line-height: 1.5;
 }
 

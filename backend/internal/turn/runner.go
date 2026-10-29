@@ -83,12 +83,14 @@ type turnRun struct {
 	published resultWatch
 	// work is the context the turn's own work runs on — the turn's context with
 	// whatever the path claim added to it — lease is the claim as the opening
-	// event reports it, and release lets the path go at the end. All three are
-	// set once, before the first event, by claimPath, and read afterwards by the
-	// one goroutine running the turn.
+	// event reports it, release lets the path go at the end, and name gives a
+	// path this turn opened its final name. All four are set once, before the
+	// first event, by claimPath, and read afterwards by the one goroutine
+	// running the turn.
 	work    context.Context
 	lease   map[string]any
 	release func(context.Context) error
+	name    func(context.Context, string, string) error
 
 	mu    sync.Mutex
 	reply chan string
@@ -197,6 +199,7 @@ func (r *turnRun) claimPath() error {
 	r.work = claimed.Context
 	r.lease = claimed.Lease
 	r.release = claimed.Release
+	r.name = claimed.Name
 	return nil
 }
 

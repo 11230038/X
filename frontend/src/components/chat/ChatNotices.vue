@@ -83,23 +83,26 @@ const emit = defineEmits<{
 .notices {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 0 24px;
+  gap: 8px;
+  padding: 0 28px;
 }
 
 .banner {
   margin: 0 0 2px;
-  padding: 7px 11px;
+  padding: 10px 14px;
   border-radius: var(--radius-sm);
   font-size: 13px;
+  font-weight: 500;
 }
 
 .banner--pending {
-  background: var(--surface-sunken);
+  border: 1px solid rgb(255 255 255 / 70%);
+  background: rgb(255 255 255 / 55%);
   color: var(--text-muted);
 }
 
 .banner--error {
+  border: 1px solid rgb(192 57 43 / 20%);
   background: var(--danger-soft);
   color: var(--danger);
 }
@@ -107,14 +110,15 @@ const emit = defineEmits<{
 /* 可点击的横幅：用来把被关掉的提问弹窗叫回来。 */
 .banner--action {
   width: 100%;
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
-  color: var(--text);
+  border: 1px solid rgb(177 140 255 / 35%);
+  background: rgb(255 255 255 / 75%);
+  color: var(--accent-ink);
+  font-weight: 600;
   text-align: left;
   cursor: pointer;
 }
 
 .banner--action:hover {
-  background: var(--surface-sunken);
+  background: #fff;
 }
 </style>

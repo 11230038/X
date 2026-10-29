@@ -93,11 +93,11 @@ export const CHAT = {
   settingsForMaterials: '附件与知识库',
   selectAttachments: '选择附件',
   selectKnowledgeBases: '选择知识库',
-  attachmentsHint: '附件是文件库里已经解析过的文件；能不能读由服务端判断。',
+  attachmentsHint: '附件是资料市场里已经解析过的文件；能不能读由服务端判断。',
   knowledgeBasesHint: '勾选的知识库只对这一轮生效。',
-  noParsedFiles: '文件库里还没有解析完成的文件',
+  noParsedFiles: '资料市场里还没有解析完成的文件',
   noKnowledgeBases: '还没有知识库',
-  goToFiles: '去文件库',
+  goToFiles: '去资料市场',
   goToKnowledgeBases: '去知识库',
   closePicker: '关闭',
   selectedCount: (count: number) => `已选 ${count} 项`,
@@ -145,4 +145,16 @@ export const CHAT = {
   sessionActions: '对话操作',
   moreActions: '更多操作',
   newSessionHere: '新建对话',
+
+  /**
+   * 对话首页（没有会话时）。照演示稿的 `.home`：一个标题、一句说明与三张
+   * 起始提示卡 —— 每张卡上面是这次要做什么，下面是点下去会发出去的那句话。
+   */
+  homeTitle: '开始一段对话',
+  homeHint: '可以点下面的提示，也可以直接在输入框里说。',
+  homeStarters: [
+    { title: '解释一个概念', text: '用一句话解释什么是复利，再给一个具体的例子。' },
+    { title: '制定复习计划', text: '帮我安排今天 90 分钟的复习计划。' },
+    { title: '出三道练习题', text: '围绕一个知识点出三道单选题，先不要给答案。' },
+  ],
 } as const

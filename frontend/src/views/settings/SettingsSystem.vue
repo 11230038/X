@@ -24,6 +24,7 @@ import SkeletonBlock from '../../components/common/SkeletonBlock.vue'
 import { SETTINGS } from '../../copy/settings'
 import { formatDateTime, formatNumber } from '../../shared/format'
 import { toFailure } from '../../shared/resource'
+import AppIcon from '../../components/common/AppIcon.vue'
 
 type Status = 'loading' | 'ready' | 'failed'
 
@@ -82,13 +83,12 @@ onMounted(() => {
 
 <template>
   <div class="system">
-    <div class="toolbar">
-      <button type="button" class="ghost" @click="reload">重新读取</button>
-    </div>
-
     <!-- 版本 -->
-    <section class="card">
-      <h2 class="card__title">{{ SETTINGS.about }}</h2>
+    <section class="set-panel">
+      <div class="set-panel__head">
+        <span class="set-panel__icon" aria-hidden="true"><AppIcon name="tag" /></span>
+        <h2 class="set-panel__title">{{ SETTINGS.about }}</h2>
+      </div>
       <SkeletonBlock v-if="versionStatus === 'loading'" :lines="3" :line-height="24" />
       <FailureState
         v-else-if="versionStatus === 'failed' && versionFailure"
@@ -112,8 +112,17 @@ onMounted(() => {
     </section>
 
     <!-- 运行状态 -->
-    <section class="card">
-      <h2 class="card__title">{{ SETTINGS.system }}</h2>
+    <section class="set-panel">
+      <div class="set-panel__head">
+        <span class="set-panel__icon set-panel__icon--ok" aria-hidden="true"><AppIcon name="pulse" /></span>
+        <h2 class="set-panel__title">{{ SETTINGS.system }}</h2>
+        <!-- 重新读取放在标题行右侧：它是这一页的动作，两块都会重读。 -->
+        <div class="set-panel__actions">
+          <button type="button" class="set-btn set-btn--ghost set-btn--sm" @click="reload">
+            重新读取
+          </button>
+        </div>
+      </div>
 
       <PartialBanner
         v-if="statusRefreshFailure"
@@ -150,7 +159,7 @@ onMounted(() => {
         <h3 class="subtitle">{{ SETTINGS.checks }}</h3>
         <ul v-if="status.checks.length > 0" class="checks">
           <li v-for="check in status.checks" :key="check.name" class="check">
-            <span class="check__mark" :class="check.ok ? 'check__mark--ok' : 'check__mark--bad'">
+            <span class="set-chip" :class="check.ok ? 'set-chip--ok' : 'set-chip--bad'">
               {{ check.ok ? '正常' : '异常' }}
             </span>
             <span class="check__name">{{ check.name }}</span>
@@ -166,57 +175,50 @@ onMounted(() => {
 .system {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 20px;
 }
 
-.toolbar {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.card {
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-.card__title {
-  margin: 0 0 10px;
-  font-size: 13px;
-  font-weight: 650;
-}
-
+/* 名值表：一行一条，行间一条浅线。名字窄、值宽，值用等宽字。 */
 .meta {
   display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 5px 14px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0 20px;
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
+}
+
+.meta dt,
+.meta dd {
+  padding: 11px 0;
+  border-bottom: 1px solid rgb(0 0 0 / 5%);
 }
 
 .meta dt {
   color: var(--text-faint);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .meta dd {
   margin: 0;
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 14px;
   word-break: break-all;
 }
 
 .subtitle {
-  margin: 16px 0 7px;
-  font-size: 12px;
-  font-weight: 600;
+  margin: 20px 0 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .checks {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -224,49 +226,27 @@ onMounted(() => {
 
 .check {
   display: flex;
-  gap: 8px;
-  align-items: baseline;
-  font-size: 12px;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 14px;
 }
 
-.check__mark {
-  padding: 0 6px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  font-size: 9px;
-  line-height: 16px;
-}
-
-.check__mark--ok {
-  border-color: var(--success);
-  color: var(--success);
-}
-
-.check__mark--bad {
-  border-color: var(--danger);
-  color: var(--danger);
+.check:hover {
+  background: rgb(255 255 255 / 45%);
 }
 
 .check__name {
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .hint {
   margin: 8px 0 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.6;
-}
-
-.ghost {
-  padding: 4px 11px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text-muted);
-  font-size: 11px;
-  cursor: pointer;
 }
 </style>

@@ -37,7 +37,7 @@ const props = withDefaults(
     rowRouteName?: string
   }>(),
   {
-    title: '对话',
+    title: '历史会话',
     emptyAction: '开始一段对话',
     newLabel: '新建会话',
     rowRouteName: 'conversation',
@@ -164,41 +164,46 @@ function commitRename(): void {
 
 <style scoped>
 .icon-button {
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 6px 12px;
+  border: 1px solid rgb(0 0 0 / 6%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 78%);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
+  font-weight: 600;
   text-decoration: none;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .icon-button:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
+/* 演示稿 `.sidebar-item`：12px 16px 内边距、12px 圆角、14px/500。 */
 .session {
   display: flex;
   gap: 2px;
   align-items: center;
   border-radius: var(--radius-sm);
+  transition: background 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 .session:hover {
-  background: var(--surface-sunken);
+  background: rgb(255 255 255 / 60%);
 }
 
 .session--active {
-  background: var(--accent-soft);
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(51 68 85 / 6%);
 }
 
 .session__link {
   flex: 1;
   min-width: 0;
   display: block;
-  padding: 8px 10px;
+  padding: 14px 18px;
   color: inherit;
   text-decoration: none;
 }
@@ -206,9 +211,15 @@ function commitRename(): void {
 .session__title {
   display: block;
   overflow: hidden;
-  font-size: 13px;
+  font-size: 16px;
+  font-weight: 500;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.session--active .session__title {
+  color: var(--text);
+  font-weight: 750;
 }
 
 .session__title--untitled {
@@ -218,6 +229,7 @@ function commitRename(): void {
 .menu {
   position: relative;
   flex: none;
+  margin-right: 8px;
 }
 
 .menu__toggle {
@@ -244,12 +256,14 @@ function commitRename(): void {
   z-index: 5;
   display: flex;
   flex-direction: column;
-  min-width: 120px;
-  padding: 4px;
-  border: 1px solid var(--border);
+  min-width: 130px;
+  padding: 5px;
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
-  background: var(--surface);
-  box-shadow: 0 6px 18px rgb(20 26 38 / 12%);
+  background: rgb(255 255 255 / 94%);
+  box-shadow: var(--glass-shadow-hover);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .menu__item {
@@ -296,7 +310,7 @@ function commitRename(): void {
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--surface);
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -337,7 +351,7 @@ function commitRename(): void {
   border-radius: 4px;
   background: transparent;
   color: inherit;
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
 }
 </style>

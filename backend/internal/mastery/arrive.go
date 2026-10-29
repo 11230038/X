@@ -22,7 +22,10 @@ import (
 type ArriveRequest struct {
 	Actor Actor
 	// Goal is what this turn is about. It is only used when the conversation has
-	// no path yet, where it becomes the new path's goal (Open).
+	// no path yet, where it becomes the new path's goal (Open) — provisionally:
+	// the question is usually not a name, so the same turn replaces the goal with
+	// the summary it gives the conversation once it has an answer (Claimed.Name
+	// on the runtime's side).
 	Goal string
 }
 
@@ -30,6 +33,12 @@ type ArriveRequest struct {
 type Arrival struct {
 	// Path is the path the conversation is on, created if it had none.
 	Path Path
+	// Created reports that this arrival is the one that opened the path: the
+	// conversation had none before this turn. Only the turn that opened a path
+	// may name it, because only that turn has the exchange the name comes from
+	// — and a path the conversation came back to may have been renamed by hand
+	// since.
+	Created bool
 	// Lease is who is writing the path now, which is not always this turn.
 	Lease Lease
 	// Ours reports whether the lease is this turn's. A turn whose path is held
@@ -57,7 +66,7 @@ type Arrival struct {
 // turn that never starts. What the turn gets instead is an arrival that says who
 // the holder is, and tools that refuse writes with that name in the refusal.
 func (s *Service) Arrive(ctx context.Context, request ArriveRequest, caller authz.Caller) (Arrival, error) {
-	path, err := s.Open(ctx, OpenRequest{Actor: request.Actor, Goal: request.Goal}, caller)
+	path, created, err := s.Open(ctx, OpenRequest{Actor: request.Actor, Goal: request.Goal}, caller)
 	if err != nil {
 		return Arrival{}, err
 	}
@@ -81,6 +90,7 @@ func (s *Service) Arrive(ctx context.Context, request ArriveRequest, caller auth
 		if errors.As(err, &held) {
 			return Arrival{
 				Path:      path,
+				Created:   created,
 				Lease:     held.Lease,
 				ExpiresAt: held.Lease.AcquiredAt.Add(s.leaseTTL),
 			}, nil
@@ -88,9 +98,10 @@ func (s *Service) Arrive(ctx context.Context, request ArriveRequest, caller auth
 		return Arrival{}, err
 	}
 	return Arrival{
-		Path:  path,
-		Lease: lease,
-		Ours:  true,
+		Path:    path,
+		Created: created,
+		Lease:   lease,
+		Ours:    true,
 		// A takeover that lost the race is not a takeover: the lease that came
 		// back belongs to whoever won, and this line would then be claiming
 		// credit for somebody else's write.

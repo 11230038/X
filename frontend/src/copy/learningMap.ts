@@ -26,10 +26,14 @@ export const STEP_LABELS = {
 export const LEARNING_MAP = {
   title: '学习地图',
   description: '按模块看一条掌握路径上的知识点四态、观察统计与下一步。',
+  /** 一级页（选路径）的说明。二级页沿用路径自己的说明。 */
+  indexDescription: '选一条路径，看它的知识点按模块铺开。',
+  chooseAnother: '换一条路径',
 
   legend: '图例',
   module: '模块',
   pointEmpty: '选一个知识点，这里会显示它的观察统计与下一步。',
+  backToPath: '回到路径',
 
   summary: (
     total: number,

@@ -134,7 +134,7 @@ async function remove(): Promise<void> {
 
 .account-actions__req {
   color: var(--text-faint);
-  font-size: 9px;
+  font-size: 14px;
 }
 
 .ghost--danger {

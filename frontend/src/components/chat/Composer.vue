@@ -12,14 +12,14 @@
  *
  * 材料选择只负责带上去，不预判可读性：附件能不能读由服务端的地面化结果说。
  *
- * 人格也是这一轮的选择，但它显示成下拉而不是 chip：chip 是"这一轮额外带上
- * 了什么"，人格是"这一轮用哪种说法"，而且选一次通常会连着用几轮。
+ * 人格不在这里：它是这一轮的说法，但演示稿把它放在顶栏的伙伴选择器里
+ * （`.partner-selector`），所以输入区只剩下"这一轮额外带上了什么"的 chip。
  */
 
 import { nextTick, ref, watch } from 'vue'
 
 import { CHAT } from '../../copy/chat'
-import { PERSONAS } from '../../copy/personas'
+import AppIcon from '../common/AppIcon.vue'
 
 export interface ComposerChip {
   id: string
@@ -44,20 +44,6 @@ const props = defineProps<{
   knowledgeBases: readonly ComposerChip[]
   /** 阅读页带过来的选区；为空表示这一轮不带选区。 */
   selection: { label: string } | null
-  /** 可选的、保存在服务端的人格。 */
-  personas: readonly PersonaChoice[]
-  /** 当前选中的人格 id；空串表示不指定。 */
-  persona: string
-  personaLoading: boolean
-  /** 列表没读出来。与"没有选中"分开画，否则失败会悄悄变成"不指定人格"。 */
-  personaFailure: boolean
-  /**
-   * 这一页锁死了人格（题目问答）。锁定时不画下拉：下拉会暗示可以换，
-   * 而每一轮发出去的都是同一个人格。
-   */
-  personaLocked?: boolean
-  /** 锁定时显示的固定人格名。 */
-  personaLockLabel?: string
   /**
    * 进入页面时预填的第一句话。协同写作页把它拼好带过来；只做初值，不跟着
    * prop 变化覆盖用户已经敲进去的字。
@@ -73,9 +59,6 @@ const emit = defineEmits<{
   (event: 'remove-attachment', id: string): void
   (event: 'remove-knowledge-base', id: string): void
   (event: 'clear-selection'): void
-  (event: 'select-persona', id: string): void
-  (event: 'retry-personas'): void
-  (event: 'manage-personas'): void
 }>()
 
 /** 最多长到几行，超过就内部滚动。 */
@@ -117,10 +100,6 @@ function onKeydown(event: KeyboardEvent): void {
   }
 }
 
-function onPersonaChange(event: Event): void {
-  emit('select-persona', (event.target as HTMLSelectElement).value)
-}
-
 /**
  * 把一段文字放进输入框并聚焦。题目问答选完题之后用它：题目内容要看得见、
  * 能被用户接着改，而不是悄悄附在发送动作后面。
@@ -144,6 +123,21 @@ defineExpose({ replace, value: () => text.value })
     -->
     <p v-if="props.waiting" class="composer__hint">正在等你的回答</p>
 
+    <!-- 演示稿把工具排成输入框上方的一行 chip，输入框本身只剩文字与发送键。 -->
+    <div v-if="!props.waiting" class="composer__tools">
+      <slot name="tools" />
+      <button type="button" class="composer__tool" @click="emit('open-attachments')">
+        {{ CHAT.attachments }}
+        <span v-if="attachments.length > 0" class="composer__badge">{{ attachments.length }}</span>
+      </button>
+      <button type="button" class="composer__tool" @click="emit('open-knowledge-bases')">
+        {{ CHAT.knowledgeBases }}
+        <span v-if="knowledgeBases.length > 0" class="composer__badge">
+          {{ knowledgeBases.length }}
+        </span>
+      </button>
+    </div>
+
     <div class="composer__box">
       <div class="composer__stack">
         <!-- 材料 chip。只在开新一轮时有意义：`submit_reply` 不带材料。 -->
@@ -160,7 +154,7 @@ defineExpose({ replace, value: () => text.value })
               :aria-label="`移除附件 ${file.label}`"
               @click="emit('remove-attachment', file.id)"
             >
-              ✕
+              <AppIcon name="close" />
             </button>
           </span>
 
@@ -173,7 +167,7 @@ defineExpose({ replace, value: () => text.value })
               :aria-label="`移除知识库 ${kb.label}`"
               @click="emit('remove-knowledge-base', kb.id)"
             >
-              ✕
+              <AppIcon name="close" />
             </button>
           </span>
 
@@ -186,7 +180,7 @@ defineExpose({ replace, value: () => text.value })
               :aria-label="CHAT.clearSelection"
               @click="emit('clear-selection')"
             >
-              ✕
+              <AppIcon name="close" />
             </button>
           </span>
         </div>
@@ -203,54 +197,6 @@ defineExpose({ replace, value: () => text.value })
           @keydown="onKeydown"
         />
 
-        <div v-if="!props.waiting" class="composer__tools">
-          <span v-if="props.personaLocked" class="composer__tool composer__persona">
-            {{ PERSONAS.composerLabel }}
-            <strong class="composer__locked">
-              {{ props.personaLoading ? PERSONAS.personaLoading : props.personaLockLabel }}
-            </strong>
-          </span>
-          <label v-else class="composer__tool composer__persona">
-            {{ PERSONAS.composerLabel }}
-            <select
-              class="composer__select"
-              :value="props.persona"
-              :disabled="props.personaLoading"
-              :aria-label="PERSONAS.composerLabel"
-              @change="onPersonaChange"
-            >
-              <option value="">
-                {{ props.personaLoading ? PERSONAS.personaLoading : PERSONAS.noPersona }}
-              </option>
-              <option v-for="item in props.personas" :key="item.id" :value="item.id">
-                {{ item.label }}
-              </option>
-            </select>
-          </label>
-          <button type="button" class="composer__tool" @click="emit('manage-personas')">
-            {{ PERSONAS.manage }}
-          </button>
-          <!-- 页面自己的工具（题目问答的「选择题目」）。 -->
-          <slot name="tools" />
-          <button type="button" class="composer__tool" @click="emit('open-attachments')">
-            {{ CHAT.attachments }}
-            <span v-if="attachments.length > 0" class="composer__badge">{{ attachments.length }}</span>
-          </button>
-          <button type="button" class="composer__tool" @click="emit('open-knowledge-bases')">
-            {{ CHAT.knowledgeBases }}
-            <span v-if="knowledgeBases.length > 0" class="composer__badge">
-              {{ knowledgeBases.length }}
-            </span>
-          </button>
-          <button
-            v-if="props.personaFailure"
-            type="button"
-            class="composer__tool composer__tool--danger"
-            @click="emit('retry-personas')"
-          >
-            {{ PERSONAS.personaLoadFailed }}
-          </button>
-        </div>
       </div>
 
       <!--
@@ -261,46 +207,57 @@ defineExpose({ replace, value: () => text.value })
         v-if="props.running"
         type="button"
         class="composer__action composer__action--stop"
+        :aria-label="CHAT.stop"
         @click="emit('stop')"
       >
-        {{ CHAT.stop }}
+        <span aria-hidden="true">■</span>
       </button>
       <button
         v-else
         type="button"
         class="composer__action"
         :disabled="props.disabled || text.trim() === ''"
+        :aria-label="props.waiting ? CHAT.reply : CHAT.send"
         @click="send"
       >
-        {{ props.waiting ? CHAT.reply : CHAT.send }}
+        <span aria-hidden="true">↑</span>
       </button>
     </div>
   </div>
 </template>
 
 <style scoped>
+/* 演示稿 `.chat-input-area`：页面留白 40 之后，输入条再往上收 16。
+   主列底面还有 32 的内边距，所以这里合起来是 48。 */
 .composer {
-  padding: 0 24px 18px;
+  padding: 0 40px 48px;
 }
 
 .composer__hint {
-  padding: 0 2px 6px;
+  padding: 0 4px 8px;
   color: var(--warning);
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
 }
 
+/* 演示稿的输入条：一整块液态玻璃，圆角很大，聚焦时描边变紫。 */
 .composer__box {
   display: flex;
-  gap: 10px;
-  align-items: flex-end;
-  padding: 8px 8px 8px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface);
+  gap: 16px;
+  align-items: center;
+  padding: 12px 12px 12px 24px;
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
 }
 
 .composer__box:focus-within {
-  border-color: var(--accent);
+  border-color: rgb(177 140 255 / 55%);
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 12%), var(--glass-shadow);
 }
 
 .composer__stack {
@@ -312,10 +269,11 @@ defineExpose({ replace, value: () => text.value })
   display: block;
   width: 100%;
   min-height: 22px;
-  padding: 4px 0;
+  padding: 0;
   border: 0;
   outline: none;
   background: none;
+  font-size: 16px;
   line-height: 22px;
   resize: none;
 }
@@ -324,48 +282,34 @@ defineExpose({ replace, value: () => text.value })
   color: var(--text-faint);
 }
 
+/* 演示稿 `.chat-tools`：输入框上方的 chip 行。 */
 .composer__tools {
   display: flex;
-  gap: 6px;
-  padding-top: 4px;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 0 16px;
 }
 
+/* 演示稿 `.tool-chip`。 */
 .composer__tool {
   display: inline-flex;
-  gap: 5px;
+  gap: 6px;
   align-items: center;
-  padding: 2px 7px;
-  border: 1px solid var(--border);
+  padding: 8px 14px;
+  border: 1px solid rgb(0 0 0 / 6%);
   border-radius: 999px;
-  background: var(--surface-sunken);
-  color: var(--text-muted);
-  font-size: 11px;
+  background: #fff;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 .composer__tool:hover {
   border-color: var(--accent);
-  color: var(--accent);
-}
-
-.composer__tool--danger {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-
-.composer__select {
-  max-width: 11em;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.composer__select:disabled {
-  color: var(--text-faint);
-  cursor: default;
+  color: var(--accent-ink);
+  transform: translateY(-1px);
 }
 
 .composer__badge {
@@ -377,7 +321,7 @@ defineExpose({ replace, value: () => text.value })
   border-radius: 8px;
   background: var(--accent);
   color: #fff;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .chips {
@@ -396,7 +340,7 @@ defineExpose({ replace, value: () => text.value })
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface-sunken);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .chip--selection {
@@ -420,7 +364,7 @@ defineExpose({ replace, value: () => text.value })
   border: 0;
   background: transparent;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 13px;
   cursor: pointer;
 }
 
@@ -428,26 +372,46 @@ defineExpose({ replace, value: () => text.value })
   color: var(--danger);
 }
 
+/* 演示稿 `.send-btn`：44×44 的圆形渐变键。 */
 .composer__action {
+  display: grid;
   flex: none;
-  padding: 7px 16px;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
+  border-radius: 50%;
+  background: var(--warm-gradient);
   color: #fff;
-  font-weight: 600;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
   cursor: pointer;
+  box-shadow: 0 8px 24px rgb(177 140 255 / 40%);
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.composer__action:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 30px rgb(177 140 255 / 50%);
+}
+
+.composer__action:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .composer__action:disabled {
-  background: #b9c6e6;
+  background: #d9cdf1;
+  box-shadow: none;
   cursor: default;
 }
 
 .composer__action--stop {
-  border-color: var(--border-strong);
-  background: var(--surface);
+  border-color: rgb(0 0 0 / 8%);
+  background: #fff;
   color: var(--text);
+  box-shadow: none;
 }
 
 .composer__action--stop:hover {

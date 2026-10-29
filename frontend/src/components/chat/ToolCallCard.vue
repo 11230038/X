@@ -39,9 +39,9 @@ defineProps<{
 
 <style scoped>
 .tool {
-  border: 1px solid var(--border);
+  border: 1px solid rgb(255 255 255 / 72%);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: rgb(255 255 255 / 48%);
   font-size: 13px;
 }
 
@@ -60,7 +60,7 @@ defineProps<{
 
 .tool__state {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tool__state--ok {
@@ -79,7 +79,7 @@ defineProps<{
 .tool__key {
   margin: 7px 0 3px;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .tool__pre {

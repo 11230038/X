@@ -213,6 +213,19 @@ func (f *fakeRepository) Marks(_ context.Context, materialID string, _ authz.Cal
 	return found, nil
 }
 
+func (f *fakeRepository) Bookmarks(_ context.Context, _ authz.Caller) ([]Bookmark, error) {
+	if f.markErr != nil {
+		return nil, f.markErr
+	}
+	found := make([]Bookmark, 0, len(f.marks))
+	for _, mark := range f.marks {
+		if mark.Kind == MarkBookmark {
+			found = append(found, Bookmark{Mark: mark})
+		}
+	}
+	return found, nil
+}
+
 func (f *fakeRepository) Mark(_ context.Context, markID string, _ authz.Caller) (Mark, error) {
 	for _, mark := range f.marks {
 		if mark.MarkID == markID {

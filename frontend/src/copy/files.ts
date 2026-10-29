@@ -1,7 +1,7 @@
-/** 文件库的文案。 */
+/** 资料市场的文案。 */
 
 export const FILES = {
-  title: '文件库',
+  title: '资料市场',
   description: '上传、解析、下载与回收站。上传不代表能读，解析完成才代表。',
 
   active: '在用',
@@ -11,16 +11,23 @@ export const FILES = {
   clearSearch: '清除搜索',
 
   upload: '上传文件',
+  uploadTitle: '上传文件',
+  dropTitle: '把文件拖到这里',
+  dropHint: '或点击选择文件',
+  close: '关闭',
   uploading: '正在上传',
   cancelUpload: '取消上传',
   uploadOneAtATime: '一次上传一个文件',
 
-  emptyActive: '文件库还是空的',
+  emptyActive: '资料市场还是空的',
   emptyActiveHint: '上传一份资料，解析之后就能在对话里引用它。',
   emptyDeleted: '回收站是空的',
   emptyDeletedHint: '在这里的会话与文件都可以恢复；永久删除才不可逆。',
   emptySearch: '没有匹配的文件',
   emptySearchHint: '换一个文件名再试，或者清除搜索看全部。',
+
+  /** 卡片右下那枚按钮：卡片本来是整块可点的，这枚只是把"点开"说清楚。 */
+  cardAction: '查看详情',
 
   unparsedTitle: '已上传，尚未解析',
   unparsedHint: '这个文件已经存下来了，但还没有被解析成可检索的文本。把它加入一个知识库就会开始解析。',
@@ -56,8 +63,6 @@ export const FILES = {
   removed: '已移入回收站',
   restored: '已恢复',
   purged: '已永久删除',
-  selectFile: '选一个文件',
-  selectFileHint: '左边选一份文件，这里会显示解析状态与操作。',
 
   removeTitle: '把这个文件移入回收站？',
   removeBody: '文件会从在用列表里消失，可以随时恢复。',
@@ -121,5 +126,5 @@ export const FILE_ACTION_ERRORS: Record<string, string> = {
   not_parsed: '这个文件还没有被解析',
   invalid_request: '这个文件编号不被接受，刷新列表再试',
   file_in_use: '还有东西在用它，暂时不能删除',
-  library_unavailable: '文件库暂时不可用，请稍后重试',
+  library_unavailable: '资料市场暂时不可用，请稍后重试',
 }

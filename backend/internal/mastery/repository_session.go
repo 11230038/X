@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"backend/internal/authz"
+	"backend/internal/data"
 	"gorm.io/gorm"
 )
 
@@ -16,6 +17,63 @@ import (
 // because it is one clause of a tree change and runs in the same transaction as
 // one. The reads here are the other direction: nothing writes them, and they are
 // what turns a conversation into a path.
+
+// Conversations reads the path-chat history: one row per path, pairing the path
+// with the mastery conversation that created it.
+//
+// The join runs from the owner column rather than from the link table, and that
+// is the whole point of this read: the link table says a conversation has been
+// on a path, while this page says which conversation a path belongs to. A
+// conversation that switched onto somebody else's path is therefore not a
+// second row for it, and a path whose owner conversation is in the recycle bin
+// is not listed at all.
+//
+// Last activity is the link table's newest time when there is one and the
+// path's own timestamps otherwise. A path is linked to its owner at creation,
+// so the fallback is for rows written before migration 00004's backfill, not a
+// state this package creates.
+func (r *GORMRepository) Conversations(ctx context.Context, caller authz.Caller) ([]Conversation, error) {
+	if err := r.ready(); err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		SessionID string     `gorm:"column:session_id"`
+		Title     *string    `gorm:"column:title"`
+		PathID    string     `gorm:"column:mastery_path_id"`
+		Goal      *string    `gorm:"column:goal"`
+		Emoji     *string    `gorm:"column:emoji"`
+		LastSeen  *time.Time `gorm:"column:last_seen"`
+		UpdatedAt *time.Time `gorm:"column:update_time"`
+	}
+	err := data.OwnerScope(r.db.WithContext(ctx).Table("sessions AS s"),
+		caller.UserID, caller.IsAdmin(), "p.owner_id").
+		Select("s.session_id, s.title, p.mastery_path_id, m.goal, m.emoji, "+
+			"COALESCE((SELECT MAX(ps.last_seen_time) FROM mastery_path_sessions ps "+
+			"WHERE ps.path_id = p.mastery_path_id), p.update_time, p.creat_time) AS last_seen, "+
+			"p.update_time").
+		Joins("JOIN mastery_paths AS p ON p.owner_session_id = s.session_id").
+		Joins("LEFT JOIN mastery_topic_meta AS m ON m.path_id = p.mastery_path_id").
+		Where("s.kind = ?", "mastery").
+		Where("s.is_deleted = ?", false).
+		Order("last_seen DESC, p.mastery_path_id ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("read mastery conversations: %w", err)
+	}
+	listed := make([]Conversation, 0, len(rows))
+	for _, row := range rows {
+		listed = append(listed, Conversation{
+			SessionID:  row.SessionID,
+			Title:      text(row.Title),
+			PathID:     row.PathID,
+			Goal:       text(row.Goal),
+			Emoji:      text(row.Emoji),
+			LastSeenAt: deref(row.LastSeen),
+			UpdatedAt:  deref(row.UpdatedAt),
+		})
+	}
+	return listed, nil
+}
 
 // PathOfSession reads the newest link between a conversation and a path.
 //

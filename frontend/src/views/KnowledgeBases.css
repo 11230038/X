@@ -1,122 +1,147 @@
-/* ── 列表栏 ─────────────────────────────────────────────────────────────── */
-.kb-pane {
+/* 页内各块之间比全局多留一点：标题、提示、卡片、检索各自成段。 */
+.page__inner {
+  gap: 28px;
+}
+
+/* ── 知识库目录 ─────────────────────────────────────────────────────────── */
+/* 照演示稿的 `.market-grid` / `.market-card`：自动填充的卡片，悬起 4px。 */
+.kb-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 28px;
+}
+
+.kb-card {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-width: 0;
-  border-right: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.kb-pane__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 12px;
-  border-bottom: 1px solid var(--border);
-}
-
-.kb-pane__title {
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.new-button {
-  padding: 4px 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.new-button:hover {
-  background: var(--surface-sunken);
-}
-
-.kb-pane__scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 6px;
-}
-
-.kb-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.kb-row {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  width: 100%;
-  padding: 9px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
+  gap: 10px;
+  padding: 28px;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: var(--glass-shadow);
   text-align: left;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-.kb-row:hover {
-  background: var(--surface-sunken);
+.kb-card:hover {
+  border-color: var(--color-purple);
+  box-shadow: 0 16px 32px -10px rgb(51 68 85 / 12%);
+  transform: translateY(-4px);
 }
 
-.kb-row--active {
-  background: var(--accent-soft);
+.kb-card:focus-visible {
+  outline: none;
+  border-color: var(--color-purple);
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
 }
 
-.kb-row__head {
+.kb-card__top {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-width: 0;
+  gap: 14px;
+  margin-bottom: 10px;
 }
 
-.kb-row__name {
+.kb-card__icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: #f3e8ff;
+  font-size: 26px;
+  line-height: 1;
+}
+
+.kb-card__name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   color: var(--text);
-  font-size: 13px;
-  font-weight: 550;
+  font-size: 20px;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.kb-row__description {
+.kb-card__default {
+  flex: none;
+}
+
+/* 小徽章跟着卡片一起放大一号。 */
+.kb-card :deep(.badge),
+.document :deep(.badge),
+.kb-summary :deep(.badge) {
+  font-size: 13px;
+}
+
+/* 描述最多两行，卡片不至于被一段长话撑高。 */
+.kb-card__desc {
+  display: -webkit-box;
   overflow: hidden;
   color: var(--text-muted);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 15px;
+  line-height: 1.8;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
-.kb-row__meta {
+.kb-card__meta {
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.kb-card__time {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* 从详情回目录。 */
+.kb-back {
+  align-self: flex-start;
+  margin-bottom: -10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.kb-back:hover {
+  color: var(--accent);
 }
 
 /* ── 主内容 ─────────────────────────────────────────────────────────────── */
+/* 演示稿的 `.btn btn-outline`：白底、12 圆角、14px 粗体。 */
 .button {
   display: inline-flex;
   align-items: center;
-  padding: 5px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
   color: var(--text);
-  font-size: 12px;
+  font-size: 15px;
+  font-weight: 700;
   text-decoration: none;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .button:hover:not(:disabled) {
-  background: var(--surface-sunken);
+  border-color: var(--text);
+  background: #f8fafc;
 }
 
 .button:disabled {
@@ -125,14 +150,18 @@
 }
 
 .button--primary {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: transparent;
+  background: var(--accent-gradient);
   color: #fff;
+  box-shadow: 0 4px 12px rgb(177 140 255 / 28%);
 }
 
-.button--danger {
-  border-color: var(--danger);
-  color: var(--danger);
+.button--primary:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--accent-gradient);
+  color: #fff;
+  box-shadow: 0 8px 20px rgb(177 140 255 / 40%);
+  transform: translateY(-2px);
 }
 
 .link-button {
@@ -140,7 +169,7 @@
   border: 0;
   background: none;
   color: var(--accent);
-  font-size: 11px;
+  font-size: 14px;
   cursor: pointer;
 }
 
@@ -153,131 +182,140 @@
   color: var(--danger);
 }
 
-.create-card,
 .add-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid var(--border);
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
-.create-card__title {
+/* 新建知识库的弹窗。原生 <dialog> 自己管焦点、Esc 与遮罩层级，这里只给外观。 */
+.kb-dialog {
+  width: min(480px, calc(100vw - 32px));
+  padding: 24px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: rgb(255 255 255 / 92%);
+  color: var(--text);
+  box-shadow: 0 24px 64px -12px rgb(51 68 85 / 20%);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+}
+
+.kb-dialog::backdrop {
+  background: rgb(20 26 38 / 25%);
+  backdrop-filter: blur(6px);
+}
+
+.kb-dialog__form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.kb-dialog__title {
   margin: 0;
-  font-size: 13px;
-  font-weight: 650;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* 卡片里的输入框限宽；弹窗已经是窄的那一列，输入框占满。 */
+.kb-dialog__form .field__input {
+  max-width: none;
+}
+
+.kb-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
 }
 
 .field__label {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .field__input {
   max-width: 420px;
-  padding: 6px 8px;
-  border: 1px solid var(--border-strong);
+  padding: 11px 16px;
+  border: 1px solid rgb(0 0 0 / 6%);
   border-radius: var(--radius-sm);
-  background: var(--surface);
-  font-size: 12px;
+  background: rgb(255 255 255 / 70%);
+  font-size: 15px;
+  outline: none;
+  transition: all 0.2s ease;
 }
 
-.create-card__actions,
+.field__input:focus {
+  border-color: var(--color-purple);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
+}
+
 .add-card__actions {
   display: flex;
-  gap: 6px;
+  gap: 10px;
 }
 
 .form-error {
-  padding: 6px 8px;
+  padding: 8px 10px;
   border: 1px solid var(--danger);
   border-radius: var(--radius-sm);
   background: var(--danger-soft);
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
 }
 
-.kb-head {
+.kb-summary {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--border);
-}
-
-.kb-head__text {
-  min-width: 0;
-}
-
-.kb-head__title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.kb-head__title {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 650;
-}
-
-.kb-head__description {
-  margin-top: 4px;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.kb-head__meta {
-  margin-top: 4px;
-  color: var(--text-faint);
-  font-size: 11px;
-}
-
-.kb-head__actions {
-  display: flex;
-  flex: none;
   flex-wrap: wrap;
-  gap: 6px;
+  align-items: center;
+  gap: 14px;
+}
+
+.kb-summary__meta {
+  color: var(--text-faint);
+  font-size: 15px;
+  line-height: 1.6;
 }
 
 .section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-}
-
-.section__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 18px;
 }
 
 .section-title {
   margin: 0;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 650;
+  line-height: 1.4;
 }
 
 .muted-note {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 1.7;
 }
 
+/* 文档卡，照演示稿的 `.kb-doc-card`：白卡、圆角 16、左右两端。 */
 .document-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 16px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -285,66 +323,159 @@
 
 .document {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  align-items: center;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: var(--glass-shadow);
+  transition: border-color 0.2s ease;
+}
+
+.document:hover,
+.document:has(.document__open:focus-visible) {
+  border-color: var(--color-purple);
+}
+
+.document:has(.document__open:focus-visible) {
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
+}
+
+/*
+ * 卡片的左半边是「打开详情」。做成一个按钮而不是整张卡片挂点击，
+ * 右侧那几个动作按钮才不用 `@click.stop` 一个个拦。
+ */
+.document__open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.document__open:focus-visible {
+  outline: none;
+}
+
+/* 演示稿的 `.kb-icon`：方块，颜色按文件类型分。 */
+.document__icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 14px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.document__icon--pdf {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.document__icon--doc {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.document__icon--ppt {
+  background: #ffedd5;
+  color: #ea580c;
+}
+
+.document__icon--sheet {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.document__icon--markdown {
+  background: #f3e8ff;
+  color: #9333ea;
+}
+
+.document__icon--text {
+  background: #f1f5f9;
+  color: #475569;
 }
 
 .document__main {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  gap: 2px;
+  gap: 5px;
   min-width: 0;
 }
 
 .document__name {
   overflow: hidden;
-  font-size: 13px;
+  font-size: 18px;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .document__meta {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 15px;
+  line-height: 1.6;
 }
 
 .document__error {
   color: var(--danger);
-  font-size: 11px;
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 .document__side {
   display: flex;
   flex: none;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  justify-content: flex-end;
+  gap: 14px;
 }
 
 .search-form {
   display: flex;
-  gap: 6px;
-  max-width: 620px;
+  gap: 10px;
+  max-width: 660px;
 }
 
 .search-form__input {
   flex: 1;
   min-width: 0;
-  padding: 6px 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  font-size: 12px;
+  padding: 11px 16px;
+  border: 1px solid rgb(0 0 0 / 6%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 70%);
+  font-size: 15px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.search-form__input:focus {
+  border-color: var(--color-purple);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
 }
 
 .source-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -352,40 +483,41 @@
 }
 
 .source {
-  padding: 10px 12px;
-  border: 1px solid var(--border);
+  padding: 14px 17px;
+  border: 1px solid rgb(255 255 255 / 72%);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: rgb(255 255 255 / 52%);
 }
 
 .source__head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
 }
 
 .source__title {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 550;
 }
 
 .source__score {
   flex: none;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .source__snippet {
-  margin-top: 4px;
+  margin-top: 8px;
   color: var(--text);
-  font-size: 12px;
-  line-height: 1.65;
+  font-size: 14px;
+  line-height: 1.8;
   white-space: pre-wrap;
 }
 
 .source__locator {
-  margin-top: 4px;
+  margin-top: 8px;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
+  line-height: 1.6;
 }

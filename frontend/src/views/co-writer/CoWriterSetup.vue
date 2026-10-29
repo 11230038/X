@@ -4,8 +4,10 @@
  *
  * 它不建会话、也不发消息 —— 两件事都由工作台做（`startSession` 负责建一条
  * `writing` 会话，并在连接就绪后把第一句发出去）。这里只把「这次写什么」拼成
- * 那句开场白，并把伙伴选择交给工作台共享：准备页选的人，写起来之后输入区的
- * 人格下拉仍是同一个值。
+ * 那句开场白。
+ *
+ * **不选人格**：写作页固定用「写作教练」，准备表对人格一个字都不提 —— 没有
+ * 可挑的东西，就不必解释为什么没有选择器。
  *
  * 之所以还要这一页：空白输入框对写作不友好。写作的第一步通常不是「问」，而是
  * 先定下读者与目的。
@@ -13,14 +15,9 @@
 
 import { computed, ref } from 'vue'
 
-import type { PersonaChoice } from '../../components/chat/Composer.vue'
 import { CO_WRITER, type WritingStep } from '../../copy/collaboration'
 
 const props = defineProps<{
-  personaItems: readonly PersonaChoice[]
-  personaId: string
-  personaLoading: boolean
-  personaFailure: boolean
   /** 建会话的请求还在飞。按钮要按住，防止连点建出两段写作。 */
   starting: boolean
   /** 建会话失败时那一句话；成功时为 null。 */
@@ -28,9 +25,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (event: 'select-persona', personaId: string): void
-  (event: 'retry-personas'): void
-  (event: 'manage-personas'): void
   (event: 'start', firstMessage: string): void
 }>()
 
@@ -63,10 +57,6 @@ function firstMessage(): string {
   }
 }
 
-function onPersonaChange(event: Event): void {
-  emit('select-persona', (event.target as HTMLSelectElement).value)
-}
-
 function start(): void {
   if (!canStart.value) return
   emit('start', firstMessage())
@@ -76,12 +66,6 @@ function start(): void {
 <template>
   <div class="setup">
     <p class="setup__intro">{{ CO_WRITER.description }}</p>
-
-    <div class="setup__links">
-      <button type="button" class="ghost" @click="emit('manage-personas')">
-        {{ CO_WRITER.manage }}
-      </button>
-    </div>
 
     <section class="section">
       <h2 class="section__title">{{ CO_WRITER.stepTitle }}</h2>
@@ -99,51 +83,6 @@ function start(): void {
           <span class="step__description">{{ entry.description }}</span>
         </button>
       </div>
-    </section>
-
-    <section class="section">
-      <h2 class="section__title">{{ CO_WRITER.personaTitle }}</h2>
-
-      <div class="persona-row">
-        <select
-          class="persona-select"
-          :value="personaId"
-          :aria-label="CO_WRITER.personaTitle"
-          :disabled="personaLoading && personaItems.length === 0"
-          @change="onPersonaChange"
-        >
-          <option value="">
-            {{
-              personaLoading && personaItems.length === 0
-                ? CO_WRITER.personaLoading
-                : CO_WRITER.noPersona
-            }}
-          </option>
-          <option
-            v-for="persona in personaItems"
-            :key="persona.id"
-            :value="persona.id"
-          >
-            {{ persona.label }}
-          </option>
-        </select>
-
-        <button
-          v-if="personaFailure"
-          type="button"
-          class="link-button"
-          @click="emit('retry-personas')"
-        >
-          {{ CO_WRITER.personaLoadFailed }}
-        </button>
-      </div>
-
-      <p v-if="!personaLoading && !personaFailure && personaItems.length === 0" class="hint">
-        {{ CO_WRITER.personaEmpty }}
-        <button type="button" class="link-button" @click="emit('manage-personas')">
-          {{ CO_WRITER.manage }}
-        </button>
-      </p>
     </section>
 
     <section class="section">
@@ -171,7 +110,7 @@ function start(): void {
 .setup {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 24px;
   max-width: 720px;
   margin: 0 auto;
   padding: 28px 32px 48px;
@@ -180,28 +119,8 @@ function start(): void {
 .setup__intro {
   margin: 0;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.7;
-}
-
-.setup__links {
-  display: flex;
-  gap: 8px;
-}
-
-.ghost {
-  padding: 6px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text-muted);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.ghost:hover {
-  border-color: var(--accent);
-  color: var(--accent);
 }
 
 .section {
@@ -213,7 +132,7 @@ function start(): void {
 .section__title {
   margin: 0;
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 650;
 }
 
@@ -227,96 +146,67 @@ function start(): void {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
+  padding: 14px 16px;
+  border: 1px solid rgb(255 255 255 / 72%);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: rgb(255 255 255 / 45%);
   color: var(--text);
   text-align: left;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .step:hover {
-  border-color: var(--border-strong);
+  background: rgb(255 255 255 / 72%);
 }
 
 .step--on {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  border-color: rgb(177 140 255 / 35%);
+  background: #fff;
+  box-shadow: 0 2px 10px rgb(177 140 255 / 12%);
 }
 
 .step__label {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 
 .step__description {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.5;
-}
-
-.persona-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-
-.persona-select {
-  min-width: 220px;
-  padding: 6px 9px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-}
-
-.persona-select:focus {
-  border-color: var(--accent);
-  outline: none;
 }
 
 .content {
   width: 100%;
-  padding: 9px 11px;
-  border: 1px solid var(--border-strong);
+  padding: 14px 16px;
+  border: 1px solid rgb(0 0 0 / 6%);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: rgb(255 255 255 / 70%);
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.7;
+  outline: none;
   resize: vertical;
 }
 
 .content:focus {
-  border-color: var(--accent);
-  outline: none;
+  border-color: var(--color-purple);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
 }
 
 .hint {
   margin: 0;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.6;
-}
-
-.link-button {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--accent);
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
 }
 
 .actions {
   display: flex;
-  gap: 12px;
+  gap: 16px;
   align-items: center;
   justify-content: flex-end;
 }
@@ -324,7 +214,7 @@ function start(): void {
 .setup__error {
   margin: 0;
   color: var(--danger);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .primary {
@@ -333,7 +223,7 @@ function start(): void {
   border-radius: var(--radius-sm);
   background: var(--accent);
   color: #fff;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
 }

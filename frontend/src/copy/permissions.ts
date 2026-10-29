@@ -12,7 +12,7 @@
 
 export const SURFACE_LABELS: Record<string, string> = {
   chat: '对话',
-  library: '文件库',
+  library: '资料市场',
   knowledge_base: '知识库',
   notebook: '题库',
   practice: '练习',
@@ -23,7 +23,7 @@ export const SURFACE_LABELS: Record<string, string> = {
   dashboard: '学习首页',
   memory: '记忆',
   system: '系统设置',
-  admin: '管理台',
+  admin: '管理功能',
   guardian: '监护',
 }
 

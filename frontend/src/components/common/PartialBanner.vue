@@ -48,11 +48,11 @@ const requestId = computed(() => props.failure?.requestId ?? '')
 .banner {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   padding: 7px 12px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .banner--warning {
@@ -77,7 +77,7 @@ const requestId = computed(() => props.failure?.requestId ?? '')
   white-space: nowrap;
   color: var(--text-faint);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .banner__retry {
@@ -87,7 +87,7 @@ const requestId = computed(() => props.failure?.requestId ?? '')
   border-radius: 4px;
   background: transparent;
   color: var(--text);
-  font-size: 11px;
+  font-size: 14px;
   cursor: pointer;
 }
 

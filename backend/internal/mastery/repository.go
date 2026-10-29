@@ -54,6 +54,10 @@ type Repository interface {
 	// listing that read those per row would cost more the more there was to
 	// list.
 	Paths(ctx context.Context, sessionID string, caller authz.Caller) ([]PathRow, error)
+	// Conversations reads the path-chat history: one row per path, pairing the
+	// path with the mastery conversation that created it. The owner column is
+	// what makes the pairing one-to-one; the link table is not read here.
+	Conversations(ctx context.Context, caller authz.Caller) ([]Conversation, error)
 	// Meta reads a path's topic metadata. ErrNotFound when the path has none,
 	// which a path created before this version may not, and when the path belongs
 	// to somebody else — the two are one answer.

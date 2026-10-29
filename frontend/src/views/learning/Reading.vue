@@ -14,7 +14,7 @@
  * 会话、大纲、选区、位置、批注、配对、扩展的状态各在自己的 composable 里。
  */
 
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { describeFailure } from '../../api/errors'
@@ -23,24 +23,19 @@ import EmptyState from '../../components/common/EmptyState.vue'
 import FailureState from '../../components/common/FailureState.vue'
 import SkeletonBlock from '../../components/common/SkeletonBlock.vue'
 import SurfaceGate from '../../components/common/SurfaceGate.vue'
-import PageHeader from '../../components/shell/PageHeader.vue'
 import { READING } from '../../copy/reading'
 
+import ReadingAssistant from './reading/ReadingAssistant.vue'
 import ReadingFileDialog from './reading/ReadingFileDialog.vue'
-import ReadingExtensions from './reading/ReadingExtensions.vue'
-import ReadingMarks from './reading/ReadingMarks.vue'
 import ReadingMaterials from './reading/ReadingMaterials.vue'
 import ReadingNoteDialog from './reading/ReadingNoteDialog.vue'
-import ReadingPairing from './reading/ReadingPairing.vue'
 import ReadingSelectionBar from './reading/ReadingSelectionBar.vue'
-import ReadingSessionBar from './reading/ReadingSessionBar.vue'
 import ReadingUnits from './reading/ReadingUnits.vue'
-import { useReadingExtensions } from './reading/useReadingExtensions'
+import { useReadingAssistant } from './reading/useReadingAssistant'
 import { useReadingFilePicker } from './reading/useReadingFilePicker'
 import { useReadingMarks } from './reading/useReadingMarks'
 import { useReadingMaterials } from './reading/useReadingMaterials'
 import { useReadingOutline } from './reading/useReadingOutline'
-import { useReadingPairing } from './reading/useReadingPairing'
 import { useReadingPosition } from './reading/useReadingPosition'
 import { useReadingSelection } from './reading/useReadingSelection'
 import { useReadingSessions } from './reading/useReadingSessions'
@@ -56,20 +51,7 @@ function reloadOutline(): Promise<void> {
   return loadOutline()
 }
 
-const {
-  sessions,
-  sessionsStatus,
-  sessionId,
-  pendingSession,
-  sessionHint,
-  sessionTitle,
-  sessionMissing,
-  loadSessions,
-  applySession,
-  clearSession,
-  needSession,
-  setSession,
-} = useReadingSessions(route, router, currentId, reloadOutline)
+const { sessionId, loadSessions, needSession, setSession } = useReadingSessions(route)
 
 /* ── 大纲与单元 ──────────────────────────────────────────────────────── */
 
@@ -92,12 +74,11 @@ const {
   sessionId,
   onReset: () => {
     resetMarks()
-    resetExtensions()
-    resetPairing()
+    resetAssistant()
     selection.value = null
   },
   afterReady: () => {
-    void Promise.all([loadMarks(), loadPairings(), loadExtensions()])
+    void loadMarks()
   },
 })
 
@@ -148,11 +129,10 @@ const {
   focusRange,
 })
 
-/* ── 批注、配对、扩展 ────────────────────────────────────────────────── */
+/* ── 批注 ────────────────────────────────────────────────────────────── */
 
 const {
   marks,
-  marksStatus,
   marksFailure,
   markFailure,
   markSaving,
@@ -160,7 +140,6 @@ const {
   addMark,
   addHighlight,
   addBookmark,
-  jumpToMark,
   resetMarks,
 } = useReadingMarks({
   currentId,
@@ -171,31 +150,62 @@ const {
   jumpToLocator,
 })
 
-const {
-  bilingual,
-  candidates,
-  pairingStatus,
-  pairingFailure,
-  pairingActionFailure,
-  pairChoice,
-  pairingBusy,
-  loadPairings,
-  confirmSelectedPairing,
-  cancelCurrentPairing,
-  resetPairing,
-} = useReadingPairing(currentId)
+/* ── 文档问答助手 ────────────────────────────────────────────────────── */
 
 const {
-  extensions,
-  extensionsStatus,
-  extensionsFailure,
-  extensionResults,
-  extensionRunning,
-  extensionFailure,
-  loadExtensions,
-  runOne,
-  resetExtensions,
-} = useReadingExtensions(currentId, selection)
+  exchanges,
+  asking,
+  ask: askAssistant,
+  reset: resetAssistant,
+} = useReadingAssistant(currentId, () => outline.value?.material.filename ?? '')
+
+function explainSelection(): void {
+  if (!selection.value) return
+  void askAssistant(selection.value.text, selection.value.locator)
+}
+
+/* ── 上次阅读位置 ────────────────────────────────────────────────────── */
+
+/**
+ * 打开材料不替人翻页，只在角落放一会儿"上次读到哪"：点它就跳过去，不点就
+ * 自己退场。位置是会话的，换了会话自然就没有这一条。
+ */
+const resumeVisible = ref(false)
+const resumeOrdinal = computed(() => outline.value?.position?.locator.ordinal ?? null)
+
+/**
+ * 浮条跟着「哪份材料、读到第几段」走，不只看段号：两份材料都停在第 3 段
+ * 时，单看段号会觉得位置没变，浮条就不会再出现。
+ */
+const resumeKey = computed(() => {
+  const position = outline.value?.position
+  if (!position) return ''
+  return `${outline.value?.material.material_id ?? ''}:${position.locator.ordinal}`
+})
+
+let resumeTimer: ReturnType<typeof setTimeout> | null = null
+
+function hideResume(): void {
+  resumeVisible.value = false
+  if (resumeTimer !== null) {
+    clearTimeout(resumeTimer)
+    resumeTimer = null
+  }
+}
+
+function resumeReading(): void {
+  hideResume()
+  jumpToPosition()
+}
+
+watch(resumeKey, (key) => {
+  hideResume()
+  if (key === '') return
+  resumeVisible.value = true
+  resumeTimer = setTimeout(hideResume, 8000)
+})
+
+onBeforeUnmount(hideResume)
 
 /* ── 写批注对话框 ────────────────────────────────────────────────────── */
 
@@ -263,16 +273,45 @@ watch(
 
 const showReader = computed(() => outlineStatus.value === 'ready' && outline.value !== null)
 
+/**
+ * 换材料的间隙：新材料还没换上来，屏幕上的正文仍属于上一份。这段时间里
+ * 正文不可点，以免把旧材料上的选区与位置记到新材料名下。
+ */
+const switching = computed(() => {
+  const open = outline.value?.material.material_id ?? ''
+  return open !== '' && currentId.value !== '' && open !== currentId.value
+})
+
+/**
+ * 正文的大标题是材料名。扩展名只对文件系统有意义，读的时候去掉 ——
+ * 完整的文件名在标题下面的来源行里。
+ */
+const materialTitle = computed(() => {
+  const filename = outline.value?.material.filename ?? ''
+  return filename.replace(/\.[^./\\]+$/, '') || filename
+})
+
+/**
+ * 材料按 markdown 排版。判断看 `source_type` 与扩展名两处，因为有的来源只
+ * 带其中之一。其余材料照旧按纯文本读，不做任何标记猜测。
+ */
+const markdownMode = computed(() => {
+  const material = outline.value?.material
+  if (!material) return false
+  const type = (material.source_type ?? '').toLowerCase()
+  const name = material.filename.toLowerCase()
+  return type === 'md' || type === 'markdown' || name.endsWith('.md') || name.endsWith('.markdown')
+})
+
 onMounted(() => {
   if (canSurface('reading') === false) return
-  void Promise.all([loadMaterials(), loadSessions()])
+  // 先定会话再读大纲：大纲要带着 session_id 去问，才知道上次读到哪。
+  void loadSessions().then(() => loadMaterials())
 })
 </script>
 
 <template>
   <SurfaceGate surface="reading">
-    <PageHeader :title="READING.title" :description="READING.description" />
-
     <FailureState
       v-if="materialsStatus === 'failed' && materialsFailure"
       :failure="materialsFailure"
@@ -289,7 +328,7 @@ onMounted(() => {
         @open-file="openFilePicker"
       />
 
-      <section class="reader">
+      <section class="reader" :class="{ 'reader--switching': switching }">
         <EmptyState
           v-if="currentId === '' && materialsStatus === 'ready'"
           :title="READING.selectMaterial"
@@ -310,29 +349,22 @@ onMounted(() => {
         />
 
         <template v-else-if="showReader && outline">
-          <ReadingSessionBar
-            :session-id="sessionId"
-            :session-title="sessionTitle"
-            :sessions="sessions"
-            :sessions-status="sessionsStatus"
-            :session-missing="sessionMissing"
-            :session-hint="sessionHint"
-            :pending-session="pendingSession"
-            :position-ordinal="outline.position?.locator.ordinal ?? null"
-            @update:pending-session="pendingSession = $event"
-            @apply="applySession"
-            @clear="clearSession"
-            @reload-sessions="loadSessions"
-            @jump-position="jumpToPosition"
-          />
+          <h1 class="reader-title">{{ materialTitle }}</h1>
+          <p class="reader-meta">
+            <span>{{ READING.source }}：{{ outline.material.filename }}</span>
+            <span>{{ READING.textChars(outline.text_chars) }}</span>
+          </p>
 
           <ReadingSelectionBar
-            v-if="selection"
+            v-if="selection && !switching"
             :text="selection.text"
             :saving="markSaving"
+            :explaining="asking"
             @copy="copySelection"
             @highlight="addHighlight"
+            @favorite="addBookmark"
             @note="openNote"
+            @explain="explainSelection"
             @ask="askInChat"
             @clear="clearSelection"
           />
@@ -342,10 +374,14 @@ onMounted(() => {
             <code v-if="markFailure.requestId" class="req">{{ markFailure.requestId }}</code>
           </p>
 
-          <div class="meta">{{ READING.textChars(outline.text_chars) }}</div>
+          <p v-if="marksFailure" class="inline-warn">
+            {{ READING.marksFailed }}
+            <button type="button" class="link" @click="loadMarks">{{ READING.retry }}</button>
+          </p>
 
           <ReadingUnits
             :entries="unitsWithState"
+            :markdown="markdownMode"
             :marks="marks"
             :highlight="highlight"
             :bind-unit="bindUnit"
@@ -372,43 +408,28 @@ onMounted(() => {
         </template>
       </section>
 
-      <aside class="panel">
-        <ReadingMarks
-          :marks="marks"
-          :status="marksStatus"
-          :failure="marksFailure"
-          :saving="markSaving"
-          @retry="loadMarks"
-          @bookmark="addBookmark"
-          @jump="jumpToMark"
-        />
+      <ReadingAssistant
+        :filename="outline?.material.filename ?? ''"
+        :exchanges="exchanges"
+      />
+    </div>
 
-        <ReadingPairing
-          :choice="pairChoice"
-          :bilingual="bilingual"
-          :candidates="candidates"
-          :status="pairingStatus"
-          :failure="pairingFailure"
-          :action-failure="pairingActionFailure"
-          :busy="pairingBusy"
-          @retry="loadPairings"
-          @confirm="confirmSelectedPairing"
-          @cancel="cancelCurrentPairing"
-          @update:choice="pairChoice = $event"
-        />
-
-        <ReadingExtensions
-          :extensions="extensions"
-          :status="extensionsStatus"
-          :failure="extensionsFailure"
-          :results="extensionResults"
-          :running="extensionRunning"
-          :action-failure="extensionFailure"
-          :has-selection="selection !== null"
-          @retry="loadExtensions"
-          @run="runOne"
-        />
-      </aside>
+    <div
+      v-if="showReader && !switching && resumeVisible && resumeOrdinal !== null"
+      class="resume"
+    >
+      <span class="resume__text">{{ READING.resumeAt(resumeOrdinal + 1) }}</span>
+      <button type="button" class="resume__go" @click="resumeReading">
+        {{ READING.jumpToPosition }}
+      </button>
+      <button
+        type="button"
+        class="resume__close"
+        :aria-label="READING.dismiss"
+        @click="hideResume"
+      >
+        ×
+      </button>
     </div>
 
     <ReadingNoteDialog

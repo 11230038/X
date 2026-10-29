@@ -1,5 +1,8 @@
 /**
  * 新建知识库。只填名字与描述 —— 解析器与向量模型不在这张表上。
+ *
+ * 表单画在一枚 `<dialog>` 里（`KnowledgeBases.vue` 的 `.kb-dialog`），开合由
+ * `createOpen` 决定：这里只管状态与一次提交，不碰弹窗本身。
  */
 
 import { ref } from 'vue'

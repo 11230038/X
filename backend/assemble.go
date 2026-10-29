@@ -12,6 +12,7 @@ import (
 	"backend/internal/chat"
 	"backend/internal/config"
 	"backend/internal/dashboard"
+	"backend/internal/directchat"
 	"backend/internal/kb"
 	"backend/internal/keypool"
 	"backend/internal/llm"
@@ -22,6 +23,7 @@ import (
 	"backend/internal/parse"
 	"backend/internal/persona"
 	"backend/internal/practice"
+	"backend/internal/presence"
 	"backend/internal/session"
 	"backend/internal/tool"
 	"backend/internal/turn"
@@ -65,6 +67,11 @@ type ai struct {
 	// dashboard is the read that fans in over the domains above. It is built last
 	// because it is the one thing built from the others.
 	dashboard *dashboard.Service
+	// presence is the attendance record behind the home page's two numbers: how
+	// long today has been spent here and how many days in a row. It is built
+	// from the database alone and joined to nothing — a minute being lived is
+	// not a fact about any of the domains above.
+	presence *presence.Service
 	// memory is what the system has been told about an account and what it
 	// admitted from it (§2.6). It is built from the database alone, because this
 	// version wires no surface to it yet: nothing in a turn observes anything, so
@@ -103,6 +110,15 @@ type ai struct {
 	// domains above, reached by a person through the routes rather than by a
 	// turn.
 	packages *workspace.Service
+	// directChat is the one-shot model call: one question in, one answer out,
+	// with no session or history. It is built here because it runs on the
+	// general assistant's tuning and the shared provider, which are both decided
+	// in this function.
+	directChat *directchat.Service
+	// tools is the tool plane itself, kept so the capability catalogue can say
+	// what each tool does: a manifest names its tools, and the sentence the
+	// model reads about one belongs to the tool, not to the declaration.
+	tools *tool.Registry
 }
 
 // assemble builds the turn runtime from configuration.
@@ -315,6 +331,24 @@ func assemble(
 	if err != nil {
 		return nil, fmt.Errorf("initialize the usage report: %w", err)
 	}
+	// A direct question is not a turn, so it takes no router, no tools and no
+	// repository — only the model and the tuning the general assistant already
+	// runs with. Resolving that tuning through capabilitySettings rather than
+	// reading the environment a second way is what keeps the two from drifting.
+	general, err := capabilitySettings(cfg, chat.Manifest())
+	if err != nil {
+		return nil, err
+	}
+	direct, err := directchat.New(directchat.Options{
+		Provider:    provider,
+		Model:       general.Model,
+		Temperature: general.Temperature,
+		MaxTokens:   general.StageMaxTokens[chat.StageResponding],
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize direct chat: %w", err)
+	}
+
 	// The question bank and the review path share this database with everything
 	// else, and each gets its own service over it: a question is written by the
 	// turns that generate it, read by the bank's endpoints, and advanced by a
@@ -454,6 +488,14 @@ func assemble(
 		return nil, err
 	}
 
+	// Presence is the database and the clock, and nothing above: a minute spent
+	// in the app is not a conclusion drawn from any domain, it is the thing
+	// itself. It is built here because this is where the database is in hand.
+	presenceService, err := presence.NewService(presence.NewRepository(db), presence.Options{})
+	if err != nil {
+		return nil, fmt.Errorf("initialize presence: %w", err)
+	}
+
 	// The package service reads four of the domains above and is read by
 	// nothing. It is the one thing here built from the reading layer rather than
 	// from the services under it, because a material is the reading layer's
@@ -469,13 +511,14 @@ func assemble(
 	}
 
 	return &ai{
-		turns: runner, socket: socket, capabilities: capabilities,
+		turns: runner, socket: socket, capabilities: capabilities, tools: tools,
 		materials: materials, indexing: worker,
 		questions: questions, reviews: reviews, mastery: paths.service,
 		personas:  personas,
-		dashboard: overview, immersive: immersive, books: books, videoSearch: videoSearch,
+		dashboard: overview, presence: presenceService,
+		immersive: immersive, books: books, videoSearch: videoSearch,
 		memory:        memories,
 		authorization: authorization, auditLog: auditLog,
-		usage: usageReport, packages: packages,
+		usage: usageReport, packages: packages, directChat: direct,
 	}, nil
 }

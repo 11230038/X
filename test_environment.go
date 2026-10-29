@@ -353,7 +353,7 @@ func (c *checker) checkDatabase(values map[string]string) {
 	dbAddr := net.JoinHostPort(host, port)
 	started := time.Now()
 	if err := dialTCP(dbAddr); err != nil {
-		c.missingf("seekdb %s 连不上：先启动本地实例（例如 docker start seekdb）", dbAddr)
+		c.missingf("seekdb %s 连不上：先启动本地实例（例如 docker start seekdb-old）", dbAddr)
 		return
 	}
 	c.okf("seekdb %s 可连接（%s）", dbAddr, time.Since(started).Round(time.Millisecond))

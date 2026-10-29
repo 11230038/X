@@ -98,9 +98,13 @@ function handleClick(event: MouseEvent): void {
 </template>
 
 <style scoped>
+/* 演示稿的正文是 16px（`.bubble-*` 继承 body、`.reader-text p` 明写 16）。
+   这一层同时供对话气泡、书籍章节与阅读助手用，所以按正文尺度定；现在整体
+   抬到 18px —— 1440 宽的玻璃卡里 16px 偏细。对话页的回答在
+   `ConversationStream` 里再大一档（20px）。 */
 .markdown {
-  font-size: 14px;
-  line-height: 1.72;
+  font-size: 18px;
+  line-height: 1.8;
   color: var(--text);
   overflow-wrap: anywhere;
 }
@@ -114,7 +118,7 @@ function handleClick(event: MouseEvent): void {
 }
 
 .markdown :deep(p) {
-  margin: 0 0 0.7em;
+  margin: 0 0 0.8em;
 }
 
 .markdown :deep(h1),
@@ -145,7 +149,7 @@ function handleClick(event: MouseEvent): void {
 
 .markdown :deep(ul),
 .markdown :deep(ol) {
-  margin: 0 0 0.7em;
+  margin: 0 0 0.8em;
   padding-left: 1.5em;
 }
 
@@ -167,7 +171,7 @@ function handleClick(event: MouseEvent): void {
 }
 
 .markdown :deep(a) {
-  color: var(--accent);
+  color: var(--accent-ink);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -186,10 +190,10 @@ function handleClick(event: MouseEvent): void {
 
 .markdown :deep(pre) {
   margin: 0 0 0.8em;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
+  padding: 14px 16px;
+  border: 1px solid rgb(255 255 255 / 72%);
   border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
+  background: rgb(255 255 255 / 52%);
   overflow-x: auto;
   line-height: 1.55;
 }
@@ -239,7 +243,7 @@ function handleClick(event: MouseEvent): void {
   background: var(--accent-soft);
   color: var(--accent);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1;
   vertical-align: 1px;
   cursor: pointer;

@@ -143,6 +143,9 @@ export function useKnowledgeBases(
     setDefault: actionsApi.setDefault,
     deleteBase: actionsApi.deleteBase,
     rebuild: actionsApi.rebuild,
+    enterReading: actionsApi.enterReading,
+    isEnteringReading: actionsApi.isEnteringReading,
+    readingError: actionsApi.readingError,
     removeDocument: actionsApi.removeDocument,
     // 预览
     previewDocument: previewApi.previewDocument,

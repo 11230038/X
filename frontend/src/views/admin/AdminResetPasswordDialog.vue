@@ -130,15 +130,19 @@ defineExpose({ show, hide })
 <style scoped>
 .account-dialog {
   width: min(440px, calc(100vw - 32px));
-  padding: 20px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 24px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: rgb(255 255 255 / 92%);
   color: var(--text);
+  box-shadow: 0 24px 64px -12px rgb(51 68 85 / 20%);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
 }
 
 .account-dialog::backdrop {
-  background: rgb(0 0 0 / 35%);
+  background: rgb(20 26 38 / 25%);
+  backdrop-filter: blur(6px);
 }
 
 .account-dialog__title {
@@ -150,19 +154,19 @@ defineExpose({ show, hide })
 .account-dialog__hint {
   margin: 0 0 12px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
 .account-form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
 }
 
 .field__note {
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .field__note--bad {
@@ -178,6 +182,6 @@ defineExpose({ show, hide })
 
 .account-dialog__req {
   color: var(--text-faint);
-  font-size: 9px;
+  font-size: 14px;
 }
 </style>

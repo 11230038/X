@@ -182,6 +182,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		Auth:             handler.NewAuthHandler(authService, logger),
 		Sessions:         handler.NewSessionHandler(sessionService, logger),
 		Personas:         handler.NewPersonaHandler(ai.personas, logger),
+		DirectChat:       handler.NewDirectChatHandler(ai.directChat, logger),
 		Questions:        handler.NewQuestionHandler(ai.questions, logger),
 		Practice:         handler.NewPracticeHandler(ai.reviews, cfg.Practice.QueueSize, logger),
 		Mastery:          handler.NewMasteryHandler(ai.mastery, logger),
@@ -189,8 +190,9 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		Book:             handler.NewBookHandler(ai.books, logger),
 		Video:            handler.NewVideoHandler(ai.videoSearch, logger),
 		Dashboard:        handler.NewDashboardHandler(ai.dashboard, logger),
+		Presence:         handler.NewPresenceHandler(ai.presence, logger),
 		Memory:           handler.NewMemoryHandler(ai.memory, logger),
-		Capabilities:     handler.NewCapabilityHandler(ai.capabilities),
+		Capabilities:     handler.NewCapabilityHandler(ai.capabilities, ai.tools),
 		Permissions:      handler.NewPermissionsHandler(ai.authorization, logger),
 		// Governance and the guardian's own view are the same service asked two
 		// questions: the administrator reads every account and every

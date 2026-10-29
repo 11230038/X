@@ -44,6 +44,9 @@ type Repository interface {
 	// Stats reads the practice history of one window, bucket by bucket, with the
 	// distribution of that window's questions.
 	Stats(ctx context.Context, query StatsQuery) (Stats, error)
+	// Mistakes reads the wrong-answer set twice: how many of its questions were
+	// reviewed in the window, and how many are in it now.
+	Mistakes(ctx context.Context, from, to time.Time, caller authz.Caller) (MistakeProgress, error)
 	// DueTimes reads the stored due time of the named questions, keyed by the
 	// bank's row id. A question with no state row is absent: it has never been
 	// reviewed, and that is not a due time.

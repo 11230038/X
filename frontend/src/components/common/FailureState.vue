@@ -95,11 +95,12 @@ async function copyRequestId(): Promise<void> {
 <style scoped>
 .failure {
   display: flex;
-  gap: 10px;
-  padding: 18px;
-  border: 1px solid var(--danger);
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid rgb(192 57 43 / 25%);
   border-radius: var(--radius);
-  background: var(--danger-soft);
+  background: rgb(253 236 234 / 72%);
+  box-shadow: var(--glass-shadow);
 }
 
 .failure__mark {
@@ -109,7 +110,7 @@ async function copyRequestId(): Promise<void> {
   border-radius: 50%;
   background: var(--danger);
   color: #fff;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   line-height: 20px;
   text-align: center;
@@ -125,14 +126,14 @@ async function copyRequestId(): Promise<void> {
 .failure__title {
   margin: 0;
   color: var(--text);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
 }
 
 .failure__description {
   margin: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -140,7 +141,7 @@ async function copyRequestId(): Promise<void> {
   margin: 0;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .failure__request {
@@ -148,7 +149,7 @@ async function copyRequestId(): Promise<void> {
   align-items: center;
   gap: 6px;
   margin: 2px 0 0;
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .failure__request-label {
@@ -167,7 +168,7 @@ async function copyRequestId(): Promise<void> {
   border-radius: 4px;
   background: transparent;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
   cursor: pointer;
 }
 
@@ -178,22 +179,25 @@ async function copyRequestId(): Promise<void> {
 }
 
 .failure__retry {
-  padding: 5px 12px;
-  border: 1px solid var(--accent);
+  padding: 8px 16px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: var(--accent);
+  background: var(--accent-gradient);
   color: #fff;
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 4px 12px rgb(177 140 255 / 30%);
 }
 
 .failure__exit {
-  padding: 5px 12px;
-  border: 1px solid var(--border-strong);
+  padding: 8px 14px;
+  border: 1px solid rgb(0 0 0 / 8%);
   border-radius: var(--radius-sm);
-  background: transparent;
+  background: #fff;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
 }
 </style>

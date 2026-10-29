@@ -199,7 +199,7 @@ onMounted(() => {
 .l3 {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
 }
 
 .head__title {
@@ -211,7 +211,7 @@ onMounted(() => {
 .head__description {
   margin: 4px 0 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -219,26 +219,29 @@ onMounted(() => {
   margin: 0;
   color: var(--text-faint);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .section {
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 18px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .section__title {
   margin: 0 0 9px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 650;
 }
 
 .groups {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 10px;
+  gap: 14px;
   align-items: start;
 }
 
@@ -259,20 +262,20 @@ onMounted(() => {
 
 .group__title {
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .group__count,
 .group__truncated {
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .group__empty {
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .group__truncated {
@@ -288,6 +291,6 @@ onMounted(() => {
 .note {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 </style>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 审计事件。
+ * 日志统计（审计事件）。
  *
  * 这里只有"谁、什么时候、对什么、做了什么、结果如何"。对象是筛选与跳转
  * 入口，不展开被审计的内容 —— 审计记录解释的是动作，不是业务数据的副本。
@@ -24,9 +24,13 @@ import EmptyState from '../../components/common/EmptyState.vue'
 import FailureState from '../../components/common/FailureState.vue'
 import LoadMore from '../../components/common/LoadMore.vue'
 import SkeletonBlock from '../../components/common/SkeletonBlock.vue'
+import SurfaceGate from '../../components/common/SurfaceGate.vue'
+import AppShell from '../../components/shell/AppShell.vue'
+import PageHeader from '../../components/shell/PageHeader.vue'
 import { ADMIN, AUDIT_ACTIONS } from '../../copy/admin'
 import { formatDateTime } from '../../shared/format'
 import { toFailure } from '../../shared/resource'
+import AppIcon from '../../components/common/AppIcon.vue'
 
 const TARGET_KINDS: AuditTargetKind[] = [
   'account',
@@ -244,6 +248,13 @@ function resultLabel(value: AuditResult): string {
   return RESULT_LABELS[value] ?? value
 }
 
+/** 结果标签的颜色：三种结果各用一种语义色（成功绿、被拒黄、失败红）。 */
+function resultClass(value: AuditResult): string {
+  if (value === 'ok') return 'set-chip--ok'
+  if (value === 'denied') return 'set-chip--warn'
+  return 'set-chip--bad'
+}
+
 function targetKindLabel(value: AuditTargetKind): string {
   return TARGET_LABELS[value] ?? value
 }
@@ -256,150 +267,169 @@ onMounted(() => {
 <style scoped src="./AdminAudit.css"></style>
 
 <template>
-  <div class="audit">
-    <section class="filters">
-      <h2 class="filters__title">{{ ADMIN.filters }}</h2>
-      <div class="filters__grid">
-        <label class="field">
-          <span class="field__label">{{ ADMIN.actor }}编号</span>
-          <input v-model="actorId" type="text" inputmode="numeric" class="field__input" />
-        </label>
-        <label class="field">
-          <span class="field__label">学习者编号</span>
-          <input v-model="subjectId" type="text" inputmode="numeric" class="field__input" />
-        </label>
-        <label class="field">
-          <span class="field__label">{{ ADMIN.actionOf }}</span>
-          <select v-model="action" class="field__input">
-            <option value="">全部</option>
-            <option v-for="option in ACTION_OPTIONS" :key="option.value" :value="option.value">
-              {{ option.label }}
-            </option>
-          </select>
-        </label>
-        <label class="field">
-          <span class="field__label">对象类型</span>
-          <select v-model="targetKind" class="field__input">
-            <option value="">全部</option>
-            <option v-for="kind in TARGET_KINDS" :key="kind" :value="kind">
-              {{ targetKindLabel(kind) }}
-            </option>
-          </select>
-        </label>
-        <label class="field">
-          <span class="field__label">对象编号</span>
-          <input v-model="targetId" type="text" class="field__input" />
-        </label>
-        <label class="field">
-          <span class="field__label">开始时间</span>
-          <input v-model="since" type="datetime-local" class="field__input" />
-        </label>
-        <label class="field">
-          <span class="field__label">结束时间</span>
-          <input v-model="until" type="datetime-local" class="field__input" />
-        </label>
-        <label class="field">
-          <span class="field__label">每页</span>
-          <select v-model.number="limit" class="field__input">
-            <option v-for="value in limitOptions" :key="value" :value="value">
-              {{ value }} 条
-            </option>
-          </select>
-        </label>
-      </div>
+  <AppShell>
+    <SurfaceGate surface="admin">
+      <div class="page">
+        <div class="page__inner">
+          <PageHeader :title="ADMIN.audit" :description="ADMIN.auditDescription" />
 
-      <p v-if="filterError" class="filters__error">{{ filterError }}</p>
+          <div class="audit">
+            <section class="set-panel">
+              <div class="set-panel__head">
+                <span class="set-panel__icon" aria-hidden="true"><AppIcon name="search" /></span>
+                <h2 class="set-panel__title">{{ ADMIN.filters }}</h2>
+              </div>
 
-      <div class="filters__actions">
-        <button type="button" class="primary" @click="loadFirst">
-          {{ status === 'loading' ? '正在读取…' : '查询' }}
-        </button>
-        <button type="button" class="ghost" :disabled="!hasFilters" @click="clearFilters">
-          清除筛选
-        </button>
-      </div>
-    </section>
+              <div class="filters__grid">
+                <label class="set-field">
+                  <span class="set-field__label">{{ ADMIN.actor }}编号</span>
+                  <input v-model="actorId" type="text" inputmode="numeric" class="set-field__input" />
+                </label>
+                <label class="set-field">
+                  <span class="set-field__label">学习者编号</span>
+                  <input v-model="subjectId" type="text" inputmode="numeric" class="set-field__input" />
+                </label>
+                <label class="set-field">
+                  <span class="set-field__label">{{ ADMIN.actionOf }}</span>
+                  <select v-model="action" class="set-field__input">
+                    <option value="">全部</option>
+                    <option v-for="option in ACTION_OPTIONS" :key="option.value" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
+                <label class="set-field">
+                  <span class="set-field__label">对象类型</span>
+                  <select v-model="targetKind" class="set-field__input">
+                    <option value="">全部</option>
+                    <option v-for="kind in TARGET_KINDS" :key="kind" :value="kind">
+                      {{ targetKindLabel(kind) }}
+                    </option>
+                  </select>
+                </label>
+                <label class="set-field">
+                  <span class="set-field__label">对象编号</span>
+                  <input v-model="targetId" type="text" class="set-field__input" />
+                </label>
+                <label class="set-field">
+                  <span class="set-field__label">开始时间</span>
+                  <input v-model="since" type="datetime-local" class="set-field__input" />
+                </label>
+                <label class="set-field">
+                  <span class="set-field__label">结束时间</span>
+                  <input v-model="until" type="datetime-local" class="set-field__input" />
+                </label>
+                <label class="set-field">
+                  <span class="set-field__label">每页</span>
+                  <select v-model.number="limit" class="set-field__input">
+                    <option v-for="value in limitOptions" :key="value" :value="value">
+                      {{ value }} 条
+                    </option>
+                  </select>
+                </label>
+              </div>
 
-    <SkeletonBlock v-if="status === 'loading'" :lines="6" :line-height="34" />
+              <p v-if="filterError" class="filters__error">{{ filterError }}</p>
 
-    <FailureState
-      v-else-if="status === 'failed' && failure"
-      :failure="failure"
-      title="审计事件没能读出来"
-      @retry="loadFirst"
-    />
-
-    <template v-else>
-      <EmptyState
-        v-if="events.length === 0"
-        :title="ADMIN.noEvents"
-        :hint="hasFilters ? '当前筛选下没有事件。' : '这个范围里还没有审计记录。'"
-        :action-label="hasFilters ? '清除筛选' : ''"
-        @action="clearFilters"
-      />
-
-      <template v-else>
-        <p class="count">
-          当前 {{ events.length }} 条{{ hasFilters ? '（已筛选）' : '' }}
-        </p>
-
-        <ol class="events">
-          <li v-for="event in events" :key="event.audit_id" class="event">
-            <div class="event__head">
-              <span class="event__action">{{ actionLabel(event.action) }}</span>
-              <span class="chip" :class="`chip--${event.result}`">
-                {{ resultLabel(event.result) }}
-              </span>
-              <time class="event__time">{{ formatDateTime(event.created_at) }}</time>
-            </div>
-
-            <div class="event__meta">
-              <span>
-                {{ ADMIN.actor }}：{{ event.actor_name }}
-                <template v-if="event.actor_id">（#{{ event.actor_id }}）</template>
-                · {{ event.actor_role }}
-              </span>
-              <span v-if="event.subject_id">学习者：#{{ event.subject_id }}</span>
-              <span>
-                {{ ADMIN.target }}：
-                <button type="button" class="target" @click="filterByTarget(event)">
-                  {{ targetKindLabel(event.target_kind) }}
-                  {{ event.target_id || '（整个类型）' }}
+              <div class="filters__actions">
+                <button type="button" class="set-btn" @click="loadFirst">
+                  {{ status === 'loading' ? '正在读取…' : '查询' }}
                 </button>
-              </span>
-              <code v-if="event.request_id" class="event__request" :title="event.request_id">
-                {{ event.request_id }}
-              </code>
-            </div>
-          </li>
-        </ol>
+                <button
+                  type="button"
+                  class="set-btn set-btn--ghost"
+                  :disabled="!hasFilters"
+                  @click="clearFilters"
+                >
+                  清除筛选
+                </button>
+              </div>
+            </section>
 
-        <p class="hint">{{ ADMIN.objectIsLink }}</p>
+            <SkeletonBlock v-if="status === 'loading'" :lines="6" :line-height="34" />
 
-        <div v-if="stuck" class="stuck">
-          <p class="stuck__text">
-            这一页没有带回新事件。审计接口按排他时间向后翻，同一时刻的事件可能被跳过，
-            所以这里不能当作已经到底。
-          </p>
-          <div class="stuck__actions">
-            <button type="button" class="ghost" @click="loadFirst">从头刷新</button>
-            <button type="button" class="ghost" @click="clearFilters">清除筛选</button>
+            <FailureState
+              v-else-if="status === 'failed' && failure"
+              :failure="failure"
+              title="审计事件没能读出来"
+              @retry="loadFirst"
+            />
+
+            <template v-else>
+              <EmptyState
+                v-if="events.length === 0"
+                :title="ADMIN.noEvents"
+                :hint="hasFilters ? '当前筛选下没有事件。' : '这个范围里还没有审计记录。'"
+                :action-label="hasFilters ? '清除筛选' : ''"
+                @action="clearFilters"
+              />
+
+              <template v-else>
+                <p class="count">
+                  当前 {{ events.length }} 条{{ hasFilters ? '（已筛选）' : '' }}
+                </p>
+
+                <ol class="events">
+                  <li v-for="event in events" :key="event.audit_id" class="event">
+                    <div class="event__head">
+                      <span class="event__action">{{ actionLabel(event.action) }}</span>
+                      <span class="set-chip" :class="resultClass(event.result)">
+                        {{ resultLabel(event.result) }}
+                      </span>
+                      <time class="event__time">{{ formatDateTime(event.created_at) }}</time>
+                    </div>
+
+                    <div class="event__meta">
+                      <span>
+                        {{ ADMIN.actor }}：{{ event.actor_name }}
+                        <template v-if="event.actor_id">（#{{ event.actor_id }}）</template>
+                        · 角色 {{ event.actor_role }}
+                      </span>
+                      <span v-if="event.subject_id">学习者：#{{ event.subject_id }}</span>
+                      <span>
+                        {{ ADMIN.target }}：
+                        <button type="button" class="target" @click="filterByTarget(event)">
+                          {{ targetKindLabel(event.target_kind) }}
+                          {{ event.target_id || '（整个类型）' }}
+                        </button>
+                      </span>
+                      <code v-if="event.request_id" class="event__request" :title="event.request_id">
+                        {{ event.request_id }}
+                      </code>
+                    </div>
+                  </li>
+                </ol>
+
+                <p class="hint">{{ ADMIN.objectIsLink }}</p>
+
+                <div v-if="stuck" class="stuck">
+                  <p class="stuck__text">
+                    这一页没有带回新事件。审计接口按排他时间向后翻，同一时刻的事件可能被跳过，
+                    所以这里不能当作已经到底。
+                  </p>
+                  <div class="stuck__actions">
+                    <button type="button" class="ghost" @click="loadFirst">从头刷新</button>
+                    <button type="button" class="ghost" @click="clearFilters">清除筛选</button>
+                  </div>
+                </div>
+
+                <LoadMore
+                  v-else
+                  label="加载更早"
+                  :loading="loadingMore"
+                  :exhausted="exhausted"
+                  :failure="moreFailure"
+                  @load="loadOlder"
+                />
+
+                <p v-if="paged && exhausted && !stuck" class="hint">
+                  向后翻页是排他的时间条件。即使这里显示"没有更多了"，同一时刻的事件仍可能不在结果里。
+                </p>
+              </template>
+            </template>
           </div>
         </div>
-
-        <LoadMore
-          v-else
-          label="加载更早"
-          :loading="loadingMore"
-          :exhausted="exhausted"
-          :failure="moreFailure"
-          @load="loadOlder"
-        />
-
-        <p v-if="paged && exhausted && !stuck" class="hint">
-          向后翻页是排他的时间条件。即使这里显示"没有更多了"，同一时刻的事件仍可能不在结果里。
-        </p>
-      </template>
-    </template>
-  </div>
+      </div>
+    </SurfaceGate>
+  </AppShell>
 </template>

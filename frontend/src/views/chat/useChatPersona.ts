@@ -12,6 +12,10 @@
  * 切换。人格是账号级数据、id 不跨账号，所以锁定按名字找；账号里还没有同名
  * 人格时，按页面给的种子内容建一个。`ensure()` 是发送前的等待点 —— 首页的
  * 「开始提问」可能早于列表返回，不 await 就会把第一句话发成没有人格的一轮。
+ *
+ * **不用人格**是给路径对话页用的：那里既不给选择器，也不把人格带进任何一轮。
+ * 连列表都不读 —— 用不到的请求不发，`selectedId` 恒为空，`SendOptions` 里
+ * 自然不会有 `persona` 字段。
  */
 
 import { computed, ref } from 'vue'
@@ -20,6 +24,7 @@ import type { RouteLocationNormalizedLoaded } from 'vue-router'
 import type { ApiFailure } from '../../api/client'
 import { createPersona, listPersonas, type Persona } from '../../api/personas'
 import type { PersonaChoice } from '../../components/chat/Composer.vue'
+import { isSystemPersona } from '../../copy/personas'
 import { toFailure } from '../../shared/resource'
 
 /** 一页只允许用这一个人格；内容只在建号时作为种子。 */
@@ -35,21 +40,28 @@ function initialSelection(route: RouteLocationNormalizedLoaded, lock?: PersonaLo
   return typeof value === 'string' ? value : ''
 }
 
-export function useChatPersona(route: RouteLocationNormalizedLoaded, lock?: PersonaLock) {
+export function useChatPersona(
+  route: RouteLocationNormalizedLoaded,
+  lock?: PersonaLock,
+  enabled = true,
+) {
   const records = ref<Persona[]>([])
-  const selectedId = ref(initialSelection(route, lock))
+  const selectedId = ref(enabled ? initialSelection(route, lock) : '')
   const loading = ref(false)
   const failure = ref<ApiFailure | null>(null)
   let loaded = false
   /** 列表请求已在飞：`load()` 与 `ensure()` 共用它，不重复发。 */
   let pending: Promise<void> | null = null
 
-  const locked = lock !== undefined
+  const locked = enabled && lock !== undefined
 
   const items = computed<PersonaChoice[]>(() => {
+    if (!enabled) return []
+    // 锁定的页面只列那一个；普通页面的选择器不列系统人格（写作教练那类），
+    // 它们只属于自己那一页。
     const visible = lock
       ? records.value.filter((persona) => persona.name === lock.name)
-      : records.value
+      : records.value.filter((persona) => !isSystemPersona(persona.name))
     return visible.map((persona) => ({
       id: persona.persona_id,
       label: persona.name,
@@ -98,11 +110,11 @@ export function useChatPersona(route: RouteLocationNormalizedLoaded, lock?: Pers
       loaded = true
       if (lock) {
         await resolveLock()
-      } else if (
-        selectedId.value !== '' &&
-        !records.value.some((persona) => persona.persona_id === selectedId.value)
-      ) {
-        selectedId.value = ''
+      } else if (selectedId.value !== '') {
+        // 选中的那个不在了，或者它是别处锁定的系统人格（地址里带进来的旧
+        // 链接），都清掉：下一轮不必点一个不在列表里的东西。
+        const chosen = records.value.find((persona) => persona.persona_id === selectedId.value)
+        if (!chosen || isSystemPersona(chosen.name)) selectedId.value = ''
       }
     } catch (cause) {
       failure.value = toFailure(cause)
@@ -113,6 +125,7 @@ export function useChatPersona(route: RouteLocationNormalizedLoaded, lock?: Pers
   }
 
   function load(force = false): Promise<void> {
+    if (!enabled) return Promise.resolve()
     if (loaded && !force) return Promise.resolve()
     if (pending !== null) return pending
     pending = loadOnce().finally(() => {
@@ -128,12 +141,12 @@ export function useChatPersona(route: RouteLocationNormalizedLoaded, lock?: Pers
    * 拒绝这一句，界面同时给重试入口。
    */
   async function ensure(): Promise<void> {
-    if (!lock || selectedId.value !== '') return
+    if (!enabled || !lock || selectedId.value !== '') return
     await load()
   }
 
   function select(personaId: string): void {
-    if (lock) return
+    if (!enabled || lock) return
     selectedId.value = personaId
   }
 

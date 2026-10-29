@@ -5,7 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"backend/internal/capability"
 	"backend/internal/event"
+	"backend/internal/llm"
 )
 
 // The path claim, from the runtime's side.
@@ -30,6 +32,7 @@ type stubPaths struct {
 	work     context.Context
 	failure  error
 	release  func(context.Context) error
+	name     func(context.Context, string, string) error
 	requests []ClaimRequest
 }
 
@@ -40,7 +43,7 @@ func (s *stubPaths) Claim(_ context.Context, request ClaimRequest) (Claimed, err
 	if s.failure != nil {
 		return Claimed{}, s.failure
 	}
-	return Claimed{Context: s.work, Lease: s.lease, Release: s.release}, nil
+	return Claimed{Context: s.work, Lease: s.lease, Release: s.release, Name: s.name}, nil
 }
 
 // aLease is a claim as the domain reports it, spelled out rather than imported:
@@ -196,5 +199,78 @@ func TestATurnWhosePathCannotBeClaimedNeverStarts(t *testing.T) {
 		if record.Type == event.TypeSession {
 			t.Errorf("a turn that could not claim its path announced itself: %+v", record)
 		}
+	}
+}
+
+func TestATurnNamesThePathItOpenedFromTheExchangeThatOpenedIt(t *testing.T) {
+	// A path is opened by the same exchange that names the conversation, so the
+	// words the learner typed are only a provisional goal: they are a question.
+	// The runtime gives the claim the title it gave the session and one sentence
+	// about what the path is for; the domain writes them over the question.
+	var named, described []string
+	paths := &stubPaths{lease: aLease(), work: context.Background()}
+	paths.name = func(_ context.Context, title, description string) error {
+		named = append(named, title)
+		described = append(described, description)
+		return nil
+	}
+	fixture := claimedFixture(t, paths)
+	fixture.naming.responses = []llm.Response{
+		{Content: "第一次对话"},
+		{Content: "从集合、逻辑到图论，按知识点逐步推进"},
+	}
+
+	started := fixture.start(t, StartRequest{Capability: "mastery_path", Content: "我想系统学离散数学"})
+	records := fixture.watch(t, started.Turn.ID)
+
+	if len(named) != 1 {
+		t.Fatalf("the path was named %d times, want once: %v", len(named), named)
+	}
+	if named[0] != "第一次对话" {
+		t.Errorf("the path was named %q, want the title the fixture generated", named[0])
+	}
+	if described[0] != "从集合、逻辑到图论，按知识点逐步推进" {
+		t.Errorf("the path was described as %q, want the sentence the model gave", described[0])
+	}
+	if meta := only(t, records, event.TypeSessionMeta); meta.Content != named[0] {
+		t.Errorf("session title = %q, path name = %q, want one summary", meta.Content, named[0])
+	}
+}
+
+func TestATurnThatOpenedAPathAndThenFailedStillNamesIt(t *testing.T) {
+	// A stopped turn is the case where the path would otherwise keep the raw
+	// first message forever: the session is never named, and no later turn may
+	// rename the path. So the name and the sentence are summarised from what the
+	// turn did say.
+	var named, described []string
+	paths := &stubPaths{lease: aLease(), work: context.Background()}
+	paths.name = func(_ context.Context, title, description string) error {
+		named = append(named, title)
+		described = append(described, description)
+		return nil
+	}
+	fixture := newRunnerFixture(t, func(options *Options) { options.Paths = paths })
+	fixture.register(t, stubCapability{
+		manifest: capability.Manifest{Name: "mastery_path", Description: "gives up", Stages: []string{"responding"}},
+		run:      func(context.Context, capability.RunContext) error { return errors.New("the capability gave up") },
+	})
+	fixture.naming.responses = []llm.Response{
+		{Content: "第一次对话"},
+		{Content: "从集合、逻辑到图论，按知识点逐步推进"},
+	}
+
+	started := fixture.start(t, StartRequest{Capability: "mastery_path", Content: "我想系统学离散数学"})
+	records := fixture.watch(t, started.Turn.ID)
+
+	if len(named) != 1 || named[0] != "第一次对话" {
+		t.Fatalf("the path was named %v, want the title the naming model gave", named)
+	}
+	if described[0] != "从集合、逻辑到图论，按知识点逐步推进" {
+		t.Errorf("the path was described as %q, want the sentence the model gave", described[0])
+	}
+	// Naming the path did not name the session: a failed turn is still not the
+	// one that writes the conversation's title.
+	if meta := only(t, records, event.TypeSessionMeta); meta.Content != "" {
+		t.Errorf("session title = %q, want none", meta.Content)
 	}
 }

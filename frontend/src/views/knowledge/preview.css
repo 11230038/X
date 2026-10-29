@@ -1,10 +1,13 @@
 .dialog {
   width: min(480px, calc(100vw - 32px));
-  padding: 20px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 24px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: rgb(255 255 255 / 92%);
   color: var(--text);
+  box-shadow: 0 24px 64px -12px rgb(51 68 85 / 20%);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
 }
 
 .dialog--wide {
@@ -12,7 +15,8 @@
 }
 
 .dialog::backdrop {
-  background: rgb(0 0 0 / 35%);
+  background: rgb(20 26 38 / 25%);
+  backdrop-filter: blur(6px);
 }
 
 .dialog__title {
@@ -24,7 +28,7 @@
 .dialog__hint {
   margin: 0 0 8px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .dialog__actions {
@@ -37,18 +41,20 @@
 .button {
   display: inline-flex;
   align-items: center;
-  padding: 5px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 6px 14px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 78%);
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
   text-decoration: none;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .button:hover:not(:disabled) {
-  background: var(--surface-sunken);
+  border-color: var(--accent);
+  background: #fff;
 }
 
 .button:disabled {
@@ -60,7 +66,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
 }
 
 .preview__headtext {
@@ -95,25 +101,25 @@
 .preview__note {
   margin: 0 0 10px;
   color: var(--warning, var(--text-muted));
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .preview__range {
   margin: 10px 0 6px;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .preview__text {
   max-height: 60vh;
   margin: 0;
   overflow: auto;
-  padding: 10px;
-  border: 1px solid var(--border);
+  padding: 12px 14px;
+  border: 1px solid rgb(255 255 255 / 60%);
   border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
+  background: rgb(255 255 255 / 45%);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: anywhere;

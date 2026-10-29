@@ -29,6 +29,7 @@ import { toFailure } from '../../../shared/resource'
 import { notify } from '../../../shared/toast'
 
 import { jobStateLabel } from './labels'
+import AppIcon from '../../../components/common/AppIcon.vue'
 
 interface PickItem {
   ref: WorkspaceRef
@@ -228,7 +229,10 @@ onMounted(() => {
 
 <template>
   <section class="card">
-    <h2 class="card__title">{{ SETTINGS.export }}</h2>
+    <div class="card__head">
+      <span class="card__icon" aria-hidden="true"><AppIcon name="package" /></span>
+      <h2 class="card__title">{{ SETTINGS.export }}</h2>
+    </div>
     <p class="hint">{{ SETTINGS.exportScope }}</p>
 
     <div class="pickers">

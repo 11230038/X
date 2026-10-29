@@ -60,16 +60,19 @@ defineEmits<{
   flex-direction: column;
   gap: 8px;
   min-width: 0;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 18px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
 }
 
 .chapters__title {
   margin: 0;
-  font-size: 13px;
-  font-weight: 650;
+  font-size: 15px;
+  font-weight: 800;
 }
 
 .chapters__list {
@@ -86,16 +89,18 @@ defineEmits<{
   gap: 8px;
   align-items: flex-start;
   width: 100%;
-  padding: 7px 8px;
+  padding: 9px 10px;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: 14px;
   background: transparent;
   text-align: left;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .chapter:hover {
-  background: var(--surface-sunken);
+  border-color: rgb(255 255 255 / 70%);
+  background: rgb(255 255 255 / 58%);
 }
 
 .chapter:disabled {
@@ -104,8 +109,9 @@ defineEmits<{
 }
 
 .chapter--active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  border-color: rgb(177 140 255 / 30%);
+  background: #fff;
+  box-shadow: 0 4px 14px rgb(51 68 85 / 6%);
 }
 
 .chapter__ordinal {
@@ -113,7 +119,7 @@ defineEmits<{
   width: 18px;
   color: var(--text-faint);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.7;
   text-align: right;
 }
@@ -129,7 +135,7 @@ defineEmits<{
 .chapter__title {
   overflow: hidden;
   color: var(--text);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -138,7 +144,7 @@ defineEmits<{
 .chapter__summary {
   overflow: hidden;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 14px;
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;

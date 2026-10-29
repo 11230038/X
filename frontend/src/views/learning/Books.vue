@@ -101,8 +101,17 @@ onMounted(() => {
       <div class="book-meta">{{ BOOKS.count(books.length) }}</div>
 
       <ul class="shelf">
-        <li v-for="book in books" :key="book.book_id">
-          <button type="button" class="card" @click="openBook(book)">
+        <li
+          v-for="(book, index) in books"
+          :key="book.book_id"
+          class="shelf__cell"
+          :class="index === 0 ? 'shelf__cell--large' : index === 1 ? 'shelf__cell--medium' : ''"
+        >
+          <button type="button" class="card" :class="{ 'card--large': index === 0 }" @click="openBook(book)">
+            <!-- 演示稿的 `.book-cover-3d`：只有第一本（正在读的那本）带立体书封。 -->
+            <span v-if="index === 0" class="card__cover" aria-hidden="true">
+              {{ book.title }}
+            </span>
             <span class="card__head">
               <span class="card__title">{{ book.title }}</span>
               <span class="card__chevron" aria-hidden="true">→</span>
@@ -145,31 +154,83 @@ onMounted(() => {
 
 <style scoped src="./books/books.css"></style>
 <style scoped>
+/* 演示稿的 `.bento-grid`：四列、固定行高，第一本占 2×2。 */
 .shelf {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: 180px;
+  gap: 24px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+.shelf__cell {
+  min-width: 0;
+}
+
+.shelf__cell--large {
+  grid-column: span 2;
+  grid-row: span 2;
+}
+
+.shelf__cell--medium {
+  grid-column: span 2;
+}
+
 .card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 7px;
   width: 100%;
   height: 100%;
-  padding: 13px 15px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 24px;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: 28px;
+  background: var(--glass-bg);
+  box-shadow: 0 10px 30px -10px rgb(51 68 85 / 8%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   text-align: left;
   cursor: pointer;
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .card:hover {
-  border-color: var(--accent);
+  border-color: rgb(177 140 255 / 30%);
+  transform: translateY(-6px);
+  box-shadow: 0 20px 40px -10px rgb(51 68 85 / 15%);
+}
+
+.card--large {
+  padding-right: 160px;
+  background: linear-gradient(135deg, rgb(255 255 255 / 80%), rgb(232 250 255 / 80%));
+}
+
+/* 立体书封。演示稿里它靠在卡的右下角。 */
+.card__cover {
+  position: absolute;
+  right: 30px;
+  bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100px;
+  height: 130px;
+  padding: 12px 0;
+  overflow: hidden;
+  border-radius: 8px 16px 16px 8px;
+  background: linear-gradient(135deg, var(--color-blue), var(--color-purple));
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  writing-mode: vertical-rl;
+  box-shadow: -4px 4px 12px rgb(0 0 0 / 10%);
 }
 
 .card__head {
@@ -182,16 +243,21 @@ onMounted(() => {
 .card__title {
   overflow: hidden;
   color: var(--text);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 650;
   line-height: 1.4;
   text-overflow: ellipsis;
 }
 
+.card--large .card__title {
+  font-size: 20px;
+  font-weight: 800;
+}
+
 .card__chevron {
   flex: none;
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .card:hover .card__chevron {
@@ -201,7 +267,7 @@ onMounted(() => {
 .card__source {
   overflow: hidden;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -216,12 +282,12 @@ onMounted(() => {
 
 .card__progress {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .card__date {
   margin-top: auto;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 14px;
 }
 </style>

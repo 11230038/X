@@ -15,6 +15,7 @@ import { toFailure } from '../../shared/resource'
 import { notify } from '../../shared/toast'
 
 import { OUTCOME_LABELS } from './labels'
+import AppIcon from '../../components/common/AppIcon.vue'
 
 const emit = defineEmits<{ (event: 'imported'): void }>()
 
@@ -100,7 +101,7 @@ defineExpose({ open })
       <h2 class="import__title">
         {{ committed ? QUESTIONS.importResultTitle : QUESTIONS.importTitle }}
       </h2>
-      <button type="button" class="import__close" aria-label="关闭" @click="close">✕</button>
+      <button type="button" class="import__close" aria-label="关闭" @click="close"><AppIcon name="close" /></button>
     </header>
 
     <p class="import__hint">{{ QUESTIONS.importHint }}</p>

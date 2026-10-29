@@ -35,6 +35,15 @@ type dashboardEntryView struct {
 	// UpdatedAt is when the thing last moved, and it is absent for a thing whose
 	// domain has no such time — an entry that has never been touched.
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	// Progress is absent rather than zeroed for an entry whose domain does not
+	// count what is done: "not counted" and "nothing done" are different answers.
+	Progress *dashboardProgressView `json:"progress,omitempty"`
+}
+
+// dashboardProgressView is what is done out of what there is.
+type dashboardProgressView struct {
+	Done  int `json:"done"`
+	Total int `json:"total"`
 }
 
 type dashboardNextView struct {
@@ -100,6 +109,9 @@ func toDashboardEntries(entries []dashboard.Entry) []dashboardEntryView {
 		if !entry.UpdatedAt.IsZero() {
 			at := entry.UpdatedAt
 			view.UpdatedAt = &at
+		}
+		if entry.Progress != nil {
+			view.Progress = &dashboardProgressView{Done: entry.Progress.Done, Total: entry.Progress.Total}
 		}
 		listed = append(listed, view)
 	}

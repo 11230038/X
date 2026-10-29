@@ -1,6 +1,6 @@
 # X
 
-X 是一个前后端分离项目。`backend/` 是完整的 Go/Gin 服务（V1–V6 已交付）；`frontend/` 覆盖了后端 126 条路由对应的全部页面——对话、人格、伙伴、协同写作、材料、知识库、题库、题目问答与练习、掌握路径、学习地图、沉浸阅读、活书、视频学习、记忆、设置与管理台。后端没有路由的占位页已经全部移除；技能与工具共用一页只读能力目录。
+X 是一个前后端分离项目。`backend/` 是完整的 Go/Gin 服务（V1–V6 已交付）；`frontend/` 覆盖了后端 134 条路由对应的全部页面——对话、伙伴（人格）、协同写作、材料、知识库、题库、题目问答与练习、掌握路径、学习地图、沉浸阅读、活书、视频学习、记忆、设置，以及个人中心下的用户管理与日志统计。后端没有路由的占位页已经全部移除；技能与工具是设置下的两个只读能力目录。
 
 ## 项目结构
 
@@ -77,7 +77,7 @@ go vet ./...
 `go test ./...` **以本地 seekdb 为前提**：存储契约（排序、唯一性、级联、CHECK、错误码映射）由真库证明，所以测试会读 `backend/.env`，为每个包建一个 `<DB_NAME>_test_<包名>` 的库（如 `x_test_kb`）并自行跑完 migration，然后只碰这些库——开发库 `x` 不会被打开，所以**测试不需要先迁移开发库**，起容器就够了：
 
 ```bash
-docker start seekdb
+docker start seekdb-old
 ```
 
 没有可用数据库时这些用例**失败**而不是跳过——不连库的绿灯没有意义。只跑纯逻辑的包不受这个前提影响。
@@ -177,7 +177,8 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `DELETE` | `/api/v1/sessions/{id}/permanent` | 永久删除，成功返回 204 |
 | `POST` | `/api/v1/sessions/{id}/claim` | **认领**一条没有主人的会话（V5 的存量数据，见下节） |
 | `GET` | `/api/v1/sessions/{id}/messages` | 会话的消息，按时间由早到晚 |
-| `GET` | `/api/v1/capabilities` | 这个 build 注册的能力：名字、说明、阶段名、工具名 |
+| `GET` | `/api/v1/capabilities` | 这个 build 注册的能力：名字、说明、阶段名、工具名；另带一张工具清单（名字 + 工具自己那句描述，按名字排序） |
+| `POST` | `/api/v1/chat/complete` | **直接问模型**：body `{"question"}`，返回 `{"answer"}`。不建会话、不存消息、不带上下文；调用照常计入用量（只记 token 与耗时，不记问答内容） |
 | `GET` | `/api/v1/personas` | 我的人格列表，按名字排序，返回 `{personas:[…]}` |
 | `POST` | `/api/v1/personas` | 建人格，body `{"name","description","content"}`，成功返回 201 与人格对象 |
 | `GET` | `/api/v1/personas/{personaID}` | 单个人格 |
@@ -211,16 +212,20 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `PATCH` | `/api/v1/questions/{questionID}` | 收藏 / 已解决 / 改分类；body 里**出现过的**字段才被改（`{"bookmarked":true}`、`{"resolved":false}`、`{"categories":["第三章"]}`；`[]` 表示取消归类） |
 | `GET` | `/api/v1/question-categories` | 分类名列表，只列出还能筛出题的那些 |
 | `POST` | `/api/v1/questions/import` | 批量导入题库，body 是一个 JSON 行文件（每行一道题，与 `save_question` 参数同形）；`?dry_run=true` 只报告不写。两次请求共用同一份解析与判定（QN-05） |
+| `GET` | `/api/v1/practice/mistakes` | 一个时间窗内的错题复习进度：`?from=&to=`（日期或 RFC3339，`[from, to)`）→ `{reviewed, total}`。`total` 是 `is_mistake` 的题数（这个标记只置不清，所以是"错题集现在有多少道"），`reviewed` 是窗口里真有 `practice_review_events` 的错题数，按题去重 —— 分子不会超过分母。窗口两端必填，缺一个或 `from >= to` 是 400 |
 | `GET` | `/api/v1/practice/queue` | 练习队列：错题插队、到期的按逾期程度、新题在后；长度是部署的 `PRACTICE_QUEUE_SIZE`，不由请求指定 |
 | `POST` | `/api/v1/practice/reviews` | 提交一次复习，body 即 `practice.Review`：`request_id`、`question_id`、`user_answer`、`marker`?（`mastered` / `needs_review` / `skipped` / `bookmarked`）、`rating`?、`version`? |
 | `GET` | `/api/v1/practice/reviews/{requestID}` | 读回一次提交的结果，与重发同一 `request_id` 拿到的那一份逐字相同 |
 | `GET` | `/api/v1/practice/stats` | 练习趋势；`?bucket=day|week`、`?from=&to=`（日期或 RFC3339），窗口向外对齐到整桶并在响应里说明实际覆盖的范围 |
-| `GET` | `/api/v1/mastery/paths` | 掌握路径列表，按最近看过排（`mastery_path_sessions.last_seen_time`）。**路径不在这里创建**，见下节 |
+| `GET` | `/api/v1/mastery/conversations` | 路径对话历史：每条 `kind=mastery` 会话与它创建的路径一对一（按 `mastery_paths.owner_session_id`），按最近活动倒序；切换进来的别的会话不算。行上的 `goal` 是路径名，由创建它的那轮结束时由模型总结（之后可用 `PATCH` 改） |
+| `GET` | `/api/v1/mastery/mastered` | 一个时间窗内**从没掌握变成掌握**的知识点数：`?from=&to=`（日期或 RFC3339，`[from, to)`）。等级是从证据回放出来的，缓存只说明现在有多少个已掌握、不说明是什么时候学会的，所以这里读 `mastery_learning_evidences` 重跑 gate：端点是掌握、起点不是掌握的点才算一个；窗口里掌握了又丢掉的不算，已经不在树上的也不算 |
+| `GET` | `/api/v1/mastery/paths` | 掌握路径列表，按最近看过排（`mastery_path_sessions.last_seen_time`）。行上的 `goal` 是模型总结的路径名、`description` 是同一轮写的说明（两者之后都可用 `PATCH` 改）。**路径不在这里创建**，见下节 |
 | `GET` | `/api/v1/mastery/paths/{pathID}` | 一条路径的状态与主题 |
 | `PATCH` | `/api/v1/mastery/paths/{pathID}` | 改主题（`goal` / `description` / `emoji` / `status`），body 里出现过的字段才被改 |
 | `GET` | `/api/v1/mastery/paths/{pathID}/insight` | **MP-05**：目标、证据、薄弱项、复习状态、下一步及其理由 |
 | `GET` | `/api/v1/mastery/paths/{pathID}/lease` | 现在是谁在写这条路径（没有则为空） |
 | `DELETE` | `/api/v1/mastery/paths/{pathID}/lease` | 主动释放租约（`mastery_leave` 的接口那一半） |
+| `GET` | `/api/v1/mastery/paths/{pathID}/progress` | 一条路径在时间窗里**完成**的模块数 / 它现在的模块数：`?from=&to=`（日期或 RFC3339，`[from, to)`）→ `{modules_done, modules_total}`。模块"完成"＝模块里每个知识点都到了 `mastered`，等级与 `/mastery/mastered` 同样由证据回放得出；窗口末全掌握、窗口初没有全掌握的模块才计数，没有知识点的模块两边都不算（否则 100% 到不了）。两端必填，缺一个或 `from >= to` 是 400，路径不存在是 404 |
 | `GET` | `/api/v1/reading/materials` | 阅读材料目录（含 `pinned` / `opened`，未表态时是缺省的 `null`） |
 | `POST` | `/api/v1/reading/materials` | 从一份已上传的文件建阅读材料，body `{"file_id"}` |
 | `GET` | `/api/v1/reading/materials/{materialID}` | 一份材料的 outline / units 与字符数 |
@@ -244,7 +249,9 @@ API 启动不会自动修改 schema：必须先通过 migration 命令升级到�
 | `PUT` | `/api/v1/books/{bookID}/progress` | 保存"读到第几章"，body `{"ordinal"}`（0 = 未开始，超出大纲 400） |
 | `GET` | `/api/v1/books/{bookID}/export` | 导出为 `{filename, content}`，只含已生成章节；一章都没有 409 `no_ready_chapters` |
 | `GET` | `/api/v1/video/search` | 按关键词搜 B 站视频；`?q=`（必填，≤100 字符）、`?page=`（1–50，默认 1）。返回 `query` / `page` / `has_more` / `items`（`video_id`、`title`、`author`、`cover_url`、`duration_seconds`、`play_count`、`published_at`、`watch_url`、`embed_url`）。上游任何失败都是 503 `video_search_unavailable`，不降级成空列表 |
-| `GET` | `/api/v1/dashboard` | **COURSE-03** 的"继续学习"：最近会话、材料、阅读、掌握、练习各取 `DASHBOARD_RECENT_LIMIT` 条 |
+| `GET` | `/api/v1/dashboard` | **COURSE-03** 的"继续学习"：最近会话、掌握路径、练习队列各取 `DASHBOARD_RECENT_LIMIT` 条，外加 `next` 推荐；掌握路径的每一行另带 `progress`（`{done, total}` = 已掌握 / 知识点总数），会话与队列没有这一项 |
+| `GET` | `/api/v1/presence` | 自己的在线统计：`{minutes, yesterday_minutes, streak_days}`。分钟数是 `presence_minutes` 里今天的行数（一行 = 活过的一分钟），连续天数从今天往前数、今天还没有记录时从昨天数。只有自己的，没有看别人的读法 |
+| `POST` | `/api/v1/presence` | 记下当前这一分钟（主键 `(owner_id, minute_at)` 去重，同一分钟打多少次都只有一行），并返回与 `GET` 相同的统计。**无面、不限流**：它是自己的一分钟，不碰任何别的资源 |
 | `GET` | `/api/v1/memory/traces` | L1 观察，可按 surface / kind / 时间收窄 |
 | `GET` | `/api/v1/memory/facts` | L2 事实，含 `status` / `confidence` / `is_sensitive` |
 | `GET` | `/api/v1/memory/facts/{factID}` | 一条事实**与它的证据链**（MEM-01） |
@@ -506,14 +513,14 @@ V4 加两个能力（`mastery_path`、`immersive_reading`）、一个只读的"�
 
 **掌握路径（MP-01–05）** 把一门要学的东西拆成知识点，然后按证据推进每一条的档位。它**不是一个请求-应答的接口**，是一轮对话：
 
-- **路径在一轮 turn 里开启**，不在 REST 上（没有 `POST /mastery/paths`）。MP-01 的五个来源——目标、材料、Notebook、Reading——都要先有一次会话才谈得上"从哪个来源来"。所以 `GET /mastery/paths` 是读，建是 `mastery_path` 能力在 `Start` 时做的事。同时推进的路径数**没有上限**：曾经有一个配置键想当这个上限（`MASTERY_MAX_ACTIVE_PATHS`），但它拦不住任何请求——一个会话只要有活跃路径就直接回到那条路径上，要数路径得先没有路径可回，而这两件事读的是同一张表——于是整条链连同那个键一起删掉了（见 [backend/.env.example](backend/.env.example)）。要再定一条上限，得先说清它数的是什么、拦的是什么。
+- **路径在一轮 turn 里开启**，不在 REST 上（没有 `POST /mastery/paths`）。MP-01 的五个来源——目标、材料、Notebook、Reading——都要先有一次会话才谈得上"从哪个来源来"。所以 `GET /mastery/paths` 是读，建是 `mastery_path` 能力在 `Start` 时做的事。建出来的路径先拿学习者那句话当名字（这一轮还没有答案可总结），等这一轮结束再由模型换成短名和一句说明（`turn.Claimed.Name` → `mastery.UpdateMeta`）。同时推进的路径数**没有上限**：曾经有一个配置键想当这个上限（`MASTERY_MAX_ACTIVE_PATHS`），但它拦不住任何请求——一个会话只要有活跃路径就直接回到那条路径上，要数路径得先没有路径可回，而这两件事读的是同一张表——于是整条链连同那个键一起删掉了（见 [backend/.env.example](backend/.env.example)）。要再定一条上限，得先说清它数的是什么、拦的是什么。
 - **九个工具**是这一版的全部动作：`mastery_state`（读树与档位）、`mastery_question`（出题）、`mastery_grade`（判卷）、`mastery_skip`、`mastery_assess`（记一条证据）、`mastery_map` / `mastery_edit`（建图与改知识点）、`mastery_switch`、`mastery_leave`。能力本身只有一个阶段（`responding`），因为"这一轮在干什么"是**工具**说的，一轮按学习者的下一句话在九个工具之间走。
 - **一题只存一处**：`mastery_question` 出的题就在 `notebook_entries` 里，只是多带了 `mastery_path_id` 与 `knowledge_point_id` 两列。掌握路径**没有自己的题表**，所以题库的每一个过滤器在它上面都照常有效。题型也跟 `save_question` 同一条政策：现在只出选择题与填空题（主观题暂停生成，见上文）。
 - **档位由证据算出来，不由模型说**：连续 `MASTERY_GATE_CONSECUTIVE` 次答对升到已掌握，证据少于 `MASTERY_GATE_MIN_EVIDENCE` 时是"未知"而不是"薄弱"——`partial` 既不算对也不算错，它重置连续计数但不降档。复习间隔是一条**自己的曲线**，读的是证据序列而不是题目的连对计数。
 - **租约让两个窗口不互相覆盖**：一轮开始时拿到 `mastery_path_leases` 的那一行，之后就带 `FenceToken` 写。**一轮结束时由运行时释放**（包括失败与取消，在 `done` 之前），所以紧接着的下一条消息拿得到写权；`mastery_leave` 留给"一轮还没结束、但已经用完这条路径"（比如 switch 之前）。租约过了 `MASTERY_LEASE_TTL` 仍可以被另一个 turn **接管**（不是续期——续期要一次心跳和它的一整套失败模式），被接管的旧 turn 退化成"只能追加证据，改不了状态"；等待用户回答的 turn 不算结束，租约在等待期间仍然有效。接管与否不靠猜：冲突返回结构化失败，带上现在是谁在写，并说明读可以照常、出题与判卷也要等对方写完。
 - **等作答的那道题，题目 id 一定说得出**：一条路径同时只有一道题开着，它开着的时候 `mastery_question` 一律被拒。拒绝句与 `mastery_state`（`Open`，以及 `metadata.open_question_id`）里带的是**题目 id**（`qn_`）——`mastery_grade` 只认这个；交互 id（`min_`）是路径那边的记录，不是题库里的题，拿它判卷只会在题库里查不到。题库那边查不到时也是一句能行动的话（"question_id 要用 qn_ 开头的题目 id"），不是"工具跑不起来"。**没人作答的题会超时自动关闭**（`MASTERY_QUESTION_TTL`）：它挡住的是之后每一道题，所以等满这个时长后，下一次需要写路径的调用把它按 `interaction.expired` 结掉——不记证据、不算答错、不算跳过，状态读（`mastery_state`）也不再报它。关闭同样是一次比较而不是定时作业；迟到的作答会被拒绝并提示"已经超时关掉，直接出下一题"。
 - **`GET /mastery/paths/{pathID}/insight`** 是 MP-05 的读：目标、证据、薄弱项、复习状态、下一步及**它的理由**。
-- **路径对话（2026-10-20 补）**：`/mastery/chat/:sessionId?` 是专门跑 `mastery_path` 的工作台，导航里挂在「掌握路径」下的二级入口「路径对话」。它复用对话页的工作台组件，但会话按 `kind=mastery` 分区、每一轮固定用这个能力；路径仍由能力的第一轮自动建出来，所以这个页面不提供"新建路径"的表单。掌握路径总览页的「去对话」跳到这里。模型用 `mastery_question` 出题后，这一页在回合结束时把题干与选项弹出来（`components/chat/MasteryQuestionDialog.vue`）：选择题点选项、填空题写文字（主观题暂时不出；库里已有的主观题仍按原文作答），提交就是**一条普通的用户消息**，下一轮模型拿它去 `mastery_grade` 判卷；收起之后状态条上留一个「继续作答」。**没调用工具的"出题"不算出题**：模型若想不碰任何工具就结束一轮（比如正文里写「题目已经存进题库了」却一次都没调 `mastery_question`），这一轮的正文会被扣住、不推给前端，模型收到一条收尾提醒并被要求重做这一轮（`agentloop.Request.NudgeWithoutToolCall`，只提醒一次）；重做后仍不调工具就照常结束。**调用失败也照样弹**：题干在调用参数里，调用失败只说明它没进题库，不说明这道题不存在；这时弹窗按题干去题库核对一次——查到就说「题库里已有这道题」，查不到就说「没能存进题库，暂时没有可判卷的记录」，不拿失败冒充"没有这道题"。它读的是实时工具调用的参数，历史接口不含工具调用，所以刷新页面后不会重弹。
+- **路径对话（2026-10-20 补，2026-10-28 拆成两级）**：一级 `/mastery/chat` 是**对话历史**（`views/MasteryConversationsPage.vue`），每行一段 `kind=mastery` 会话，行上标出它创建的那条路径的目标（**路径名由第一轮结束时模型总结出来，不再是用户的第一句话**；摘要与会话标题是同一次命名，所以两者相同时行上不再重复第二行；同一轮还会为路径再问一次模型，写一句 60 字以内的说明，就是路径卡片名字下面那句）；数据走 `GET /mastery/conversations`，按 `mastery_paths.owner_session_id` 一对一配对，所以一条路径只会出现它自己创建的那段对话，切换进来的别的会话不会让同一路径再出现一遍。二级 `/mastery/chat/:sessionId` 是专门跑 `mastery_path` 的工作台，导航里挂在「掌握路径」下的二级入口「路径对话」。它复用对话页的工作台组件，但会话按 `kind=mastery` 分区、每一轮固定用这个能力、**不用人格**（不给选择器，也不把人格带进任何一轮），并且**不画工作台自带的会话列表**——那一列已经由一级页承担；顶栏左侧有「返回对话历史」的链接回到一级页（`ChatWorkspace` 的 `back-label`，只有二级页传）。路径仍由能力的第一轮自动建出来，所以这个页面不提供"新建路径"的表单。**一级历史页也不提供「新建」**，只读：掌握路径页的「新建路径」与学习地图的「去路径对话新建」直接建一段 `kind=mastery` 会话再进二级（`shared/masteryChat.ts`），第一句落进去时后端才建路径；二级页的「下一步：学」回到这条路径自己的那段对话（按 `GET /mastery/conversations` 的 `path_id` 找），不新开会话——新会话会再建出一条路径。模型用 `mastery_question` 出题后，这一页在回合结束时把题干与选项弹出来（`components/chat/MasteryQuestionDialog.vue`）：选择题点选项、填空题写文字（主观题暂时不出；库里已有的主观题仍按原文作答），提交就是**一条普通的用户消息**，下一轮模型拿它去 `mastery_grade` 判卷；收起之后状态条上留一个「继续作答」。**没调用工具的"出题"不算出题**：模型若想不碰任何工具就结束一轮（比如正文里写「题目已经存进题库了」却一次都没调 `mastery_question`），这一轮的正文会被扣住、不推给前端，模型收到一条收尾提醒并被要求重做这一轮（`agentloop.Request.NudgeWithoutToolCall`，只提醒一次）；重做后仍不调工具就照常结束。**调用失败也照样弹**：题干在调用参数里，调用失败只说明它没进题库，不说明这道题不存在；这时弹窗按题干去题库核对一次——查到就说「题库里已有这道题」，查不到就说「没能存进题库，暂时没有可判卷的记录」，不拿失败冒充"没有这道题"。它读的是实时工具调用的参数，历史接口不含工具调用，所以刷新页面后不会重弹。
 
 **沉浸阅读（READ-01–06）** 把一份已上传的文件变成可以停、可以标注、可以就着某一段提问的材料：
 
@@ -533,7 +540,7 @@ V4 加两个能力（`mastery_path`、`immersive_reading`）、一个只读的"�
 - 每一次动作在 `memory_audit` 里留一行，而审计表**没有 UPDATE 与 DELETE 路径**。`GET /memory/export` 把事实连同证据链一起导出（PRD §11.3）。
 - **Memory 有 owner，别的表没有**：`owner_id` 由认证边界传入，一个没有 owner 的 turn **一行 Memory 都不写**。MEM-04 说 Memory 是账号级且不随 Workspace 切换隔离——当前后端里不存在 Workspace 切换，所以这条边界今天是空的。
 
-**继续学习（COURSE-03/04）**：`GET /dashboard` 一个请求读三个域——最近会话、掌握路径、练习队列，各取 `DASHBOARD_RECENT_LIMIT` 条——外加一组 `next` 推荐，每条带 `reason` 与 `evidence_ids` 两个不许为空的字段。新账号拿到的是 **200 加四个空数组**，不是一个错误；一个读不通的查询是 500，**不做部分页面**。
+**继续学习（COURSE-03/04）**：`GET /dashboard` 一个请求读三个域——最近会话、掌握路径、练习队列，各取 `DASHBOARD_RECENT_LIMIT` 条——外加一组 `next` 推荐，每条带 `reason` 与 `evidence_ids` 两个不许为空的字段。掌握路径的每一行除了那句「已掌握 2/4 个知识点」，还带同一对数的 `progress: {done, total}`，给要画比例而不只是写句话的界面用；会话与队列没有可数的东西，这一项就**缺席**（缺席是"没有这项统计"，不是"完成 0"）。新账号拿到的是 **200 加四个空数组**，不是一个错误；一个读不通的查询是 500，**不做部分页面**。学习首页是演示稿的那块看板——五块液态玻璃砖（版式照 `.product/Rinnex_UI_初版演示_v1.0.html.html` 的「全新首页看板」）：路径完成率（第一条掌握路径的 `progress`，画在流体球的渐变环里，球下面写那条路径的名字）、本周学习快照（练习正确率来自 `GET /practice/stats` 本周判过的题；本周掌握知识点数来自 `GET /mastery/mastered`；连续打卡来自 `GET /presence`）、当前模块进度（这条路径里第一个还没全掌握的模块，来自 `GET /mastery/paths/{pathID}` 的树）、本周任务进度（「掌握路径模块」来自 `GET /mastery/paths/{pathID}/progress` 的本周完成数 / 模块总数，「复习错题集」来自 `GET /practice/mistakes` 的本周复习数 / 错题集题数）、今日学习时长（`GET /presence` 的今天分钟数，提示行与昨天比）。**五块砖的数都有出处**，读不到的那一格画一条横线并写明——不填示意值，也不把「还没读到」画成 0。今日时长与连续打卡由 `src/presence.ts` 的心跳记：登录后每分钟在页面可见时 `POST /presence` 一次，标签页不可见时不打，失败不打扰；服务端一行一分钟、主键去重，所以关页面没有「结束」信号也不会多算。
 
 **QN-05 批量导入**：`POST /questions/import` 的 body 是一个 JSON 行文件（每行一道题，与 `save_question` 参数同形），`?dry_run=true` 只报告不写。两次请求共用同一份解析与判定，所以 preview 不会说谎；冲突分"同一道题"（同 `question_id`）与"同一题干不同 id"（重复）两种，都进报告。两次都是 **200**——一份"写了 3 条、拒了 2 条"的报告不是失败的请求。
 
@@ -653,7 +660,7 @@ V6 加的不是功能，是**让已经有的东西有客人**：两条 migration
 
 ## 前端
 
-`frontend/` 覆盖后端现有的全部页面：对话（断线重连、续传、心跳、引用与来源、工具卡、附件与知识库选择、人格选择、回收站）、人格管理、伙伴、协同写作、学习首页、练习、掌握路径、学习地图（按模块展示知识点四态与下一步）、沉浸阅读、活书（书架、大纲编辑、逐章生成、阅读进度与 Markdown 导出）、视频学习（手动搜索 B 站视频并用官方播放器内嵌播放）、文件库、知识库、题库、题目问答（选一道题就它提问）、记忆（L1 / L2 / L3 / 归属分组图 / 去重与清理）、设置七个分区，以及管理台（用户、超级管理员专属的账号生命周期操作、授权、监护关系、审计）。后端没有路由的占位页已经全部移除（最后一块 `/visualizations` 落到 404）；技能与工具共用一页只读能力目录（数据来自 `/capabilities`，不能启停）。**伙伴与协同写作没有自己的数据表**：两者都读同一份人格——伙伴是"选一个人格开始对话"的入口；协同写作页自己就是一套对话工作台（列表、消息流、输入区与引用面板复用对话页的 `ChatWorkspace.vue`），"选人格 + 选写作步骤 + 写一句主题"之后直接在该页建一条 `writing` 会话并发出开场白，不再跳去对话页。写作会话与普通对话是同一张 `sessions` 表里的两个**分区**（`kind`），写作页只列 `writing`、对话页只列 `chat`；`kind` 不是权限面，写作仍然跑 `chat` 能力、仍由 `chat` 权限面看守。写作本身仍然是一来一回的消息，不另存文档。掌握路径也有一条自己的路径对话（`/mastery/chat/:sessionId?`，入口是「掌握路径 → 路径对话」）：同一套 `ChatWorkspace.vue`，列表只读 `kind=mastery`，每一轮固定 `mastery_path` 能力（不画能力选择器）；一段没有路径的对话在这里发出第一轮时，后端替它建一条路径。模型出题（`mastery_question`）后，这一页在回合结束时弹窗给出题干与选项，作答直接提交；出题调用失败时也弹，并说明题库里是否已有这道题。题库也有自己的题目问答页（`/questions/chat/:sessionId?`，入口是「题库 → 题目问答」）：同一套工作台，列表只读 `kind=question_bank`，固定 `deep_solve` 能力、仍由 `chat` 权限面看守，人格锁死为「题目问答伙伴」（输入区不给切换）；页面默认是空对话，输入区工具行里的「选择题目」打开选题弹窗，选中后题目内容（题干、选项、参考答案与解析）写进输入框，用户补上问题再发送；从练习页的「我不会，去提问」或题库详情的「提问」过来时题号在查询串里（带 `send=1`），页面直接拿这道题建会话并发出默认问题。回收站与导出按四个分区分别列出。
+`frontend/` 覆盖后端现有的全部页面：对话（首页起始提示卡、断线重连、续传、心跳、引用与来源、工具卡、附件与知识库选择、人格选择、回收站）、伙伴（人格的列表、编辑与删除在同一页）、协同写作、学习首页（演示稿的学习看板：路径完成率、本周学习快照、当前模块进度、本周任务进度、今日学习时长五块玻璃砖；没有数据源的格子画「—」并注明还没有统计）、练习、掌握路径、学习地图（按模块展示知识点四态与下一步）、沉浸阅读、活书（书架、大纲编辑、逐章生成、阅读进度与 Markdown 导出）、视频学习（手动搜索 B 站视频并用官方播放器内嵌播放）、文件库、知识库、题库、题目问答（选一道题就它提问）、记忆（L1 / L2 / L3 / 归属分组图 / 去重与清理）、设置七个分区，以及个人中心下的用户管理（超级管理员专属的账号生命周期操作、授权、监护关系）与日志统计（审计事件）。后端没有路由的占位页已经全部移除（最后一块 `/visualizations` 落到 404）；技能与工具拆成设置下的两个只读目录（数据来自 `/capabilities`，不能启停；工具每行带一句工具自己的描述）。**伙伴与协同写作没有自己的数据表**：两者都读同一份人格——伙伴页（`/partners`）就是人格管理页，列表、新建、编辑与删除都在上面，列表可按「全部 / 系统 / 非系统」筛选（默认全部），卡片上的「开始对话」跳 `/chat?persona=`（`/personas` 保留重定向）；协同写作页自己就是一套对话工作台（列表、消息流、输入区与引用面板复用对话页的 `ChatWorkspace.vue`），"选写作步骤 + 写一句主题"之后直接在该页建一条 `writing` 会话并发出开场白，不再跳去对话页。写作页**选不了人格**：每一轮固定用系统人格「写作教练」（账号里没有同名人格时按 `copy/collaboration.ts` 的 `WRITING_COACH_PERSONA` 种子建一个），这个人格也不出现在别的对话的人格选择器里（`copy/personas.ts` 的 `isSystemPersona`；名单里还有题目问答页锁死的「题目问答伙伴」），两种系统人格在伙伴页上标注为「系统人格」且不给「开始对话」出口。写作会话与普通对话是同一张 `sessions` 表里的两个**分区**（`kind`），写作页只列 `writing`、对话页只列 `chat`；`kind` 不是权限面，写作仍然跑 `chat` 能力、仍由 `chat` 权限面看守。写作本身仍然是一来一回的消息，不另存文档。掌握路径也有一条自己的路径对话，分两级（一级 `/mastery/chat` 是只读的对话历史，每行标出它创建的路径名——由第一轮结束时模型总结的短名，不再是用户的第一句话（同一轮还生成名字下面那句说明），这一页没有「新建」；二级 `/mastery/chat/:sessionId` 是其中一段，导航入口是「掌握路径 → 路径对话」，新建从掌握路径页的「新建路径」或学习地图的「去路径对话新建」直接开一段会话）：二级复用同一套 `ChatWorkspace.vue`，列表只读 `kind=mastery`，每一轮固定 `mastery_path` 能力（不画能力选择器）、不用人格（不画人格选择器，也不把人格带进任何一轮），且不重复画左侧会话列表；一段没有路径的对话在这里发出第一轮时，后端替它建一条路径。模型出题（`mastery_question`）后，这一页在回合结束时弹窗给出题干与选项，作答直接提交；出题调用失败时也弹，并说明题库里是否已有这道题。题库也有自己的题目问答页（`/questions/chat/:sessionId?`，入口是「题库 → 题目问答」）：同一套工作台，列表只读 `kind=question_bank`，固定 `deep_solve` 能力、仍由 `chat` 权限面看守，人格锁死为「题目问答伙伴」（输入区不给切换）；页面默认是空对话，输入区工具行里的「选择题目」打开选题弹窗，选中后题目内容（题干、选项、参考答案与解析）写进输入框，用户补上问题再发送；从练习页的「我不会，去提问」或题库详情的「提问」过来时题号在查询串里（带 `send=1`），页面直接拿这道题建会话并发出默认问题。回收站与导出按四个分区分别列出。
 
 运行时依赖是 `vue`、`vue-router`、`markdown-it`、`highlight.js`、`katex` 与 `dompurify`；没有 pinia、没有 axios、没有 eslint/prettier/vitest。模型输出统一经 `markdown-it`（`html: false`）→ DOMPurify 后才进 `v-html`，全应用只有 `src/markdown/render.ts` 产出 HTML。
 
@@ -670,14 +677,14 @@ npm run build        # 门禁之二
 | 目录 | 职责 |
 |---|---|
 | `src/api/` | 按后端领域拆分的请求模块；`client.ts` 是全应用**唯一的 `fetch` 出口**（上传进度用 `XMLHttpRequest`，下载走带认证的 blob）；`errors.ts` 把 `error.code` 映成界面上那一句 |
-| `src/auth/` | 权限快照（`can` / `canSurface` / `surfaceDecision`）、401 统一处理、`policy-mirror.ts`（管理台预锁的地板与 learner-never 镜像） |
+| `src/auth/` | 权限快照（`can` / `canSurface` / `surfaceDecision`）、401 统一处理、`policy-mirror.ts`（用户管理页预锁的地板与 learner-never 镜像） |
 | `src/copy/` | 全部界面文案；只做中文，但页面里不写死句子，将来接 i18n 不用重写 |
 | `src/markdown/` | 唯一的 HTML 产出点（Markdown + 高亮 + KaTeX + DOMPurify） |
 | `src/shared/` | 资源状态约定、确认框、toast、格式化、能力缓存 |
 | `src/ws/` | `protocol.ts` / `socket.ts` / `connection.ts` / `blocks.ts`：协议 v2.0 的逐字镜像、重连退避、心跳、按 `seq` 幂等续传 |
 | `src/session.ts` | 登录态（token 存 `localStorage`）。**唯一写 token 的地方** |
 | `src/router.ts` | 全部页面路由 + "未登录去 `/login`"与权限守卫；未知路径落到 404 |
-| `src/components/shell/` | 四段式骨架（导航 / 列表栏 / 主内容 / 右侧面板），两个侧栏可收合 |
+| `src/components/shell/` | 四段式骨架（导航 / 列表栏 / 主内容 / 右侧面板），右侧面板可收合；窗口窄于 1440 时二级侧栏自动收成 80px 图标栏 |
 | `src/views/` | 按领域分组：`Chat.vue`、`learning/`、`memory/`、`settings/`、`admin/`、`Files.vue`、`KnowledgeBases.vue`、`Questions/` |
 
 **这一版明确没有做的**（不是漏了）：分支、重新生成、编辑后重发、删除单条消息（后端没有承接，`regenerate` 会被拒）；模型/供应商/密钥配置、忘记密码、一键升级；深色模式、中英双语、移动端；Mermaid、图片渲染管线、多媒体；前端 lint/format/单元测试工具链。协同写作没有文档存储、版本对比与导出，伙伴没有 IM 渠道、详情页、群组、语音与智能体接入——这些都需要后端先有对应接口。生产部署仍不在这一版里——Go 服务不伺服 `dist/`。
@@ -704,7 +711,7 @@ go vet ./...
 gofmt -l .
 ```
 
-`go test ./...` 会自建 `<DB_NAME>_test_*` 库并在其中跑 migration，所以需要本地 seekdb 在跑（`docker start seekdb`）。测试库用完留在那里即可，`x` 与之无关——`go run ./cmd/migrate up` 是给应用用的，测试不依赖它。
+`go test ./...` 会自建 `<DB_NAME>_test_*` 库并在其中跑 migration，所以需要本地 seekdb 在跑（`docker start seekdb-old`）。测试库用完留在那里即可，`x` 与之无关——`go run ./cmd/migrate up` 是给应用用的，测试不依赖它。
 
 **这套测试不证明什么**（写在这里，免得把"全绿"读成语义上的全绿）：
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"backend/internal/config"
 	"backend/internal/mastery"
@@ -76,11 +77,31 @@ func (m masteryPath) Claim(ctx context.Context, request turn.ClaimRequest) (turn
 	// whichever path the turn is on by then, so a mastery_switch mid-turn is
 	// followed rather than leaving the destination locked. It is a no-op for a
 	// turn that never held the lease.
-	return turn.Claimed{
+	claimed := turn.Claimed{
 		Context: tool.WithMasteryPath(ctx, path),
 		Lease:   arrival.Metadata(),
 		Release: path.Leave,
-	}, nil
+	}
+	// A path this turn opened was named, provisionally, after the question that
+	// opened it. The runtime hands back the summary it names the conversation
+	// with once the turn has one, plus a sentence about what the path is for;
+	// those become the goal and description a learner reads on their path cards.
+	// Only the opening turn gets this: a path this conversation came back to may
+	// have been named by hand, and a later turn has no exchange that names it.
+	if arrival.Created {
+		pathID := arrival.Path.ID
+		claimed.Name = func(ctx context.Context, title, description string) error {
+			meta := mastery.MetaRequest{PathID: pathID, Goal: &title}
+			// An empty description is a description the model could not write;
+			// it is left out rather than written over anything.
+			if strings.TrimSpace(description) != "" {
+				meta.Description = &description
+			}
+			_, err := m.service.UpdateMeta(ctx, meta, request.Caller)
+			return err
+		}
+	}
+	return claimed, nil
 }
 
 // newMasteryPaths builds the mastery domain and the join onto the runtime.

@@ -3,15 +3,18 @@
   flex-direction: column;
   gap: 15px;
   margin-top: 18px;
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 24px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
 }
 
 .card__head {
   display: flex;
-  gap: 10px;
+  gap: 14px;
   align-items: center;
   justify-content: space-between;
 }
@@ -27,7 +30,7 @@
   border: 1px solid var(--border-strong);
   border-radius: 10px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .chip--danger {
@@ -38,7 +41,7 @@
 
 .card__progress {
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .card__question {
@@ -60,7 +63,7 @@
 }
 
 .card__ask-button {
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .card__ask-error {
@@ -71,7 +74,7 @@
   border-radius: var(--radius-sm);
   background: var(--danger-soft);
   color: var(--danger);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -82,14 +85,14 @@
   border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
 }
 
 .card__prior {
   margin: 0;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .card__version {
@@ -109,35 +112,50 @@
   display: flex;
   gap: 9px;
   align-items: baseline;
-  padding: 9px 11px;
-  border: 1px solid var(--border);
+  padding: 11px 14px;
+  border: 1px solid rgb(255 255 255 / 72%);
   border-radius: var(--radius-sm);
+  background: rgb(255 255 255 / 40%);
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.choice:hover {
+  background: rgb(255 255 255 / 70%);
 }
 
 .choice--on {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  border-color: rgb(177 140 255 / 40%);
+  background: #fff;
+  box-shadow: 0 2px 10px rgb(177 140 255 / 12%);
 }
 
 .choice__key {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
 }
 
 .choice__text {
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .answer {
   min-height: 96px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
+  padding: 14px 16px;
+  border: 1px solid rgb(0 0 0 / 6%);
   border-radius: var(--radius-sm);
-  font-size: 14px;
+  background: rgb(255 255 255 / 70%);
+  font-size: 15px;
   line-height: 1.6;
+  outline: none;
   resize: vertical;
+}
+
+.answer:focus {
+  border-color: var(--color-purple);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
 }
 
 .actions {
@@ -147,13 +165,15 @@
 }
 
 .primary {
-  padding: 7px 16px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
-  background: var(--accent);
+  padding: 9px 20px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--accent-gradient);
   color: #fff;
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 4px 12px rgb(177 140 255 / 30%);
 }
 
 .primary:disabled {
@@ -162,19 +182,20 @@
 }
 
 .ghost {
-  padding: 6px 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 8px 17px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 78%);
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: 600;
   cursor: pointer;
 }
 
 .judgment {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
   margin-top: 4px;
   padding: 16px;
   border: 1px solid var(--border);
@@ -201,7 +222,7 @@
 
 .judgment__title {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 650;
 }
 
@@ -216,20 +237,20 @@
 
 .judgment__kind {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .judgment__replayed,
 .judgment__request {
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .judgment__reason,
 .judgment__text {
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.7;
   white-space: pre-wrap;
 }
@@ -239,7 +260,7 @@
   grid-template-columns: max-content 1fr;
   gap: 4px 14px;
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .judgment__meta dt {
@@ -254,7 +275,7 @@
 .judgment__label {
   margin: 0 0 4px;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -262,7 +283,7 @@
   margin: 0;
   padding-left: 18px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
 }
 
@@ -275,54 +296,208 @@
   white-space: nowrap;
 }
 
-/* ── 统计 ─────────────────────────────────────────────────────────────── */
+/* ── 练习统计（右侧面板） ─────────────────────────────────────────────── */
 
-.stats {
-  margin-top: 26px;
-  padding-top: 18px;
-  border-top: 1px solid var(--border);
+/*
+ * 面板外壳与知识库的 `.ops` 同口径：展开是玻璃面板，收合是一条 40px 竖条。
+ * 统计内容只有一张记录卡，按 360px 的栏宽排版。
+ */
+
+.stats-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
 }
 
-.stats__head {
+.stats-panel__head {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: flex-start;
+  gap: 8px;
+  align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  padding: 16px 14px 10px 20px;
+  border-bottom: 1px solid rgb(28 28 30 / 5%);
 }
 
-.stats__title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 650;
-}
-
-.stats__description {
-  margin: 3px 0 0;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.stats__switch {
+/* 演示稿的 `.tracker-tabs`：一条胶囊槽，选中的那个浮起来。 */
+.tracker-tabs {
   display: flex;
+  flex: 1;
   gap: 4px;
+  min-width: 0;
+  padding: 4px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 50%);
 }
 
-.switch {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+.tracker-tab {
+  flex: 1;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tracker-tab:hover {
+  color: var(--text);
+}
+
+.tracker-tab--on {
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 5%);
+}
+
+.stats-panel__collapse {
+  display: grid;
+  place-items: center;
+  padding: 5px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-faint);
   cursor: pointer;
 }
 
-.switch--on {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
+.stats-panel__collapse:hover {
+  background: var(--surface-sunken);
+  color: var(--text);
+}
+
+.stats-panel__collapse svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.stats-panel__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  padding: 20px 22px;
+  overflow-y: auto;
+}
+
+/* 收合后的竖条，与对话页 / 知识库页的 rail 一致。 */
+.stats-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 18px 0;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  cursor: pointer;
+}
+
+.stats-rail:hover {
+  background: var(--glass-bg-strong);
+}
+
+.stats-rail__icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.stats-rail__text {
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  writing-mode: vertical-rl;
+}
+
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── 记录卡 ───────────────────────────────────────────────────────────── */
+
+/* 照演示稿的 `.tracker-content-card` / `.rt-*`：白卡、虚线分隔的数值行、
+   带紫色左边的一段结语。 */
+.record {
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--glass-shadow);
+}
+
+.record__title {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 20px;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.record__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  /* 三行数字从卡片的左内边距再往里退一点。 */
+  padding-left: 8px;
+}
+
+.record__row {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 0;
+  border-bottom: 1px dashed #e2e8f0;
+}
+
+.record__row dt {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.record__row dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.record__quote {
+  margin: 24px 0 0;
+  padding: 16px;
+  border-left: 3px solid var(--color-purple);
+  border-radius: 12px;
+  background: #f8fafc;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .stats__empty {
@@ -331,63 +506,61 @@
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius);
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 16px;
+  line-height: 1.8;
   text-align: center;
 }
 
-.series {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
+/* ── 错题解析 ─────────────────────────────────────────────────────────── */
 
-.series th,
-.series td {
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-}
-
-.series th {
-  color: var(--text-faint);
-  font-weight: 500;
-}
-
-.series td {
-  color: var(--text-muted);
-}
-
-.distributions {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 16px;
-  margin-top: 16px;
-}
-
-.distribution__title {
-  margin: 0 0 6px;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.distribution__empty {
-  margin: 0;
-  color: var(--text-faint);
-  font-size: 12px;
-}
-
-.distribution__list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.distribution__list li {
+.analysis {
   display: flex;
-  justify-content: space-between;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--border);
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* 解析卡只有这一段正文，标题比记录卡高一档，免得和 16px 的正文拉平。 */
+.analysis .record__title {
+  font-size: 20px;
+  margin-bottom: 4px;
+}
+
+.analysis__target {
+  margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.analysis__entry {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.analysis__hint,
+.analysis__loading {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.analysis__answer {
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgb(255 255 255 / 65%);
+}
+
+/* MarkdownBody 是给正文用的 18px，360px 的栏里收到 16px。 */
+.analysis__answer :deep(.markdown) {
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.analysis__again {
+  align-self: flex-start;
+  font-size: 16px;
 }

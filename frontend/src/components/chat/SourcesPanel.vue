@@ -66,16 +66,18 @@ function locatorText(source: SourceItem): string {
   display: flex;
   gap: 9px;
   width: 100%;
-  padding: 9px;
-  border: 1px solid var(--border);
+  padding: 11px 13px;
+  border: 1px solid rgb(255 255 255 / 72%);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: rgb(255 255 255 / 48%);
   text-align: left;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .sources__open:hover {
   border-color: var(--accent);
+  background: rgb(255 255 255 / 78%);
 }
 
 .sources__index {
@@ -88,7 +90,7 @@ function locatorText(source: SourceItem): string {
   background: var(--accent-soft);
   color: var(--accent);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .sources__body {
@@ -100,7 +102,7 @@ function locatorText(source: SourceItem): string {
 
 .sources__title {
   overflow: hidden;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -108,15 +110,15 @@ function locatorText(source: SourceItem): string {
 
 .sources__locator {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .sources__snippet {
   display: -webkit-box;
   overflow: hidden;
   color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.6;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }

@@ -120,22 +120,25 @@ const failed = computed(() => props.item?.status === 'failed')
 .pane {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   min-width: 0;
-  padding: 18px 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  padding: 24px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
 }
 
 .pane__head {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 14px;
   align-items: flex-start;
   justify-content: space-between;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgb(28 28 30 / 6%);
 }
 
 .pane__heading {
@@ -144,7 +147,7 @@ const failed = computed(() => props.item?.status === 'failed')
 
 .pane__ordinal {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .pane__title {
@@ -158,13 +161,13 @@ const failed = computed(() => props.item?.status === 'failed')
 .pane__summary {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
 .pane__hint {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 </style>

@@ -9,6 +9,11 @@
 
 import ConfirmDialog from './components/common/ConfirmDialog.vue'
 import ToastHost from './components/common/ToastHost.vue'
+import { startPresenceHeartbeat } from './presence'
+
+// 在线时长的心跳挂在根上：它跟着登录态起停，和当前是哪一页无关 —— 时长是
+// "这个人今天在不在"，不是"这个人开了学习首页"。
+startPresenceHeartbeat()
 </script>
 
 <template>

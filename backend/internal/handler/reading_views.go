@@ -84,6 +84,23 @@ type markView struct {
 	UpdatedAt  time.Time        `json:"updated_at"`
 }
 
+// bookmarkView is one saved place, with the material it was saved in and the
+// words it covers.
+//
+// The material is a name rather than a whole catalogue row: what a favourites
+// card says is which book this came from, and the row's other columns would be
+// a second copy of the catalogue's answer.
+type bookmarkView struct {
+	Mark     markView             `json:"mark"`
+	Material bookmarkMaterialView `json:"material"`
+	Text     string               `json:"text,omitempty"`
+}
+
+type bookmarkMaterialView struct {
+	MaterialID string `json:"material_id"`
+	Filename   string `json:"filename"`
+}
+
 type createMaterialRequest struct {
 	FileID     string `json:"file_id"`
 	SourceType string `json:"source_type"`
@@ -125,6 +142,17 @@ func toPositionView(record reading.Position) positionView {
 		MaterialID: record.MaterialID, SessionID: record.SessionID,
 		Locator: record.Locator, Revision: record.Revision,
 		CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
+	}
+}
+
+func toBookmarkView(bookmark reading.Bookmark) bookmarkView {
+	return bookmarkView{
+		Mark: toMarkView(bookmark.Mark),
+		Material: bookmarkMaterialView{
+			MaterialID: bookmark.Material.MaterialID,
+			Filename:   bookmark.Material.Filename,
+		},
+		Text: bookmark.Text,
 	}
 }
 

@@ -1,34 +1,67 @@
 /*
  * 全局样式与设计变量。
  *
- * 尺寸照 `设计说明书.md` §2.1：基准画布 1440×900，内容区最小按 1280 宽保证，
- * **不设计窄屏与移动端**。所以这里不写媒体查询去适配小屏 —— 那是一条明确的
- * 设计边界，不是漏了。
+ * 视觉语言取自 `.product/Rinnex_UI_初版演示_v1.0.html.html`：极光渐变底、
+ * 液态玻璃面板、大圆角、粉紫蓝的强调色。所有页面共用这一层变量，页面自己的
+ * scoped 样式只决定布局，不再各自定义颜色。
  *
- * 只有浅色一套。§3.7 的两套主题里深色那一套是**单独校准**出来的设计产物
- * （长文、公式、代码块、图表的对比度要单独校），不是把浅色反一下；设计还没
- * 交付，所以这里不预先编一套假的。颜色全部走自定义属性，主题到了就换这一层。
+ * 尺寸照 `设计说明书.md` §2.1：基准画布 1440×900，内容区最小按 1280 宽保证。
+ * 窗口窄于基准时**只有一个响应式动作**：二级侧栏（`SectionSidebar`）由 280px
+ * 收成 80px 的图标栏，条目只留图标、悬停给出名字 —— 与左边的主图标栏同一种
+ * 样子。页面自带的列表（会话、知识库）不收：那些行的内容就是文字。再窄也不
+ * 重排，`body` 的 `min-width` 让它出横向滚动条，不为小屏另做一套版式。
+ *
+ * 只有浅色一套。深色主题仍是单独校准出来的设计产物，不是把颜色反一下；颜色
+ * 全部走自定义属性，主题到了就换这一层。
  */
 
 :root {
-  /* 骨架四段。一级导航与列表栏可收合，两个值各有一个收合态。 */
-  --nav-width: 220px;
-  --nav-width-collapsed: 64px;
+  /* 骨架四段：80px 图标栏、280px 二级侧栏、360px 上下文面板（见 §2.1）。
+     `--rail-width` 是二级侧栏收起来之后的宽度，与图标栏同宽。 */
+  --nav-width: 80px;
   --list-width: 280px;
-  --panel-width: 320px;
+  --rail-width: 80px;
+  --panel-width: 360px;
+  --shell-pad: 24px;
+  --shell-gap: 24px;
 
-  --surface: #ffffff;
-  --surface-sunken: #f6f7f9;
-  --surface-raised: #ffffff;
-  --border: #e3e5e9;
-  --border-strong: #cfd3da;
+  /* ── 品牌色板（与演示稿一致） ─────────────────────────────────────────── */
+  --color-pink: #f7a9ef;
+  --color-purple: #b18cff;
+  --color-blue: #66d2f5;
+  --color-yellow: #fedd76;
+  --color-orange: #ffb07c;
+  --color-green: #a7f3d0;
 
-  --text: #1f2430;
-  --text-muted: #6b7280;
-  --text-faint: #9aa1ae;
+  /* 文字与背景 */
+  --text: #1c1c1e;
+  --text-muted: #5f5f66;
+  --text-faint: #8e8e93;
+  --bg-light: #fcfbf9;
 
-  --accent: #2f6feb;
-  --accent-soft: #eaf0fe;
+  /* 液态玻璃。`surface` 是卡片与浮动面板的底色，`sunken` 是输入框与列表行
+     的凹陷面。半透明是刻意的：底下的极光要透出来。 */
+  --surface: rgb(255 255 255 / 55%);
+  --surface-sunken: rgb(255 255 255 / 32%);
+  --surface-raised: rgb(255 255 255 / 82%);
+  --border: rgb(255 255 255 / 78%);
+  --border-strong: rgb(28 28 30 / 9%);
+
+  --glass-bg: rgb(255 255 255 / 45%);
+  --glass-bg-strong: rgb(255 255 255 / 72%);
+  --glass-border: rgb(255 255 255 / 82%);
+  --glass-shadow: 0 12px 40px -10px rgb(51 68 85 / 8%);
+  --glass-shadow-hover: 0 20px 50px -10px rgb(51 68 85 / 15%);
+  --inset-light: inset 0 2px 4px rgb(255 255 255 / 80%),
+    inset 0 -2px 4px rgb(0 0 0 / 2%);
+
+  /* 强调色：`accent` 用于填充，`accent-ink` 用于需要可读的文字与描边。 */
+  --accent: #b18cff;
+  --accent-ink: #6d4bd0;
+  --accent-soft: rgb(177 140 255 / 14%);
+  --accent-gradient: linear-gradient(135deg, #b18cff, #66d2f5);
+  --warm-gradient: linear-gradient(135deg, #f7a9ef, #b18cff);
+
   --danger: #c0392b;
   --danger-soft: #fdecea;
   --warning: #9a6700;
@@ -36,16 +69,27 @@
   --success: #1f7a4d;
   --success-soft: #e8f5ee;
 
-  --radius: 8px;
-  --radius-sm: 6px;
+  --radius-card: 24px;
+  --radius: 20px;
+  --radius-sm: 12px;
   --gap: 12px;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font-serif: "Noto Serif SC", "Songti SC", Georgia, serif;
 
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  /*
+   * 与演示稿逐字一致。不要在这里补 "Microsoft YaHei"：补了之后拉丁字母和
+   * 数字会走雅黑的拉丁字形，而演示稿在同样的机器上走的是 sans-serif 的系统
+   * 默认（Windows 上是 Arial）—— 中文仍然由浏览器的中文回退字体接手。
+   * 这一条决定了整页的字形，差一个候选项肉眼就看得出来。
+   */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
   color: var(--text);
-  background: var(--surface-sunken);
-  font-synthesis: none;
+  background: var(--bg-light);
+  /*
+   * 不要加 `font-synthesis: none`。中文回退字体在 800 这个字重上没有对应的
+   * 字面，禁止合成之后浏览器就退回常规字面 —— 标题会整体变细，和演示稿
+   * 的 700/800 对不上。演示稿本身没有这条声明，这里照它。
+   */
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -58,16 +102,26 @@
 html,
 body,
 #app {
-  /* 四段式骨架自己管高度，页面不滚动 —— 滚动发生在两栏内部。 */
+  /* 四段式骨架自己管高度，各栏内部照常滚；整页滚动只用来"拖到没露出来的
+     那部分"，见下面 body 的 min-width 与 AppShell 的 min-height。 */
   height: 100%;
   margin: 0;
 }
 
 body {
-  /* 基准画布 1440，内容区最小 1280：窗口更窄时横向出现滚动条，而不是把四段
-     挤变形。`min-width` 放在 body 上是为了让滚动条属于整个窗口。 */
+  /* 基准画布 1440 × 900，内容区最小 1280。窗口比这更窄时四段不挤变形，
+     而是整个窗口出横向滚动条；比基准更矮时同理出纵向滚动条（骨架的
+     `min-height` 在 AppShell 里）。`min-width` 放在 body 上是为了让滚动条
+     属于整个窗口；`overflow: auto` 必须写在这里 —— `hidden` 会连滚动条
+     一起关掉，窄窗口就只剩被裁掉的一截。 */
   min-width: 1280px;
-  overflow: hidden;
+  overflow: auto;
+  background-color: var(--bg-light);
+  background-image:
+    radial-gradient(circle at 30% 60%, rgb(247 169 239 / 25%) 0%, transparent 50%),
+    radial-gradient(circle at 70% 40%, rgb(254 221 118 / 20%) 0%, transparent 50%),
+    radial-gradient(circle at 10% 10%, rgb(102 210 245 / 15%) 0%, transparent 40%);
+  background-attachment: fixed;
 }
 
 h1,
@@ -78,24 +132,23 @@ figure {
   margin: 0;
 }
 
-/* 内容页的滚动容器。四段式骨架自己不管滚动，滚动发生在主内容区里。 */
+/* 内容页的滚动容器。四段式骨架自己不管滚动，滚动发生在主内容区里。
+   留白照演示稿 `.page`：32px 40px。 */
 .page {
   height: 100%;
   overflow-y: auto;
-  padding: 20px 24px 40px;
+  padding: 32px 40px;
 }
 
-/* 阅读型页面的行宽上限。宽表与双栏页面用 `--wide` 取消它。 */
+/*
+ * 内容铺满主列，不再设行宽上限居中：演示稿的 `.page` 只有 32px 40px 的内边距，
+ * 正文紧贴着侧栏。加过 1120 上限之后，宽屏上左边会空出一大截，和演示稿对不上。
+ * 需要窄行宽的单页（回收站、技能/工具目录）在自己的 scoped 样式里再收。
+ */
 .page__inner {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  max-width: 1080px;
-  margin: 0 auto;
-}
-
-.page__inner--wide {
-  max-width: none;
+  gap: 24px;
 }
 
 button {
@@ -104,18 +157,394 @@ button {
 }
 
 input,
-textarea {
+textarea,
+select {
   font: inherit;
   color: inherit;
 }
 
 a {
-  color: var(--accent);
+  color: var(--accent-ink);
+}
+
+::selection {
+  background: rgb(177 140 255 / 30%);
+  color: var(--text);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 10px;
+  background: rgb(51 68 85 / 12%);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(51 68 85 / 22%);
 }
 
 /* §7.4 无障碍：焦点必须看得见。用 `:focus-visible` 而不是 `:focus`，这样鼠标
    点过之后不会留一个框，键盘走过来一定有。 */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-ink);
   outline-offset: 2px;
+}
+
+/* ── 品牌字标 ──────────────────────────────────────────────────────────────
+ *
+ * 标志下方那行花体 "Rinnex"，以及登录/注册页的标题与副标题。拉丁字母走
+ * Great Vibes（只保留 "Rinnex" 六个字形，5KB，SIL OFL 1.1），中文接到系统里
+ * 的行楷（华文行楷 → 楷体 → 衬线）；与标志的手绘铜版花体是同一路笔触。
+ * 颜色是标志同一道横向渐变（粉 → 紫 → 蓝），用文字裁切上色：字号变了颜色跟着
+ * 缩放，不用另存图片；不支持 background-clip 的浏览器退回中间那档紫色。
+ *
+ * 这里只定义字体与颜色，字号、行距由各处的 scoped 样式给。
+ */
+
+@font-face {
+  font-family: "Rinnex Script";
+  src: url("./assets/great-vibes-rinnex.woff") format("woff");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+.brand-script {
+  color: #7a54e2;
+  font-family: "Rinnex Script", "STXingkai", "华文行楷", "KaiTi", "楷体", "STKaiti",
+    serif;
+}
+
+@supports (background-clip: text) or (-webkit-background-clip: text) {
+  .brand-script {
+    background: linear-gradient(90deg, #e05abe, #7a54e2, #2496d6);
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+  }
+}
+
+/* ── 通用控件（新页面直接用，老页面保留自己的 scoped 样式） ────────────── */
+
+.btn {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 24px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.btn:active {
+  transform: scale(0.96);
+}
+
+.btn-primary {
+  background: var(--accent-gradient);
+  color: #fff;
+  box-shadow: 0 4px 12px rgb(177 140 255 / 30%);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgb(177 140 255 / 40%);
+}
+
+.btn-outline {
+  border: 1px solid var(--border-strong);
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.btn-outline:hover {
+  border-color: var(--text);
+}
+
+.glass-card {
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+/* ── 设置与管理页共用的一套零件 ────────────────────────────────────────────
+ *
+ * 设置（`/settings/*`）、用户管理与日志统计（`/profile/users`、`/profile/logs`）
+ * 是同一类页面：一块筛选/操作面板，下面一列记录或一张表。它们原来各自抄了一份
+ * 尺度相近但数值不一样的样式 —— 同样的卡片，一页 20px 圆角、一页 12px；同样的
+ * 输入框，一页 15px 字、一页 14px。这一组类是它们共用的那一份。
+ *
+ * 前缀 `set-` 是刻意的：这几个类名都很普通（`panel`、`field`、`chip`），
+ * 不加前缀就会悄悄落到别的页面上，而那些页面有自己的 scoped 样式。
+ */
+
+.set-panel {
+  padding: 26px 28px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  box-shadow: var(--glass-shadow), var(--inset-light);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+.set-panel:hover {
+  background: var(--glass-bg-strong);
+  box-shadow: var(--glass-shadow-hover), var(--inset-light);
+}
+
+/* 标题行：一块小图标 + 标题，必要时右边挂动作。 */
+.set-panel__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.set-panel__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgb(177 140 255 / 18%), rgb(102 210 245 / 18%));
+  font-size: 18px;
+  line-height: 1;
+}
+
+.set-panel__icon--warm {
+  background: linear-gradient(135deg, rgb(247 169 239 / 22%), rgb(255 176 124 / 22%));
+}
+
+.set-panel__icon--ok {
+  background: linear-gradient(135deg, rgb(167 243 208 / 30%), rgb(102 210 245 / 16%));
+}
+
+.set-panel__icon--danger {
+  background: linear-gradient(135deg, rgb(192 57 43 / 12%), rgb(255 176 124 / 18%));
+}
+
+.set-panel__title {
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.set-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.set-panel__hint {
+  margin: 0 0 18px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* 输入：与账号页的密码框同一档 —— 12px 圆角、白底、聚焦时一圈淡紫。 */
+.set-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.set-field__label {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.set-field__input {
+  min-width: 0;
+  padding: 10px 13px;
+  border: 1px solid rgb(0 0 0 / 7%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 85%);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.set-field__input:hover {
+  background: #fff;
+}
+
+.set-field__input:focus {
+  border-color: var(--color-purple);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgb(177 140 255 / 15%);
+}
+
+.set-field__note {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+/* 按钮：主按钮是渐变底，次按钮描边。尺寸只有两档 —— 卡的页脚用默认，
+   行内（筛选栏、列表行）用 `--sm`。 */
+.set-btn {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 22px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent-gradient);
+  box-shadow: 0 8px 18px rgb(177 140 255 / 28%);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.set-btn:hover:enabled {
+  box-shadow: 0 10px 22px rgb(177 140 255 / 38%);
+  transform: translateY(-1px);
+}
+
+.set-btn--ghost {
+  border: 1px solid rgb(0 0 0 / 8%);
+  background: #fff;
+  box-shadow: none;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.set-btn--ghost:hover:enabled {
+  border-color: rgb(0 0 0 / 18%);
+  box-shadow: 0 4px 12px rgb(51 68 85 / 6%);
+}
+
+.set-btn--sm {
+  padding: 7px 14px;
+  font-size: 13px;
+}
+
+.set-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* 标签：比按钮矮一档的胶囊，颜色由语义决定。底色压一层浅灰而不是白色，
+   白卡上才看得见轮廓。 */
+.set-chip {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 2px 9px;
+  border: 1px solid rgb(0 0 0 / 5%);
+  border-radius: 8px;
+  background: rgb(0 0 0 / 4%);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+.set-chip--accent {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.set-chip--ok {
+  border-color: transparent;
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.set-chip--warn {
+  border-color: transparent;
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.set-chip--bad {
+  border-color: transparent;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.set-chip--mono {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+/* 表格：数字列右对齐、首列左对齐，行悬停时浮起一层白。 */
+.set-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.set-table th,
+.set-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid rgb(0 0 0 / 5%);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.set-table th:first-child,
+.set-table td:first-child {
+  padding-left: 4px;
+  text-align: left;
+}
+
+.set-table th:last-child,
+.set-table td:last-child {
+  padding-right: 4px;
+}
+
+.set-table th {
+  color: var(--text-faint);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.set-table tbody tr {
+  transition: background 0.2s ease;
+}
+
+.set-table tbody tr:hover {
+  background: rgb(255 255 255 / 45%);
+}
+
+.set-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .btn-primary {
+    transition: none;
+  }
 }

@@ -53,18 +53,30 @@ export const PRACTICE = {
   retry: '重试',
 
   statsTitle: '练习统计',
-  statsDescription: '准确率按天汇总；来源与分类是同一段窗口里的分布。',
-  statsRangeDay: '按天',
-  statsRangeWeek: '按周',
-  statsEmpty: '这段时间还没有复习记录',
-  statsEmptyHint: '做过几道题之后，这里会出现趋势。',
+
+  /** 面板里唯一的一张卡。只写统计接口拿得到的三项；平均用时与自评目前没有数据。 */
+  recordTitle: '你的学习记录',
+  recordReviews: '累计复习次数',
+  recordResult: '正确 / 错误',
+  recordAccuracy: '准确率',
+  recordTimes: (count: number) => `${count} 次`,
+  recordQuote:
+    '学过多少、复习了什么、哪题还不稳，都能留下痕迹。不是凭感觉学，而是让复习过程有记录、有反馈。',
+  statsEmpty: '还没有复习记录，做过几道题之后这里就会有数。',
   statsFailed: '统计没能读出来',
-  reviews: '复习',
-  accuracy: '准确率',
-  correctCount: '正确',
-  wrongCount: '错误',
-  added: '新增',
-  sources: '来源分布',
-  categories: '分类分布',
-  noDistribution: '这段时间没有数据',
+
+  /** 面板的两个 Tab：复习轨迹（记录卡）与错题解析。 */
+  tabTracker: '复习轨迹',
+  tabAnalysis: '错题解析',
+
+  analysisTitle: '错题解析助手',
+  analysisTarget: '正在解析',
+  analysisAsk: '解析这道题',
+  analysisAgain: '重新解析',
+  /** 解析里说得出来答案：作答之前按钮禁用，这句说明为什么。 */
+  analysisHint: '解析里会说出答案。',
+  analysisLocked: '先作答这道题，再做解析——解析里会说出答案。',
+  analysisLoading: '正在解析，稍等片刻。',
+  analysisEmpty: '现在没有要复习的题，解析也就无从谈起。',
+  analysisFailed: '解析没能出来',
 } as const

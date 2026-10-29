@@ -176,6 +176,11 @@ func (r *turnRun) announce(ctx context.Context, outcome Status, failure *Failure
 // nameSession generates the session's title and publishes the event that ends
 // the turn's stream (WS-07).
 //
+// It is also where a path this turn opened stops being called by the question
+// that opened it: the title becomes the path's name (the same summary of the
+// same exchange, so it is not asked for twice), and one more call writes the
+// sentence the path is shown under that name.
+//
 // The event is sent whatever happened, including when there is no title to
 // give: it is what tells a subscriber the stream is over, and a subscriber left
 // waiting on a turn that has ended is worse than one given a stale title.
@@ -186,16 +191,56 @@ func (r *turnRun) nameSession(ctx context.Context, completed bool) {
 	ctx = usage.WithSource(ctx, usage.SourceTurnTitle)
 
 	title := r.session.Title
+	// pathName is what a path this turn opened will be called. It starts as the
+	// session's name and is replaced by the generated one when there is one: a
+	// path is opened by the exchange that names the conversation, so the two are
+	// the same summary and there is no reason to ask the model for it twice.
+	pathName := title
 	if r.titleNeeded && completed {
 		generated, err := r.runner.titler.Title(ctx, r.question, r.published.answer)
-		if err != nil {
+		switch {
+		case err != nil:
 			r.runner.logger.WarnContext(ctx, "could not name a session",
 				"session_id", r.session.ID, "error", err)
-		} else if renamed, err := r.runner.sessions.Rename(ctx, r.session.ID, generated, r.caller); err != nil {
-			r.runner.logger.WarnContext(ctx, "could not store a session name",
+		default:
+			pathName = generated
+			if renamed, err := r.runner.sessions.Rename(ctx, r.session.ID, generated, r.caller); err != nil {
+				r.runner.logger.WarnContext(ctx, "could not store a session name",
+					"session_id", r.session.ID, "error", err)
+			} else {
+				title = renamed.Title
+				pathName = renamed.Title
+			}
+		}
+	} else if r.name != nil && pathName == "" {
+		// The turn opened a path and stopped before it could name the session —
+		// a failure, or a cancellation. The path still gets a name, because
+		// leaving it as the question that opened it is the raw first message
+		// this naming exists to replace. What it is summarised with is whatever
+		// the turn managed to say, which may be nothing.
+		generated, err := r.runner.titler.Title(ctx, r.question, r.published.answer)
+		if err != nil {
+			r.runner.logger.WarnContext(ctx, "could not name a path",
 				"session_id", r.session.ID, "error", err)
 		} else {
-			title = renamed.Title
+			pathName = generated
+		}
+	}
+	if r.name != nil && pathName != "" {
+		// The sentence under the path's name is a second call, because a name
+		// and a description have different shapes. It is asked only once the
+		// path has a name, so a turn whose naming failed does not pay for a
+		// description of something it cannot label.
+		description, err := r.runner.titler.Describe(ctx, r.question, r.published.answer)
+		if err != nil {
+			r.runner.logger.WarnContext(ctx, "could not describe a path",
+				"session_id", r.session.ID, "error", err)
+		}
+		if err := r.name(ctx, pathName, description); err != nil {
+			// The turn has already ended and been announced; a path left with
+			// its provisional name is a list entry, not a broken turn.
+			r.runner.logger.WarnContext(ctx, "could not store a path name",
+				"session_id", r.session.ID, "error", err)
 		}
 	}
 	r.report(ctx, event.Event{Type: event.TypeSessionMeta, Content: title})

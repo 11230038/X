@@ -39,7 +39,7 @@ defineEmits<{
 .pending {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -67,24 +67,31 @@ defineEmits<{
 .pending__label {
   margin: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .pending__detail {
   margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .pending__cancel {
   flex: none;
-  padding: 3px 9px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 4px 12px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 78%);
   color: var(--text);
-  font-size: 11px;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pending__cancel:hover {
+  border-color: var(--accent);
+  background: #fff;
 }
 
 @keyframes pending-spin {

@@ -90,6 +90,55 @@ func TestTheTitlerReportsAModelThatFails(t *testing.T) {
 	}
 }
 
+func TestTheDescriberAsksForOneSentence(t *testing.T) {
+	provider := &scriptedProvider{responses: []llm.Response{{Content: "系统学习离散数学的知识地图。"}}}
+	titler, err := NewTitler(provider, "task-model", 64)
+	if err != nil {
+		t.Fatalf("NewTitler() error = %v", err)
+	}
+
+	description, err := titler.Describe(context.Background(), "我想系统学离散数学", "先从集合开始……")
+	if err != nil {
+		t.Fatalf("Describe() error = %v", err)
+	}
+	// It is cleaned like a title is: a sentence ending in a full stop is stored
+	// without one, because the card supplies the punctuation around it.
+	if description != "系统学习离散数学的知识地图" {
+		t.Errorf("Describe() = %q", description)
+	}
+
+	asked := provider.asked()
+	if len(asked) != 1 {
+		t.Fatalf("the describer made %d calls, want one", len(asked))
+	}
+	if asked[0].Model != "task-model" || asked[0].MaxTokens != 64 {
+		t.Errorf("the describer was asked with model %q, max tokens %d", asked[0].Model, asked[0].MaxTokens)
+	}
+	if len(asked[0].Tools) != 0 {
+		t.Error("the describer was offered tools")
+	}
+	// The description has its own prompt: it is not the conversation title's
+	// reply cut differently.
+	if len(asked[0].Messages) != 2 || !strings.Contains(asked[0].Messages[0].Content, "learning paths") {
+		t.Errorf("the describer was given %+v", asked[0].Messages)
+	}
+	if !strings.Contains(asked[0].Messages[1].Content, "我想系统学离散数学") {
+		t.Errorf("the question is missing from %q", asked[0].Messages[1].Content)
+	}
+}
+
+func TestADescriptionIsKeptToOneLineWithinItsBound(t *testing.T) {
+	long := strings.Repeat("学", descriptionMaxRunes+10)
+	if got := cleanLine(long, descriptionMaxRunes); len([]rune(got)) != descriptionMaxRunes {
+		t.Errorf("a long description was %d runes, want %d", len([]rune(got)), descriptionMaxRunes)
+	}
+	// A description is read as a sentence, so a full stop at the end is dropped
+	// like a title's is.
+	if got := cleanLine("先学会离散数学的四个基础模块。", descriptionMaxRunes); got != "先学会离散数学的四个基础模块" {
+		t.Errorf("cleanLine() = %q, want it without the trailing full stop", got)
+	}
+}
+
 func TestATitleIsReducedToSomethingAListCanShow(t *testing.T) {
 	cases := map[string]struct {
 		reply string

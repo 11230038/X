@@ -370,23 +370,27 @@ defineExpose({ show, hide })
 }
 
 .kind {
-  padding: 5px 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  padding: 6px 14px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 78%);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .kind:hover {
+  border-color: var(--accent);
+  background: #fff;
   color: var(--text);
 }
 
 .kind--active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
+  border-color: transparent;
+  background: var(--accent-gradient);
+  color: #fff;
+  box-shadow: 0 4px 12px rgb(177 140 255 / 30%);
 }
 </style>
