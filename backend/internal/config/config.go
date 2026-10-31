@@ -9,6 +9,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -145,14 +146,29 @@ type Config struct {
 	Workspace       WorkspaceConfig
 }
 
-// Load reads configuration exclusively from the dotenv file at path. The path
-// reaches the upload section as well, because a relative UPLOAD_ROOT is resolved
-// against the file it was written in rather than the process's working directory.
+// Load reads configuration exclusively from the dotenv file at path. The file's
+// directory reaches the upload section as well, because a relative UPLOAD_ROOT
+// is resolved against the file it was written in rather than the process's
+// working directory.
 func Load(path string) (Config, error) {
 	values, err := godotenv.Read(path)
 	if err != nil {
 		return Config{}, fmt.Errorf("read configuration file %q", path)
 	}
+	return loadValues(values, filepath.Dir(path))
+}
+
+// LoadValues builds the same configuration from values that did not come from a
+// file. The desktop build embeds its settings in the executable, so there is no
+// dotenv file whose directory a relative storage root could be resolved
+// against; baseDir is that directory instead.
+func LoadValues(values map[string]string, baseDir string) (Config, error) {
+	return loadValues(values, baseDir)
+}
+
+// loadValues is the one composition of the sections. Both entry points above
+// reach it, so a key added to one cannot be missing from the other.
+func loadValues(values map[string]string, baseDir string) (Config, error) {
 	if err := requireValues(values); err != nil {
 		return Config{}, err
 	}
@@ -165,7 +181,7 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	upload, err := loadUploadConfig(path, values)
+	upload, err := loadUploadConfig(baseDir, values)
 	if err != nil {
 		return Config{}, err
 	}
@@ -237,7 +253,7 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	workspace, err := loadWorkspaceConfig(path, values)
+	workspace, err := loadWorkspaceConfig(baseDir, values)
 	if err != nil {
 		return Config{}, err
 	}

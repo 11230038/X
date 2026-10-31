@@ -28,3 +28,13 @@ Agent.md
 .claude/
 架构优化文档.md
 功能优化文档.md
+
+# 桌面版整套留在本地：打包脚本、启动器、内嵌前端与配置都不入库。
+# 注意：backend/main.go 和 internal/config 的改动引用了这些包，
+# 单独提交它们会让仓库编译不过。
+desktop/
+backend/internal/desktop/
+backend/internal/web/
+backend/main_desktop.go
+backend/desktop_windows.go
+backend/desktop_other.go

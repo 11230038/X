@@ -98,9 +98,10 @@ func parseNonNegativeDuration(values map[string]string, key string) (time.Durati
 	return value, nil
 }
 
-// resolveConfigPath turns a path written in the dotenv file into an absolute
-// one, reading a relative value against the file it was written in rather than
-// against the process's working directory.
+// resolveConfigPath turns a path written in the configuration into an absolute
+// one, reading a relative value against baseDir — the dotenv file's directory,
+// or the directory a desktop build chose — rather than against the process's
+// working directory.
 //
 // Those two are not the same directory: the server is run from `backend/`, tests
 // are run from wherever the developer is, and a deployment may start the binary
@@ -111,14 +112,14 @@ func parseNonNegativeDuration(values map[string]string, key string) (time.Durati
 // It is one function because there are two such keys now (UPLOAD_ROOT and
 // WORKSPACE_ARCHIVE_ROOT) and the rule is subtle enough that two copies of it
 // would drift.
-func resolveConfigPath(configPath, value string) (string, error) {
+func resolveConfigPath(baseDir, value string) (string, error) {
 	resolved := strings.TrimSpace(value)
 	if !filepath.IsAbs(resolved) {
-		absoluteConfig, err := filepath.Abs(configPath)
+		absoluteBase, err := filepath.Abs(baseDir)
 		if err != nil {
-			return "", fmt.Errorf("resolve configuration file path")
+			return "", fmt.Errorf("resolve configuration base directory")
 		}
-		resolved = filepath.Join(filepath.Dir(absoluteConfig), resolved)
+		resolved = filepath.Join(absoluteBase, resolved)
 	}
 	resolved, err := filepath.Abs(filepath.Clean(resolved))
 	if err != nil {

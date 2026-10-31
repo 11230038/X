@@ -34,8 +34,8 @@ func (c UploadConfig) Validate() error {
 	return nil
 }
 
-func loadUploadConfig(path string, values map[string]string) (UploadConfig, error) {
-	root, err := resolveConfigPath(path, values["UPLOAD_ROOT"])
+func loadUploadConfig(baseDir string, values map[string]string) (UploadConfig, error) {
+	root, err := resolveConfigPath(baseDir, values["UPLOAD_ROOT"])
 	if err != nil {
 		return UploadConfig{}, err
 	}

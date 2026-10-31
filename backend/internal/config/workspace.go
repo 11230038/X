@@ -57,8 +57,8 @@ func (c WorkspaceConfig) Validate() error {
 	return nil
 }
 
-func loadWorkspaceConfig(path string, values map[string]string) (WorkspaceConfig, error) {
-	root, err := resolveConfigPath(path, values["WORKSPACE_ARCHIVE_ROOT"])
+func loadWorkspaceConfig(baseDir string, values map[string]string) (WorkspaceConfig, error) {
+	root, err := resolveConfigPath(baseDir, values["WORKSPACE_ARCHIVE_ROOT"])
 	if err != nil {
 		return WorkspaceConfig{}, err
 	}
